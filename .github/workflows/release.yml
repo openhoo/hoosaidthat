@@ -103,13 +103,14 @@ jobs:
         env:
           CONTAINER_ENGINE: docker
         run: |
+          npx playwright install ffmpeg
           bash images/hoovda/smoke-test.sh hoosaidthat-hoovda:release
           bash images/orca/smoke-test.sh hoosaidthat-orca:release orca
           SCREEN_READER=hoovda SCREEN_READER_IMAGE=hoosaidthat-hoovda:release \
             npx playwright test --config examples/basic/playwright.config.ts
           SCREEN_READER=orca SCREEN_READER_IMAGE=hoosaidthat-orca:release \
             npx playwright test --config examples/basic/playwright.config.ts
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         if: always()
         with:
           name: release-qualification-evidence

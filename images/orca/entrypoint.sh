@@ -169,20 +169,64 @@ else:
     raise RuntimeError(f"Chromium CDP did not become ready: {last_error}")
 PY
 
-sleep 0.5
-window_id=$(xdotool search --onlyvisible --class chromium 2>/dev/null | tail -n 1 || true)
-if [[ -n "$window_id" ]]; then
-  xdotool windowactivate --sync "$window_id" || true
-  # Chromium registers its Linux accessibility application lazily on the first
-  # keyboard transfer into web content. Bootstrap that native registration
-  # before health can become ready; test sessions checkpoint after this speech.
-  xdotool key --clearmodifiers F6
-  sleep 0.5
-fi
-
 python3 /opt/hoosaidthat/control_server.py &
 control_pid=$!
 pids+=("$control_pid")
+
+window_id=
+for _attempt in $(seq 1 200); do
+  candidate=$(xdotool search --onlyvisible --class chromium 2>/dev/null | tail -n 1 || true)
+  if [[ -n "$candidate" ]] && xdotool windowactivate --sync "$candidate" 2>/dev/null; then
+    window_id=$candidate
+    break
+  fi
+  sleep 0.1
+done
+if [[ -z "$window_id" ]]; then
+  echo "Chromium window did not become visible and active" >&2
+  exit 70
+fi
+# Chromium registers its Linux accessibility application lazily on the first
+# keyboard transfer into web content. Verify registration through the same
+# authenticated health contract clients use instead of relying on a fixed
+# startup delay.
+bootstrap_ready=0
+for _focus_attempt in 1 2 3; do
+  xdotool windowactivate --sync "$window_id"
+  sleep 0.5
+  xdotool key --clearmodifiers F6
+  if python3 - <<'PY'
+import json
+import os
+import time
+import urllib.error
+import urllib.request
+
+request = urllib.request.Request(
+    f"http://127.0.0.1:{os.environ['HST_CONTROL_PORT']}/v1/health",
+    headers={"Authorization": f"Bearer {os.environ['HST_CONTROL_TOKEN']}"},
+)
+deadline = time.monotonic() + 5
+while time.monotonic() < deadline:
+    try:
+        with urllib.request.urlopen(request, timeout=1) as response:
+            value = json.load(response)
+        if response.status == 200 and value.get("status") == "ready":
+            raise SystemExit(0)
+    except (OSError, ValueError, urllib.error.HTTPError):
+        pass
+    time.sleep(0.25)
+raise SystemExit(1)
+PY
+  then
+    bootstrap_ready=1
+    break
+  fi
+done
+if (( bootstrap_ready != 1 )); then
+  echo "Chromium accessibility application did not become ready" >&2
+  exit 70
+fi
 
 for required_pid in "$HST_XVFB_PID" "$HST_WINDOW_MANAGER_PID" "$HST_SPEECHD_PID" "$HST_ORCA_PID" "$HST_CHROMIUM_PID"; do
   if ! kill -0 "$required_pid" 2>/dev/null; then

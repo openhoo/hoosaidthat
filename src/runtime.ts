@@ -224,11 +224,10 @@ async function waitUntilReady(
           signal: AbortSignal.timeout(1_000),
         }),
       ]);
+      const [controlBody, cdpBody] = await Promise.all([control.text(), cdp.text()]);
       if (control.ok && cdp.ok) {
-        const [controlValue, cdpValue] = (await Promise.all([
-          control.json(),
-          cdp.json(),
-        ])) as [unknown, unknown];
+        const controlValue: unknown = JSON.parse(controlBody);
+        const cdpValue: unknown = JSON.parse(cdpBody);
         if (
           isObject(controlValue) &&
           ((screenReader === 'orca' &&
@@ -246,7 +245,7 @@ async function waitUntilReady(
         }
         lastError = 'runtime readiness payload was invalid';
       } else {
-        lastError = `control=${control.status}, cdp=${cdp.status}`;
+        lastError = `control=${control.status} ${boundedBody(controlBody)}, cdp=${cdp.status} ${boundedBody(cdpBody)}`;
       }
     } catch (error) {
       lastError = error instanceof Error ? error.message : String(error);
@@ -256,6 +255,11 @@ async function waitUntilReady(
   throw new Error(
     `screen-reader runtime did not become ready within ${timeoutMs}ms: ${lastError}`,
   );
+}
+
+function boundedBody(value: string): string {
+  const normalized = value.replace(/\s+/g, ' ').trim();
+  return normalized.length > 1_000 ? `${normalized.slice(0, 1_000)}...` : normalized;
 }
 
 async function reserveTwoPorts(): Promise<[number, number]> {

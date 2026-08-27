@@ -36,6 +36,7 @@ HooVDA engine and Playwright runtime use separate private repositories:
 ```bash
 git clone git@github.com:openhoo/hoovda.git ../hoovda
 npm ci
+npx playwright install ffmpeg
 npm run image:build:hoovda
 npm run image:smoke:hoovda
 ```
