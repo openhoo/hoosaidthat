@@ -83,6 +83,30 @@ class ControlProtocolTests(unittest.TestCase):
         with mock.patch.object(MODULE, "runtime_components", return_value=degraded):
             self.assertEqual(MODULE.runtime_ready(), (False, degraded))
 
+    def test_ready_health_uses_precomputed_version_without_subprocess(self) -> None:
+        components = {
+            "xvfb": True,
+            "windowManager": True,
+            "screenReader": True,
+            "chromium": True,
+            "cdp": True,
+            "browserAccessibility": True,
+            "browserWindowActive": True,
+        }
+        handler = object.__new__(MODULE.Handler)
+        handler.send_json = mock.Mock()
+        with (
+            mock.patch.object(MODULE, "runtime_ready", return_value=(True, components)),
+            mock.patch.object(MODULE, "SCREEN_READER_VERSION", "Orca 49.10"),
+            mock.patch.object(MODULE.subprocess, "run") as subprocess_run,
+        ):
+            MODULE.Handler.health(handler)
+
+        subprocess_run.assert_not_called()
+        status, payload = handler.send_json.call_args.args
+        self.assertEqual(status, MODULE.HTTPStatus.OK)
+        self.assertEqual(payload["screenReader"]["version"], "Orca 49.10")
+
     def test_browser_chrome_focus_overrides_stale_document_focus(self) -> None:
         result = {"webContentFocused": False, "role": None, "name": None}
         MODULE.apply_focused_nodes(

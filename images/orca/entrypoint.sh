@@ -43,7 +43,6 @@ export HST_EVENTS_FILE="$runtime_root/events.jsonl"
 export HST_ACTIONS_FILE="$runtime_root/actions.jsonl"
 export HST_SCREEN_READER_NAME=orca
 export HST_SCREEN_READER_CAPTURE=speech-dispatcher-output-module
-export HST_SCREEN_READER_VERSION_COMMAND='orca --version'
 export HST_SCREEN_READER_PID_ENV=HST_ORCA_PID
 export HST_OPTIONAL_SPEECH_PID_ENV=HST_SPEECHD_PID
 export HST_CAPTURE_PROCESS_FRAGMENT=/opt/hoosaidthat/sd_capture.py
@@ -111,6 +110,16 @@ for _attempt in $(seq 1 100); do
   sleep 0.05
 done
 [[ -S "$runtime_root/speechd.sock" ]]
+
+# Resolve immutable process metadata before starting Orca. Health polling must
+# stay side-effect free; spawning `orca --version` per request can contend with
+# the running Orca process and starve the threaded control server.
+export HST_SCREEN_READER_VERSION
+HST_SCREEN_READER_VERSION=$(orca --version 2>&1 | sed -n '1p')
+if [[ -z "$HST_SCREEN_READER_VERSION" ]]; then
+  echo "Orca version could not be determined" >&2
+  exit 70
+fi
 
 orca_args=(--replace --debug-file "$runtime_root/logs/orca-debug.log")
 if orca --help 2>&1 | grep -q -- '--speech-system'; then

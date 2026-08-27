@@ -10,7 +10,6 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
 from pathlib import Path
-import shlex
 import subprocess
 import threading
 import time
@@ -33,9 +32,7 @@ SCREEN_READER_NAME = os.environ.get("HST_SCREEN_READER_NAME", "orca")
 SCREEN_READER_CAPTURE = os.environ.get(
     "HST_SCREEN_READER_CAPTURE", "speech-dispatcher-output-module"
 )
-SCREEN_READER_VERSION_COMMAND = shlex.split(
-    os.environ.get("HST_SCREEN_READER_VERSION_COMMAND", "orca --version")
-)
+SCREEN_READER_VERSION = os.environ.get("HST_SCREEN_READER_VERSION", "unknown")[:200]
 SCREEN_READER_PID_ENV = os.environ.get("HST_SCREEN_READER_PID_ENV", "HST_ORCA_PID")
 
 
@@ -336,12 +333,6 @@ def runtime_ready(
     return all(components.values()), components
 
 
-def command_version(command: list[str]) -> str:
-    completed = subprocess.run(command, check=False, capture_output=True, text=True, timeout=2)
-    output = (completed.stdout or completed.stderr).strip().splitlines()
-    return output[0][:200] if output else "unknown"
-
-
 def append_action(action: str, gesture: str, after_sequence: int) -> None:
     ACTIONS_FILE.parent.mkdir(parents=True, exist_ok=True)
     value = {
@@ -508,7 +499,7 @@ class Handler(BaseHTTPRequestHandler):
                 "status": "ready",
                 "screenReader": {
                     "name": SCREEN_READER_NAME,
-                    "version": command_version(SCREEN_READER_VERSION_COMMAND),
+                    "version": SCREEN_READER_VERSION,
                     "capture": SCREEN_READER_CAPTURE,
                 },
                 "browser": {
@@ -564,12 +555,16 @@ class Handler(BaseHTTPRequestHandler):
 
     def send_json(self, status: HTTPStatus, value: object) -> None:
         body = json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode()
-        self.send_response(status.value)
-        self.send_header("content-type", "application/json; charset=utf-8")
-        self.send_header("content-length", str(len(body)))
-        self.send_header("cache-control", "no-store")
-        self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.send_response(status.value)
+            self.send_header("content-type", "application/json; charset=utf-8")
+            self.send_header("content-length", str(len(body)))
+            self.send_header("cache-control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError):
+            # Bounded readiness polls may disconnect while a response is sent.
+            return
 
 
 def bounded_integer(
