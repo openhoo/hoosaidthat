@@ -27,7 +27,11 @@ read -r site_port control_port cdp_port <<<"$ports"
 
 SITE_PORT="$site_port" node -e '
 const http = require("node:http");
-const html = `<!doctype html><html lang="en"><head><title>HooVDA smoke</title></head><body><main><h1>HooVDA harness smoke test</h1><button>Continue</button></main></body></html>`;
+const html = `<!doctype html><html lang="en"><head><title>HooVDA smoke</title></head><body><main>
+<h1>HooVDA harness smoke test</h1><button>Continue</button><p id="tax-help">Before tax</p>
+<table><caption>Rates</caption><thead><tr><th>Metric</th><th>Year</th><th>Quarter</th></tr></thead>
+<tbody><tr><th>Revenue</th><td colspan="2" aria-describedby="tax-help">42</td></tr></tbody></table>
+</main></body></html>`;
 http.createServer((_request, response) => {
   response.writeHead(200, {"content-type": "text/html; charset=utf-8"});
   response.end(html);
@@ -97,6 +101,26 @@ if (!speech.includes('HooVDA harness smoke test') || !speech.toLowerCase().inclu
 if (!action.events.some((event) => event.kind === 'audio' && event.audioDurationNs > 0)) {
   throw new Error(`HooVDA did not synthesize heading audio: ${JSON.stringify(action)}`);
 }
+await request(`/v2/sessions/${session.id}/actions`, { command: 'documentStart' });
+const characterAction = await request(`/v2/sessions/${session.id}/actions`, { command: 'nextCharacter' });
+const characterSpeech = characterAction.events.filter((event) => event.kind === 'speech').map((event) => event.text).join(' ');
+if (characterSpeech !== 'H') {
+  throw new Error(`HooVDA character cursor did not move inside Chromium text: ${JSON.stringify(characterAction)}`);
+}
+const wordAction = await request(`/v2/sessions/${session.id}/actions`, { command: 'nextWord' });
+const wordSpeech = wordAction.events.filter((event) => event.kind === 'speech').map((event) => event.text).join(' ');
+if (wordSpeech !== 'harness') {
+  throw new Error(`HooVDA word cursor did not move inside Chromium text: ${JSON.stringify(wordAction)}`);
+}
+await request(`/v2/sessions/${session.id}/actions`, { command: 'nextTable' });
+await request(`/v2/sessions/${session.id}/actions`, { command: 'lastTableRow' });
+const tableAction = await request(`/v2/sessions/${session.id}/actions`, { command: 'nextTableColumn' });
+const tableSpeech = tableAction.events.filter((event) => event.kind === 'speech').map((event) => event.text).join(' ');
+for (const expected of ['42', 'Revenue', 'Year', 'Before tax', 'spans 2 columns']) {
+  if (!tableSpeech.includes(expected)) {
+    throw new Error(`HooVDA table context omitted ${expected}: ${JSON.stringify(tableAction)}`);
+  }
+}
 const finished = await request(`/v2/sessions/${session.id}/finish`, {});
 for (const artifact of finished.artifacts) {
   const response = await fetch(`${control}/v2/sessions/${session.id}/artifacts/${artifact.name}`, { headers });
@@ -112,7 +136,7 @@ const audioArtifact = finished.artifacts.find((item) => item.name === 'screenrea
 if (!audioArtifact || audioArtifact.bytes <= 10_000) {
   throw new Error(`screenreader audio contains no synthesized PCM: ${JSON.stringify(finished)}`);
 }
-console.log(JSON.stringify({ health, speech, artifacts: finished.artifacts }, null, 2));
+console.log(JSON.stringify({ health, speech, characterSpeech, wordSpeech, tableSpeech, artifacts: finished.artifacts }, null, 2));
 NODE
 
 "$engine" exec "$container_name" bash -ceu '

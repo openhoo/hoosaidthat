@@ -370,6 +370,12 @@ export class ScreenReaderSession {
     if (!Number.isInteger(maxGestures) || maxGestures < 1 || maxGestures > 20) {
       throw new Error('returnToPage maxGestures must be an integer between 1 and 20');
     }
+    // A CDP-connected browser can retain the runtime bootstrap tab as its X11
+    // foreground tab even while Playwright operates a different Page. Make the
+    // fixture Page foreground first, then allow AT-SPI focus/graph events to
+    // settle before trusting runtime focus state.
+    await this.page.bringToFront();
+    await this.page.waitForTimeout(this.options.quietMs);
     if ((await this.client.state()).focus.webContentFocused) return;
     for (let attempt = 0; attempt < maxGestures; attempt += 1) {
       await this.act('returnToPage');

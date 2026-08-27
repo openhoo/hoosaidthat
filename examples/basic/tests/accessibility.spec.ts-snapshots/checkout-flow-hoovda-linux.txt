@@ -1,34 +1,22 @@
 # Screen reader flow
 
-01. ACTION Return focus to web page [returnToPage]
-    SPEECH[focus] Checkout example tab selected 1 of 1
-    BRAILLE[focus] ,*eck|t example tab select$ #a ( #a
-    STATUS settled
-02. ACTION Return focus to web page [returnToPage]
-    SPEECH[focus] Download Chrome link
-    BRAILLE[focus] ,d{nload ,*rome l9k
-    STATUS settled
-03. ACTION Return focus to web page [returnToPage]
-    SPEECH[focus] Checkout example document
-    BRAILLE[focus] ,*eck|t example docu;t
-    STATUS settled
-04. ACTION Next heading [nextHeading]
+01. ACTION Next heading [nextHeading]
     SPEECH[nextHeading] Checkout heading level 1
     BRAILLE[nextHeading] ,*eck|t h1d+ level #a
     STATUS settled
-05. ACTION Next focusable element [nextFocusable]
+02. ACTION Next focusable element [nextFocusable]
     SPEECH[focus] Skip to checkout link
     BRAILLE[focus] ,skip 6*eck|t l9k
     STATUS settled
-06. ACTION Focus email [focus]
+03. ACTION Focus email [focus]
     SPEECH[focus] Email entry
     BRAILLE[focus] ,email 5try
     STATUS settled
-07. ACTION Focus continue-button [focus]
-    SPEECH[focus] Continue button
-    BRAILLE[focus] ,3t9ue button
+04. ACTION Focus continue-button [focus]
+    SPEECH[focus] Continue Review order before payment button
+    BRAILLE[focus] ,3t9ue ,review ord} 2f pay;t button
     STATUS settled
-08. ACTION Activate current element [activate]
+05. ACTION Activate current element [activate]
     SPEECH[event] Order review ready
     BRAILLE[event] ,ord} review r1dy
     STATUS settled
