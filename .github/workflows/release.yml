@@ -1,0 +1,148 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Exact package and image version, without v prefix
+        required: true
+        type: string
+      hoovda_ref:
+        description: Immutable HooVDA tag or commit containing complete oracle corpus
+        required: true
+        type: string
+      confirm_release:
+        description: Publish npm package and three GHCR images
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+  attestations: write
+
+jobs:
+  release:
+    if: inputs.confirm_release
+    runs-on: ubuntu-latest
+    env:
+      RELEASE_VERSION: ${{ inputs.version }}
+      HOOVDA_REF: ${{ inputs.hoovda_ref }}
+      ENGINE_IMAGE: ghcr.io/openhoo/hoosaidthat-hoovda-engine
+      HOOVDA_IMAGE: ghcr.io/openhoo/hoosaidthat-hoovda
+      ORCA_IMAGE: ghcr.io/openhoo/hoosaidthat-orca
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          repository: openhoo/hoovda
+          ref: ${{ inputs.hoovda_ref }}
+          path: hoovda
+          token: ${{ secrets.HOOVDA_REPOSITORY_TOKEN }}
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24
+          cache: npm
+          registry-url: https://registry.npmjs.org
+      - uses: actions/setup-go@44694675825211faa026b3c33043df3e48a5fa00 # v6
+        with:
+          go-version: '1.27.0'
+          cache-dependency-path: hoovda/go.sum
+      - name: Validate immutable release identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "version must be valid SemVer without a v prefix" >&2
+            exit 1
+          fi
+          test "$(node -p 'require("./package.json").version')" = "$RELEASE_VERSION"
+          test "$(git rev-parse "refs/tags/v${RELEASE_VERSION}^{commit}")" = "$GITHUB_SHA"
+          test "$(git -C hoovda rev-parse HEAD)" = "$(git -C hoovda rev-parse "$HOOVDA_REF^{commit}")"
+      - name: Verify HooVDA release gate
+        working-directory: hoovda
+        run: |
+          go generate ./internal/atspi
+          git diff --exit-code -- internal/atspi/zz_generated_interfaces.go
+          go test -race ./...
+          go vet ./...
+          go run golang.org/x/vuln/cmd/govulncheck@v1.7.0 ./...
+          go run ./cmd/hoovda conformance --manifest oracle/corpus/manifest.json
+      - name: Verify npm package
+        run: |
+          npm ci
+          npm audit --audit-level=high
+          npm test
+          npm run typecheck
+          npm run pack:check
+      - name: Build release candidates
+        shell: bash
+        run: |
+          set -euo pipefail
+          hoovda_commit=$(git -C hoovda rev-parse HEAD)
+          hoovda_date=$(git -C hoovda show -s --format=%cI HEAD)
+          docker build --platform linux/amd64 \
+            --build-arg "VERSION=${RELEASE_VERSION}" \
+            --build-arg "COMMIT=${hoovda_commit}" \
+            --build-arg "BUILD_DATE=${hoovda_date}" \
+            --tag hoovda-engine:release hoovda
+          docker build --platform linux/amd64 \
+            --build-arg HOOVDA_IMAGE=hoovda-engine:release \
+            --build-arg "IMAGE_VERSION=${RELEASE_VERSION}" \
+            --tag hoosaidthat-hoovda:release \
+            --file images/hoovda/Dockerfile .
+          docker build --platform linux/amd64 \
+            --build-arg "IMAGE_VERSION=${RELEASE_VERSION}" \
+            --tag hoosaidthat-orca:release \
+            --file images/orca/Dockerfile .
+      - name: Qualify release candidates
+        env:
+          CONTAINER_ENGINE: docker
+        run: |
+          bash images/hoovda/smoke-test.sh hoosaidthat-hoovda:release
+          bash images/orca/smoke-test.sh hoosaidthat-orca:release orca
+          SCREEN_READER=hoovda SCREEN_READER_IMAGE=hoosaidthat-hoovda:release \
+            npx playwright test --config examples/basic/playwright.config.ts
+          SCREEN_READER=orca SCREEN_READER_IMAGE=hoosaidthat-orca:release \
+            npx playwright test --config examples/basic/playwright.config.ts
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: release-qualification-evidence
+          path: test-results
+          if-no-files-found: ignore
+          retention-days: 30
+      - name: Authenticate GHCR
+        shell: bash
+        run: echo "$GITHUB_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish image manifests, SBOMs, and provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker buildx create --name hoosaidthat-release --use
+          hoovda_commit=$(git -C hoovda rev-parse HEAD)
+          hoovda_date=$(git -C hoovda show -s --format=%cI HEAD)
+          docker buildx build --platform linux/amd64 --push --sbom=true --provenance=mode=max \
+            --build-arg "VERSION=${RELEASE_VERSION}" \
+            --build-arg "COMMIT=${hoovda_commit}" \
+            --build-arg "BUILD_DATE=${hoovda_date}" \
+            --tag "${ENGINE_IMAGE}:${RELEASE_VERSION}" hoovda
+          docker buildx build --platform linux/amd64 --push --sbom=true --provenance=mode=max \
+            --build-arg "HOOVDA_IMAGE=${ENGINE_IMAGE}:${RELEASE_VERSION}" \
+            --build-arg "IMAGE_VERSION=${RELEASE_VERSION}" \
+            --tag "${HOOVDA_IMAGE}:${RELEASE_VERSION}" \
+            --file images/hoovda/Dockerfile .
+          docker buildx build --platform linux/amd64 --push --sbom=true --provenance=mode=max \
+            --build-arg "IMAGE_VERSION=${RELEASE_VERSION}" \
+            --tag "${ORCA_IMAGE}:${RELEASE_VERSION}" \
+            --file images/orca/Dockerfile .
+      - name: Publish npm package with provenance
+        run: npm publish --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

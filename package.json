@@ -1,0 +1,70 @@
+{
+  "name": "@openhoo/hoosaidthat",
+  "version": "0.1.0",
+  "description": "Real screen-reader testing fixtures, assertions, and visual evidence for Playwright.",
+  "type": "module",
+  "license": "MIT",
+  "author": "Hoo Said That contributors",
+  "homepage": "https://github.com/openhoo/hoosaidthat#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/openhoo/hoosaidthat.git"
+  },
+  "bugs": {
+    "url": "https://github.com/openhoo/hoosaidthat/issues"
+  },
+  "keywords": [
+    "playwright",
+    "accessibility",
+    "a11y",
+    "screenreader",
+    "screen-reader",
+    "orca",
+    "hoovda",
+    "testing"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "docs",
+    "images/*/README.md",
+    "images/*/runtime-contract.json",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "clean": "node scripts/clean.mjs",
+    "typecheck": "tsc -p tsconfig.build.json --noEmit",
+    "test:unit": "tsc -p tsconfig.test.json && node --test .test-dist/tests/*.test.js",
+    "test:python": "python3 -m unittest discover -s images/orca/tests -v",
+    "test:e2e:orca": "npm run build && playwright test --config examples/basic/playwright.config.ts",
+    "test:e2e:hoovda": "npm run build && SCREEN_READER=hoovda SCREEN_READER_IMAGE=hoosaidthat-hoovda:dev playwright test --config examples/basic/playwright.config.ts",
+    "test:e2e": "npm run test:e2e:orca && npm run test:e2e:hoovda",
+    "test": "npm run clean && npm run build && npm run test:unit && npm run test:python",
+    "pack:check": "npm pack --dry-run",
+    "image:build:orca": "podman build --tag hoosaidthat-orca:dev --file images/orca/Dockerfile .",
+    "image:smoke:orca": "bash images/orca/smoke-test.sh hoosaidthat-orca:dev orca",
+    "image:build:hoovda-engine": "podman build --platform linux/amd64 --tag hoovda-engine:dev ../hoovda",
+    "image:build:hoovda": "npm run image:build:hoovda-engine && podman build --platform linux/amd64 --tag hoosaidthat-hoovda:dev --file images/hoovda/Dockerfile .",
+    "image:smoke:hoovda": "bash images/hoovda/smoke-test.sh hoosaidthat-hoovda:dev"
+  },
+  "peerDependencies": {
+    "@playwright/test": ">=1.62.1 <1.63.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.62.1",
+    "@types/node": "26.4.0",
+    "typescript": "7.0.2"
+  }
+}

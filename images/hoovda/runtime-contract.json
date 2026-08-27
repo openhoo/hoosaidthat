@@ -1,0 +1,21 @@
+{
+  "protocolVersion": "2.0",
+  "screenReader": "HooVDA",
+  "profile": "nvda-web-2026.1.1",
+  "platform": "linux",
+  "architecture": "amd64",
+  "browser": "Playwright Chromium with stock Linux browser chrome",
+  "accessibilityApi": "AT-SPI 2.60.1 over D-Bus",
+  "runtimeComponents": {
+    "atSpi": "2.60.1",
+    "eSpeakNg": "1.52.0",
+    "liblouis": "3.38.0"
+  },
+  "display": "X11 through Xvfb",
+  "input": "Physical X11 key events observed and consumed through AT-SPI",
+  "capture": ["structured speech", "braille", "focus", "mode", "audio", "synchronized WebM"],
+  "locales": ["en-US", "de-DE"],
+  "keyboardLayouts": ["desktop", "laptop"],
+  "explicitlyAbsent": ["Windows", "KVM", "Wine", "NVDA executable", "NVDA fork", "Orca"],
+  "releaseGate": "No package or image release before complete NVDA 2026.1.1 black-box conformance corpus"
+}

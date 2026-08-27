@@ -1,0 +1,9 @@
+.git
+node_modules
+dist
+.test-dist
+test-results
+playwright-report
+examples
+hoovda
+*.tgz

@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.test-dist/
+test-results/
+playwright-report/
+*.tgz
+.env
+__pycache__/
+*.pyc

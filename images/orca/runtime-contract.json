@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "screenReader": "Orca",
+  "screenReaderVersion": "51.rc",
+  "source": "https://github.com/GNOME/orca",
+  "sourceCommit": "46c56130b2275a7e9637c24ac95462f02872ae80",
+  "browser": "Playwright 1.62.1 Chromium 151.0.7922.34",
+  "accessibilityApi": "AT-SPI 2.58.8",
+  "display": "X11 through Xvfb",
+  "windowManager": "Matchbox 1.2.2",
+  "input": "semantic action expanded to a physical X11 key gesture through xdotool",
+  "capture": "text requested by Orca at the Speech Dispatcher output-module boundary",
+  "speechDispatcherVersion": "0.12.0~rc2-2build3",
+  "captureLimit": "presentation-request text; not proof of acoustic pronunciation",
+  "focusVerification": "AT-SPI focused object is the Chromium web document or its descendant",
+  "architecture": "linux/amd64",
+  "platform": "linux",
+  "browserProtocol": "Chrome DevTools Protocol",
+  "controlProtocol": "hoosaidthat-screenreader/v1",
+  "referenceSource": "../screenreader/screenreader-pathfinder Orca harness"
+}
