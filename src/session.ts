@@ -361,8 +361,21 @@ export class ScreenReaderSession {
       ['form-fields', 'nextFormField'],
       ['links', 'nextLink'],
       ['lists', 'nextList'],
+      ['list-items', 'nextListItem'],
       ['tables', 'nextTable'],
       ['graphics', 'nextImage'],
+      ['checkboxes', 'nextCheckbox'],
+      ['radio-buttons', 'nextRadioButton'],
+      ['combo-boxes', 'nextCombobox'],
+      ['edit-fields', 'nextEntry'],
+      ['text-paragraphs', 'nextParagraph'],
+      ['frames', 'nextFrame'],
+      ['separators', 'nextSeparator'],
+      ['block-quotes', 'nextBlockQuote'],
+      ['embedded-objects', 'nextEmbeddedObject'],
+      ['annotations', 'nextAnnotation'],
+      ['spelling-errors', 'nextSpellingError'],
+      ['non-link-text', 'nextNotLinkBlock'],
     ] as const;
     const results: Record<string, ScanResult> = {};
     for (const [name, action] of groups) {

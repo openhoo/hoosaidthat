@@ -106,13 +106,25 @@ jobs:
         env:
           CONTAINER_ENGINE: docker
         run: |
+          set -euo pipefail
           npx playwright install ffmpeg
           bash images/hoovda/smoke-test.sh hoosaidthat-hoovda:release
           bash images/orca/smoke-test.sh hoosaidthat-orca:release orca
           SCREEN_READER=hoovda SCREEN_READER_IMAGE=hoosaidthat-hoovda:release \
-            npx playwright test --config examples/basic/playwright.config.ts
+            npx playwright test --config examples/basic/playwright.config.ts \
+              --output test-results/hoovda-en-US-desktop
+          for matrix in en-US/laptop de-DE/desktop de-DE/laptop; do
+            locale=${matrix%/*}
+            layout=${matrix#*/}
+            SCREEN_READER=hoovda SCREEN_READER_IMAGE=hoosaidthat-hoovda:release \
+              SCREEN_READER_LOCALE="$locale" SCREEN_READER_KEYBOARD_LAYOUT="$layout" \
+              npx playwright test --config examples/basic/playwright.config.ts \
+                --output "test-results/hoovda-${locale}-${layout}" \
+                --grep 'matches pinned NVDA aria-details'
+          done
           SCREEN_READER=orca SCREEN_READER_IMAGE=hoosaidthat-orca:release \
-            npx playwright test --config examples/basic/playwright.config.ts
+            npx playwright test --config examples/basic/playwright.config.ts \
+              --output test-results/orca
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         if: always()
         with:

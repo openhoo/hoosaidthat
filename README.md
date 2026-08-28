@@ -23,10 +23,13 @@ test('checkout is announced', async ({ page, screenReader }) => {
 
 ## Release state
 
-Private development only. No npm package or OCI image may be published until
-HooVDA's pinned official NVDA 2026.1.1 assertion corpus is complete, native
-Linux HooVDA observations match, and `hoovda conformance` passes. Current code
-does not claim full NVDA parity.
+HooVDA's seven-case locked-profile corpus now passes. It includes live Linux
+observations for all four `en-US`/`de-DE` and desktop/laptop cells plus browse,
+quick-navigation, text-paragraph, table, live-region, speech, and braille
+assertions. This proves the declared corpus, not full NVDA parity.
+
+Publishing remains an explicit tagged release operation. No unversioned npm
+package or OCI image is published from normal CI.
 The manual release workflow and required credentials are documented in
 [`docs/releasing.md`](docs/releasing.md); it performs this gate again before
 publishing version-only artifacts with SBOM and provenance attestations.
@@ -169,9 +172,11 @@ Automated structural export:
 await screenReader.capturePageElements({ maxPerKind: 100, screenshots: true });
 ```
 
-This visits headings, landmarks, buttons, form fields, links, lists, tables,
-and graphics with screenreader navigation, then exports an image for each
-observed output plus a JSON manifest. Each result includes its ordered
+This visits every HooVDA semantic quick-navigation class: headings, landmarks,
+buttons, form fields and their subtypes, links, lists and list items, tables,
+graphics, text paragraphs, frames, separators, block quotes, embedded objects,
+annotations, spelling or grammar errors, and non-link text. It exports an image
+for each observed output plus a JSON manifest. Each result includes its ordered
 `screenshots` paths. `scan()` remains available for custom action loops.
 
 ## Options
@@ -201,8 +206,8 @@ HooVDA consumes real Chromium AT-SPI objects. It produces structured
 presentation, braille translation, and eSpeak PCM from its own Go engine. This
 is stronger than asserting against a browser accessibility snapshot. It still
 does not certify WCAG conformance, simulate disabled people's lived experience,
-or prove NVDA parity until the provenance-pinned upstream assertion corpus and
-native Linux observation conformance gate passes.
+or prove unrestricted NVDA parity. The passing provenance-pinned gate proves
+only its declared browser-profile cases.
 
 See [runtime protocol](docs/runtime-protocol.md),
 [HooVDA image](images/hoovda/README.md), and

@@ -6,6 +6,14 @@ if (requestedScreenReader !== 'orca' && requestedScreenReader !== 'hoovda') {
 }
 const image =
   process.env.SCREEN_READER_IMAGE ?? `hoosaidthat-${requestedScreenReader}:dev`;
+const requestedLocale = process.env.SCREEN_READER_LOCALE ?? 'en-US';
+if (requestedLocale !== 'en-US' && requestedLocale !== 'de-DE') {
+  throw new Error('SCREEN_READER_LOCALE must be "en-US" or "de-DE"');
+}
+const requestedKeyboardLayout = process.env.SCREEN_READER_KEYBOARD_LAYOUT ?? 'desktop';
+if (requestedKeyboardLayout !== 'desktop' && requestedKeyboardLayout !== 'laptop') {
+  throw new Error('SCREEN_READER_KEYBOARD_LAYOUT must be "desktop" or "laptop"');
+}
 
 export default defineConfig({
   testDir: './tests',
@@ -23,6 +31,8 @@ export default defineConfig({
       screenReader: requestedScreenReader,
       image,
       profile: 'nvda-web-2026.1.1',
+      locale: requestedLocale,
+      keyboardLayout: requestedKeyboardLayout,
       recording: 'on',
       actionScreenshots: 'on',
       keepContainer: process.env.KEEP_SCREEN_READER_CONTAINER === '1',

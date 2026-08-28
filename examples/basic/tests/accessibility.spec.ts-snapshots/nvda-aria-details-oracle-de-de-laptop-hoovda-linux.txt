@@ -1,0 +1,14 @@
+# Screen reader flow
+
+01. ACTION Focus element [focus]
+    SPEECH[focus] focus in app  Schalter
+    BRAILLE[focus] focus in app sltr
+    STATUS settled
+02. ACTION Focus element [focus]
+    SPEECH[focus] push me  Schalter  Hat Details
+    BRAILLE[focus] push me sltr Details
+    STATUS settled
+03. ACTION Report details [reportDetails]
+    SPEECH[reportDetails] Press to self-destruct
+    BRAILLE[reportDetails] Press to self-destruct
+    STATUS settled

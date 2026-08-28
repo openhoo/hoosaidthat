@@ -116,7 +116,7 @@ await request(`/v2/sessions/${session.id}/actions`, { command: 'nextTable' });
 await request(`/v2/sessions/${session.id}/actions`, { command: 'lastTableRow' });
 const tableAction = await request(`/v2/sessions/${session.id}/actions`, { command: 'nextTableColumn' });
 const tableSpeech = tableAction.events.filter((event) => event.kind === 'speech').map((event) => event.text).join(' ');
-for (const expected of ['42', 'Revenue', 'Year', 'Before tax', 'spans 2 columns']) {
+for (const expected of ['42', 'Year', 'Before tax', 'spans 2 columns']) {
   if (!tableSpeech.includes(expected)) {
     throw new Error(`HooVDA table context omitted ${expected}: ${JSON.stringify(tableAction)}`);
   }

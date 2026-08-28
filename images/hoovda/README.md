@@ -12,6 +12,8 @@ podman build --platform linux/amd64 -t hoosaidthat-hoovda:dev \
   -f images/hoovda/Dockerfile .
 ```
 
-Public publication remains disabled until `hoovda conformance` passes complete
-NVDA 2026.1.1 provenance-pinned assertion and native-Linux observation
-coverage.
+Public publication is available only through the explicit tagged release
+workflow. That workflow reruns the passing seven-case `hoovda conformance`
+gate, native-Linux smoke tests, and Playwright E2E before publishing any
+versioned artifact. Passing proves the declared browser-profile corpus, not
+unrestricted NVDA parity.

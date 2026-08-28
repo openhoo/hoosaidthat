@@ -1,0 +1,70 @@
+# Screen reader flow
+
+01. ACTION Start of document [documentStart]
+    SPEECH[documentStart] Browse navigation oracle  document
+    BRAILLE[documentStart] Browse navigation oracle doc
+    STATUS settled
+02. ACTION Next heading [nextHeading]
+    SPEECH[nextHeading] Quick Nav Target  heading  level 1
+    BRAILLE[nextHeading] Quick Nav Target h1
+    STATUS settled
+03. ACTION Next text paragraph [nextParagraph]
+    SPEECH[nextParagraph] Hello, world!
+    BRAILLE[nextParagraph] Hello, world!
+    STATUS settled
+04. ACTION Next text paragraph [nextParagraph]
+    SPEECH[nextParagraph] He replied,  That's wonderful.
+    BRAILLE[nextParagraph] He replied, "That's wonderful."
+    STATUS settled
+05. ACTION Next text paragraph [nextParagraph]
+    SPEECH[nextParagraph] He replied,  That's wonderful .
+    BRAILLE[nextParagraph] He replied, "That's wonderful".
+    STATUS settled
+06. ACTION Next text paragraph [nextParagraph]
+    SPEECH[nextParagraph] He replied,  That's wonderful.  4
+    BRAILLE[nextParagraph] He replied, "That's wonderful."[4]
+    STATUS settled
+07. ACTION Next text paragraph [nextParagraph]
+    SPEECH[nextParagraph] Предложение по-русски.
+    BRAILLE[nextParagraph] Предложение по-русски.
+    STATUS settled
+08. ACTION Next text paragraph [nextParagraph]
+    SPEECH[nextParagraph] 我不会说中文
+    BRAILLE[nextParagraph] 我不会说中文！
+    STATUS settled
+09. ACTION Next text paragraph [nextParagraph]
+    SPEECH[nextParagraph] Bye-bye, world!
+    BRAILLE[nextParagraph] Bye-bye, world!
+    STATUS settled
+10. ACTION Next text paragraph [nextParagraph]
+    SPEECH[nextParagraph] no next text paragraph
+    BRAILLE[nextParagraph] no next text paragraph
+    STATUS settled
+11. ACTION Previous text paragraph [previousParagraph]
+    SPEECH[previousParagraph] 我不会说中文
+    BRAILLE[previousParagraph] 我不会说中文！
+    STATUS settled
+12. ACTION Previous text paragraph [previousParagraph]
+    SPEECH[previousParagraph] Предложение по-русски.
+    BRAILLE[previousParagraph] Предложение по-русски.
+    STATUS settled
+13. ACTION Previous text paragraph [previousParagraph]
+    SPEECH[previousParagraph] He replied,  That's wonderful.  4
+    BRAILLE[previousParagraph] He replied, "That's wonderful."[4]
+    STATUS settled
+14. ACTION Previous text paragraph [previousParagraph]
+    SPEECH[previousParagraph] He replied,  That's wonderful .
+    BRAILLE[previousParagraph] He replied, "That's wonderful".
+    STATUS settled
+15. ACTION Previous text paragraph [previousParagraph]
+    SPEECH[previousParagraph] He replied,  That's wonderful.
+    BRAILLE[previousParagraph] He replied, "That's wonderful."
+    STATUS settled
+16. ACTION Previous text paragraph [previousParagraph]
+    SPEECH[previousParagraph] Hello, world!
+    BRAILLE[previousParagraph] Hello, world!
+    STATUS settled
+17. ACTION Previous text paragraph [previousParagraph]
+    SPEECH[previousParagraph] no previous text paragraph
+    BRAILLE[previousParagraph] no previous text paragraph
+    STATUS settled

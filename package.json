@@ -50,6 +50,7 @@
     "test:python": "python3 -m unittest discover -s images/orca/tests -v",
     "test:e2e:orca": "npm run build && playwright test --config examples/basic/playwright.config.ts",
     "test:e2e:hoovda": "npm run build && SCREEN_READER=hoovda SCREEN_READER_IMAGE=hoosaidthat-hoovda:dev playwright test --config examples/basic/playwright.config.ts",
+    "test:e2e:hoovda:oracle": "npm run build && SCREEN_READER=hoovda SCREEN_READER_IMAGE=hoosaidthat-hoovda:dev playwright test --config examples/basic/playwright.config.ts --grep 'oracle'",
     "test:e2e": "npm run test:e2e:orca && npm run test:e2e:hoovda",
     "test": "npm run clean && npm run build && npm run test:unit && npm run test:python",
     "pack:check": "npm pack --dry-run",

@@ -6,11 +6,12 @@
     <title>Checkout example</title>
     <style>
       body { max-width: 42rem; margin: 4rem auto; font: 18px/1.5 system-ui; }
-      label, input, button { display: block; margin-block: 1rem; }
-      input, button { padding: 0.7rem; font: inherit; }
+      label, input, button, select { display: block; margin-block: 1rem; }
+      input, button, select { padding: 0.7rem; font: inherit; }
       table { border-collapse: collapse; margin-block: 1rem; }
       th, td { border: 1px solid #777; padding: 0.5rem; text-align: left; }
       img { width: 5rem; height: 5rem; }
+      iframe, object { width: 100%; min-height: 5rem; border: 1px solid #777; }
     </style>
   </head>
   <body>
@@ -40,6 +41,27 @@
       </section>
       <p id="ordinary-update">Receipt pending</p>
       <p id="status" role="status" aria-live="polite"></p>
+      <form aria-label="Delivery preferences">
+        <label><input type="checkbox" /> Email receipt</label>
+        <label><input type="radio" name="delivery" /> Standard delivery</label>
+        <label for="country">Country</label>
+        <select id="country"><option>Germany</option></select>
+        <label for="reference">Order reference</label>
+        <input id="reference" value="receipt" />
+      </form>
+      <p>Big <span aria-invalid="spelling">caat</span> meos</p>
+      <hr />
+      <blockquote>Accessibility belongs in every delivery flow.</blockquote>
+      <div role="comment" aria-label="Reviewer annotation">Check address wording.</div>
+      <object
+        aria-label="Embedded receipt preview"
+        type="image/svg+xml"
+        data="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 320 80'%3E%3Ctext x='10' y='45' font-size='20'%3EReceipt preview%3C/text%3E%3C/svg%3E"
+      ></object>
+      <iframe
+        title="Shipping help"
+        srcdoc="<!doctype html><html lang='en'><body><p>Shipping help frame.</p></body></html>"
+      ></iframe>
     </main>
     <script>
       document.querySelector('button').addEventListener('click', () => {

@@ -17,5 +17,5 @@
   "locales": ["en-US", "de-DE"],
   "keyboardLayouts": ["desktop", "laptop"],
   "explicitlyAbsent": ["Windows", "KVM", "Wine", "NVDA executable", "NVDA fork", "Orca"],
-  "releaseGate": "No package or image release before complete NVDA 2026.1.1 provenance-pinned assertion and native-Linux observation corpus"
+  "releaseGate": "Explicit tagged release only after the declared NVDA 2026.1.1 provenance-pinned corpus, native-Linux smoke tests, and Playwright E2E pass"
 }
