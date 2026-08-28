@@ -211,9 +211,47 @@ export class ScreenReaderSession {
   }
 
   transcript(): string {
-    if (this.entries.length === 0) return '# Screen reader flow\n\n(no observations)\n';
+    return this.renderTranscript(this.entries);
+  }
+
+  regressionTranscript(): string {
+    const entries = this.entries
+      .filter(({ observation }) => observation.action !== 'returnToPage')
+      .map(({ observation }, index) => {
+        let speechEvents = observation.speechEvents;
+        let brailleEvents = observation.brailleEvents;
+        if (
+          observation.action === 'focus' ||
+          observation.action === 'nextFocusable' ||
+          observation.action === 'previousFocusable'
+        ) {
+          const focusSpeech = speechEvents.filter(({ command }) => command === 'focus');
+          const focusBraille = brailleEvents.filter(({ command }) => command === 'focus');
+          speechEvents = (focusSpeech.length > 0 ? focusSpeech : speechEvents).slice(-1);
+          brailleEvents = (focusBraille.length > 0 ? focusBraille : brailleEvents).slice(-1);
+        } else if (observation.action !== 'observe') {
+          const commands = new Set<string>([observation.action]);
+          if (
+            observation.action === 'activate' ||
+            observation.action === 'activateWithSpace'
+          ) {
+            commands.add('event');
+          }
+          speechEvents = speechEvents.filter(({ command }) => commands.has(command));
+          brailleEvents = brailleEvents.filter(({ command }) => commands.has(command));
+        }
+        return {
+          index: index + 1,
+          observation: { ...observation, speechEvents, brailleEvents },
+        };
+      });
+    return this.renderTranscript(entries);
+  }
+
+  private renderTranscript(entries: readonly FlowEntry[]): string {
+    if (entries.length === 0) return '# Screen reader flow\n\n(no observations)\n';
     const lines = ['# Screen reader flow', ''];
-    for (const entry of this.entries) {
+    for (const entry of entries) {
       const number = String(entry.index).padStart(2, '0');
       const observation = entry.observation;
       lines.push(
@@ -350,6 +388,14 @@ export class ScreenReaderSession {
     return await this.act('nextHeading');
   }
 
+  async documentStart(): Promise<ScreenReaderObservation> {
+    return await this.act('documentStart');
+  }
+
+  async documentEnd(): Promise<ScreenReaderObservation> {
+    return await this.act('documentEnd');
+  }
+
   async previousHeading(): Promise<ScreenReaderObservation> {
     return await this.act('previousHeading');
   }
@@ -366,6 +412,44 @@ export class ScreenReaderSession {
     return await this.act('activate');
   }
 
+  async reportDetails(): Promise<ScreenReaderObservation> {
+    return await this.act('reportDetails');
+  }
+
+  async elementsList(): Promise<ScreenReaderObservation> {
+    return await this.act('elementsList');
+  }
+
+  async findText(query: string): Promise<ScreenReaderObservation> {
+    const normalized = query.trim();
+    if (normalized.length === 0 || Buffer.byteLength(normalized) > 500) {
+      throw new Error('findText query must contain 1 to 500 bytes');
+    }
+    if (this.health.screenReader.name !== 'hoovda') {
+      throw new Error('findText structured query input requires HooVDA');
+    }
+    if (!this.supportedActions.has('find')) {
+      throw new Error('HooVDA runtime does not support screen-reader action find');
+    }
+    const label = `Find: ${normalized}`;
+    return await playwrightTest.step(`Screen reader: ${label}`, async () => {
+      await this.show(label, 'Listening...');
+      const response = await this.client.perform('find', normalized);
+      if (response.delivery !== 'structured') {
+        throw new Error('HooVDA find response did not confirm structured query delivery');
+      }
+      const observation = this.observation(
+        response.events ?? [],
+        response.timedOut ?? false,
+        'find',
+        label,
+        response.lastSequence,
+      );
+      await this.afterObservation(observation);
+      return observation;
+    });
+  }
+
   async returnToPage(maxGestures = 6): Promise<void> {
     if (!Number.isInteger(maxGestures) || maxGestures < 1 || maxGestures > 20) {
       throw new Error('returnToPage maxGestures must be an integer between 1 and 20');
@@ -376,10 +460,25 @@ export class ScreenReaderSession {
     // settle before trusting runtime focus state.
     await this.page.bringToFront();
     await this.page.waitForTimeout(this.options.quietMs);
-    if ((await this.client.state()).focus.webContentFocused) return;
+    const pageContextReady = async (): Promise<boolean> => {
+      const state = await this.client.state();
+      if (state.focus.webContentFocused) return true;
+      // Chromium sometimes reports its selected tab wrapper as the final
+      // AT-SPI focus object even though the active document and HooVDA browse
+      // buffer remain live. Require all independent signals before accepting
+      // that known browser event-ordering case.
+      return (
+        this.health.screenReader.name === 'hoovda' &&
+        state.focus.browserWindowActive &&
+        state.cursorMode === 'browse' &&
+        state.virtualBufferActive === true &&
+        (await this.page.evaluate(() => document.hasFocus()))
+      );
+    };
+    if (await pageContextReady()) return;
     for (let attempt = 0; attempt < maxGestures; attempt += 1) {
       await this.act('returnToPage');
-      if ((await this.client.state()).focus.webContentFocused) return;
+      if (await pageContextReady()) return;
     }
     throw new Error(
       `web-content focus was not verified after ${maxGestures} physical F6 gestures`,

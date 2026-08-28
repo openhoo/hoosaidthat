@@ -32,10 +32,10 @@ the Speech Dispatcher presentation-request boundary. That is the same strict
 capture pattern proven in `../screenreader/screenreader-pathfinder`; research,
 planner, and privileged verifier layers are not copied into this test runtime.
 
-The v1 action catalog omits `Ctrl+Home`/`Ctrl+End` document-boundary gestures.
-Live review found nondeterministic stalls after those chords in isolated
-Chromium contexts. Unknown actions fail closed; those gestures can return only
-after a runtime-version qualification test is reliable.
+The v1 action catalog includes qualified `Ctrl+Home`/`Ctrl+End`
+document-boundary gestures. Orca's automatic say-all-on-load behavior is
+disabled in its disposable settings profile so page load cannot race ahead of
+the first explicit test action. Unknown actions fail closed.
 
 Chromium runs with `--no-sandbox`, and the container uses host networking so a
 browser inside it can reach Playwright `webServer` processes on loopback. Use

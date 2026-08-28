@@ -1,110 +1,114 @@
 # Screen reader flow
 
 01. ACTION Start of document [documentStart]
-    SPEECH[documentStart] Checkout example document
-    BRAILLE[documentStart] ,*eck|t example docu;t
+    SPEECH[documentStart] Checkout example  document
+    BRAILLE[documentStart] Checkout example doc
     STATUS settled
 02. ACTION Next heading [nextHeading]
-    SPEECH[nextHeading] Checkout heading level 1
-    BRAILLE[nextHeading] ,*eck|t h1d+ level #a
+    SPEECH[nextHeading] Checkout  heading  level 1
+    BRAILLE[nextHeading] Checkout h1
     STATUS settled
 03. ACTION Next heading [nextHeading]
-    SPEECH[nextHeading] Order summary heading level 2
-    BRAILLE[nextHeading] ,ord} summ>y h1d+ level #b
+    SPEECH[nextHeading] Order summary  heading  level 2
+    BRAILLE[nextHeading] Order summary h2
     STATUS settled
 04. ACTION Next heading [nextHeading]
     SPEECH[nextHeading] no next heading
-    BRAILLE[nextHeading] no next h1d+
+    BRAILLE[nextHeading] no next heading
     STATUS settled
 05. ACTION Start of document [documentStart]
-    SPEECH[documentStart] Checkout example document
-    BRAILLE[documentStart] ,*eck|t example docu;t
+    SPEECH[documentStart] Checkout example  document
+    BRAILLE[documentStart] Checkout example doc
     STATUS settled
 06. ACTION Next landmark [nextLandmark]
     SPEECH[nextLandmark] banner landmark
-    BRAILLE[nextLandmark] bann} l&m>k
+    BRAILLE[nextLandmark] landmark
     STATUS settled
 07. ACTION Next landmark [nextLandmark]
     SPEECH[nextLandmark] main landmark
-    BRAILLE[nextLandmark] ma9 l&m>k
+    BRAILLE[nextLandmark] landmark
     STATUS settled
 08. ACTION Next landmark [nextLandmark]
-    SPEECH[nextLandmark] Order summary region landmark
-    BRAILLE[nextLandmark] ,ord} summ>y region l&m>k
+    SPEECH[nextLandmark] Order summary  region landmark
+    BRAILLE[nextLandmark] Order summary landmark
     STATUS settled
 09. ACTION Next landmark [nextLandmark]
     SPEECH[nextLandmark] no next landmark
-    BRAILLE[nextLandmark] no next l&m>k
+    BRAILLE[nextLandmark] no next landmark
     STATUS settled
 10. ACTION Start of document [documentStart]
-    SPEECH[documentStart] Checkout example document
-    BRAILLE[documentStart] ,*eck|t example docu;t
+    SPEECH[documentStart] Checkout example  document
+    BRAILLE[documentStart] Checkout example doc
     STATUS settled
 11. ACTION Next button [nextButton]
-    SPEECH[nextButton] Continue Review order before payment button
-    BRAILLE[nextButton] ,3t9ue ,review ord} 2f pay;t button
+    SPEECH[nextButton] Continue  button  Review order before payment  has details
+    BRAILLE[nextButton] Continue Review order before payment btn details
     STATUS settled
 12. ACTION Next button [nextButton]
     SPEECH[nextButton] no next button
     BRAILLE[nextButton] no next button
     STATUS settled
 13. ACTION Start of document [documentStart]
-    SPEECH[documentStart] Checkout example document
-    BRAILLE[documentStart] ,*eck|t example docu;t
+    SPEECH[documentStart] Checkout example  document
+    BRAILLE[documentStart] Checkout example doc
     STATUS settled
 14. ACTION Next form field [nextFormField]
-    SPEECH[nextFormField] Email entry
-    BRAILLE[nextFormField] ,email 5try
+    SPEECH[nextFormField] Email  entry
+    BRAILLE[nextFormField] Email edt
     STATUS settled
 15. ACTION Next form field [nextFormField]
+    SPEECH[nextFormField] Continue  button  Review order before payment  has details
+    BRAILLE[nextFormField] Continue Review order before payment btn details
+    STATUS settled
+16. ACTION Next form field [nextFormField]
     SPEECH[nextFormField] no next formField
-    BRAILLE[nextFormField] no next =m,field
+    BRAILLE[nextFormField] no next formField
     STATUS settled
-16. ACTION Start of document [documentStart]
-    SPEECH[documentStart] Checkout example document
-    BRAILLE[documentStart] ,*eck|t example docu;t
-    STATUS settled
-17. ACTION Next link [nextLink]
-    SPEECH[nextLink] Skip to checkout link
-    BRAILLE[nextLink] ,skip 6*eck|t l9k
+17. ACTION Start of document [documentStart]
+    SPEECH[documentStart] Checkout example  document
+    BRAILLE[documentStart] Checkout example doc
     STATUS settled
 18. ACTION Next link [nextLink]
+    SPEECH[nextLink] Skip to checkout  link
+    BRAILLE[nextLink] Skip to checkout lnk
+    STATUS settled
+19. ACTION Next link [nextLink]
     SPEECH[nextLink] no next link
-    BRAILLE[nextLink] no next l9k
+    BRAILLE[nextLink] no next link
     STATUS settled
-19. ACTION Start of document [documentStart]
-    SPEECH[documentStart] Checkout example document
-    BRAILLE[documentStart] ,*eck|t example docu;t
-    STATUS settled
-20. ACTION Next list [nextList]
-    SPEECH[nextList] list
-    BRAILLE[nextList] li/
+20. ACTION Start of document [documentStart]
+    SPEECH[documentStart] Checkout example  document
+    BRAILLE[documentStart] Checkout example doc
     STATUS settled
 21. ACTION Next list [nextList]
+    SPEECH[nextList] list
+    BRAILLE[nextList] lst
+    STATUS settled
+22. ACTION Next list [nextList]
     SPEECH[nextList] no next list
-    BRAILLE[nextList] no next li/
+    BRAILLE[nextList] no next list
     STATUS settled
-22. ACTION Start of document [documentStart]
-    SPEECH[documentStart] Checkout example document
-    BRAILLE[documentStart] ,*eck|t example docu;t
-    STATUS settled
-23. ACTION Next table [nextTable]
-    SPEECH[nextTable] Order totals table 2 rows 2 columns
-    BRAILLE[nextTable] ,ord} totals ta# #b r{s #b columns
+23. ACTION Start of document [documentStart]
+    SPEECH[documentStart] Checkout example  document
+    BRAILLE[documentStart] Checkout example doc
     STATUS settled
 24. ACTION Next table [nextTable]
+    SPEECH[nextTable] Order totals  table  with 2 rows and 2 columns
+    BRAILLE[nextTable] Order totals tbl 2r 2c
+    STATUS settled
+25. ACTION Next table [nextTable]
     SPEECH[nextTable] no next table
-    BRAILLE[nextTable] no next ta#
+    BRAILLE[nextTable] no next table
     STATUS settled
-25. ACTION Start of document [documentStart]
-    SPEECH[documentStart] Checkout example document
-    BRAILLE[documentStart] ,*eck|t example docu;t
-    STATUS settled
-26. ACTION Next graphic [nextImage]
-    SPEECH[nextImage] OpenHoo parcel mark image
-    BRAILLE[nextImage] ,op5,hoo p>cel m>k image
+26. ACTION Start of document [documentStart]
+    SPEECH[documentStart] Checkout example  document
+    BRAILLE[documentStart] Checkout example doc
     STATUS settled
 27. ACTION Next graphic [nextImage]
+    SPEECH[nextImage] OpenHoo parcel mark  image
+    BRAILLE[nextImage] OpenHoo parcel mark image
+    STATUS settled
+28. ACTION Next graphic [nextImage]
     SPEECH[nextImage] no next graphic
     BRAILLE[nextImage] no next graphic
     STATUS settled

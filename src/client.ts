@@ -20,6 +20,7 @@ interface ActionResponse {
   lastSequence: number;
   events?: ScreenReaderEvent[];
   timedOut?: boolean;
+  delivery: 'physical' | 'structured';
 }
 
 interface EventsResponse {
@@ -117,6 +118,7 @@ export class HttpScreenReaderClient {
         protocolVersion: 2,
         lastSequence: value.lastSequence,
         cursorMode: value.cursor.mode,
+        virtualBufferActive: value.cursorInDocument,
         focus: {
           browserWindowActive: value.browserWindowActive,
           webContentFocused: value.webContentFocused,
@@ -167,11 +169,11 @@ export class HttpScreenReaderClient {
     return (await this.state()).lastSequence;
   }
 
-  async perform(action: ScreenReaderAction): Promise<ActionResponse> {
+  async perform(action: ScreenReaderAction, argument?: string): Promise<ActionResponse> {
     if (this.screenReaderName === 'hoovda') {
       const value = await this.requestJSON(`${this.sessionPath()}/actions`, {
         method: 'POST',
-        body: JSON.stringify({ command: action }),
+        body: JSON.stringify({ command: action, ...(argument === undefined ? {} : { argument }) }),
         timeoutMs: this.actionTimeoutMs + 2_000,
       });
       if (
@@ -180,6 +182,9 @@ export class HttpScreenReaderClient {
         !isSequence(value.beforeSequence) ||
         !isSequence(value.cursor) ||
         typeof value.timedOut !== 'boolean' ||
+        (value.delivery !== 'physical' && value.delivery !== 'structured') ||
+        (argument === undefined && value.delivery !== 'physical') ||
+        (argument !== undefined && value.delivery !== 'structured') ||
         !Array.isArray(value.events)
       ) {
         throw new ScreenReaderProtocolError('invalid HooVDA action response');
@@ -192,7 +197,11 @@ export class HttpScreenReaderClient {
         lastSequence: value.cursor,
         events,
         timedOut: value.timedOut,
+        delivery: value.delivery,
       };
+    }
+    if (argument !== undefined) {
+      throw new ScreenReaderProtocolError('structured action arguments require HooVDA');
     }
     const value = await this.requestJSON('/v1/actions', {
       method: 'POST',
@@ -210,6 +219,7 @@ export class HttpScreenReaderClient {
       action,
       afterSequence: value.afterSequence,
       lastSequence: value.afterSequence,
+      delivery: 'physical',
     };
   }
 
@@ -570,10 +580,12 @@ function isV1State(value: unknown): value is ScreenReaderState {
 }
 
 function isHooVDAState(value: unknown): value is {
-  lastSequence: number; browserWindowActive: boolean; webContentFocused: boolean; cursor: { mode: string };
+  lastSequence: number; browserWindowActive: boolean; webContentFocused: boolean;
+  cursorInDocument: boolean; cursor: { mode: string };
 } {
   return isObject(value) && isSequence(value.lastSequence) &&
     typeof value.browserWindowActive === 'boolean' && typeof value.webContentFocused === 'boolean' &&
+    typeof value.cursorInDocument === 'boolean' &&
     isObject(value.cursor) && typeof value.cursor.mode === 'string';
 }
 

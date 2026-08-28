@@ -32,6 +32,7 @@ test('client performs action and reads captured speech', async (t) => {
     action: 'nextHeading',
     afterSequence: 4,
     lastSequence: 4,
+    delivery: 'physical',
   });
   const events = await client.readEvents(4, { timeoutMs: 100, quietMs: 10 });
   assert.equal(events.events[0]?.text, 'Checkout heading level 1');
@@ -74,11 +75,11 @@ test('client drives HooVDA v2 session and verifies artifacts', async (t) => {
     } else if (path === '/v2/sessions/hv-test/state') {
       send(response, 200, {
         lastSequence: 2, browserWindowActive: true, webContentFocused: true,
-        cursor: { mode: 'browse' },
+        cursorInDocument: true, cursor: { mode: 'browse' },
       });
     } else if (path === '/v2/sessions/hv-test/actions') {
       send(response, 200, {
-        command: 'nextHeading', beforeSequence: 2, cursor: 5, timedOut: false,
+        command: 'nextHeading', delivery: 'physical', beforeSequence: 2, cursor: 5, timedOut: false,
         events: [
           {
             sequence: 3,
@@ -119,6 +120,7 @@ test('client drives HooVDA v2 session and verifies artifacts', async (t) => {
   assert.equal((await client.capabilities()).actions[0]?.action, 'nextHeading');
   assert.equal(await client.cursor(), 2);
   const action = await client.perform('nextHeading');
+  assert.equal(action.delivery, 'physical');
   assert.equal(action.events?.find((event) => event.kind === 'speech')?.text, 'Checkout heading level 1');
   assert.deepEqual(action.events?.find((event) => event.kind === 'speech')?.source, {
     bus: ':1.5',
@@ -221,6 +223,48 @@ test('client validates event query bounds before transport', async () => {
     () => client.readEvents(0, { timeoutMs: 30_001, quietMs: 10 }),
     /timeoutMs/,
   );
+});
+
+test('client rejects mismatched HooVDA action delivery claims', async (t) => {
+  for (const item of [
+    { action: 'nextHeading' as const, argument: undefined, delivery: 'structured' },
+    { action: 'find' as const, argument: 'Checkout', delivery: 'physical' },
+  ] as const) {
+    await t.test(`${item.action} reported as ${item.delivery}`, async (subtest) => {
+      const server = createServer((request, response) => {
+        const path = new URL(request.url ?? '/', 'http://localhost').pathname;
+        if (path === '/v2/sessions') {
+          send(response, 201, { id: 'delivery-test', startSequence: 0 });
+        } else if (path === '/v2/sessions/delivery-test/actions') {
+          send(response, 200, {
+            command: item.action,
+            delivery: item.delivery,
+            beforeSequence: 0,
+            cursor: 0,
+            timedOut: false,
+            events: [],
+          });
+        } else {
+          send(response, 404, { error: 'not-found' });
+        }
+      });
+      server.listen(0, '127.0.0.1');
+      await new Promise<void>((resolve) => server.once('listening', resolve));
+      subtest.after(() => server.close());
+      const address = server.address();
+      assert(address && typeof address !== 'string');
+      const client = new HttpScreenReaderClient({
+        controlEndpoint: `http://127.0.0.1:${address.port}`,
+        cdpEndpoint: 'http://127.0.0.1:9222',
+        controlToken: token,
+      }, 'hoovda');
+      await client.beginSession('delivery-test', false);
+      await assert.rejects(
+        () => client.perform(item.action, item.argument),
+        /invalid HooVDA action response/,
+      );
+    });
+  }
 });
 
 function handler(request: IncomingMessage, response: ServerResponse): void {

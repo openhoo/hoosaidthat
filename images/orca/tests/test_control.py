@@ -20,6 +20,8 @@ class ControlProtocolTests(unittest.TestCase):
         self.assertEqual(MODULE.ACTIONS["previousHeading"][1], "shift+h")
         self.assertEqual(MODULE.ACTIONS["toggleFocusMode"][1], "Insert+a")
         self.assertEqual(MODULE.ACTIONS["returnToPage"][1], "F6")
+        self.assertEqual(MODULE.ACTIONS["documentStart"][1], "ctrl+Home")
+        self.assertEqual(MODULE.ACTIONS["documentEnd"][1], "ctrl+End")
 
     def test_bounded_integer_rejects_missing_and_out_of_range_values(self) -> None:
         with self.assertRaisesRegex(ValueError, "missing quietMs"):
@@ -82,6 +84,24 @@ class ControlProtocolTests(unittest.TestCase):
         degraded = {**ready, "screenReader": False}
         with mock.patch.object(MODULE, "runtime_components", return_value=degraded):
             self.assertEqual(MODULE.runtime_ready(), (False, degraded))
+
+    def test_action_readiness_avoids_full_accessibility_tree_walk(self) -> None:
+        components = {
+            "xvfb": True,
+            "windowManager": True,
+            "screenReader": True,
+            "chromium": True,
+            "cdp": True,
+        }
+        with (
+            mock.patch.object(MODULE, "runtime_components", return_value=components) as runtime,
+            mock.patch.object(MODULE, "browser_window_active", return_value=True),
+        ):
+            self.assertEqual(
+                MODULE.action_runtime_ready(),
+                (True, {**components, "browserWindowActive": True}),
+            )
+        runtime.assert_called_once_with(include_accessibility=False)
 
     def test_ready_health_uses_precomputed_version_without_subprocess(self) -> None:
         components = {

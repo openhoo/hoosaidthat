@@ -1,22 +1,30 @@
 # Screen reader flow
 
-01. ACTION Next heading [nextHeading]
-    SPEECH[nextHeading] Checkout heading level 1
-    BRAILLE[nextHeading] ,*eck|t h1d+ level #a
+01. ACTION Start of document [documentStart]
+    SPEECH[documentStart] Checkout example  document
+    BRAILLE[documentStart] Checkout example doc
     STATUS settled
-02. ACTION Next focusable element [nextFocusable]
-    SPEECH[focus] Skip to checkout link
-    BRAILLE[focus] ,skip 6*eck|t l9k
+02. ACTION Next heading [nextHeading]
+    SPEECH[nextHeading] Checkout  heading  level 1
+    BRAILLE[nextHeading] Checkout h1
     STATUS settled
-03. ACTION Focus email [focus]
-    SPEECH[focus] Email entry
-    BRAILLE[focus] ,email 5try
+03. ACTION Next focusable element [nextFocusable]
+    SPEECH[focus] Skip to checkout  link
+    BRAILLE[focus] Skip to checkout lnk
     STATUS settled
-04. ACTION Focus continue-button [focus]
-    SPEECH[focus] Continue Review order before payment button
-    BRAILLE[focus] ,3t9ue ,review ord} 2f pay;t button
+04. ACTION Focus email [focus]
+    SPEECH[focus] Email  entry
+    BRAILLE[focus] Email edt
     STATUS settled
-05. ACTION Activate current element [activate]
+05. ACTION Focus continue-button [focus]
+    SPEECH[focus] Continue  button  Review order before payment  has details
+    BRAILLE[focus] Continue Review order before payment btn details
+    STATUS settled
+06. ACTION Report details [reportDetails]
+    SPEECH[reportDetails] Payment continues only after order review.
+    BRAILLE[reportDetails] Payment continues only after order review.
+    STATUS settled
+07. ACTION Activate current element [activate]
     SPEECH[event] Order review ready
-    BRAILLE[event] ,ord} review r1dy
+    BRAILLE[event] Order review ready
     STATUS settled

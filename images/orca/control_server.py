@@ -75,6 +75,8 @@ ACTIONS: dict[str, tuple[str, str]] = {
     "previousCharacter": ("Previous character", "Left"),
     "nextLine": ("Next line", "Down"),
     "previousLine": ("Previous line", "Up"),
+    "documentStart": ("Start of document", "ctrl+Home"),
+    "documentEnd": ("End of document", "ctrl+End"),
     "readCurrent": ("Read current location", "KP_Enter"),
     "sayAll": ("Read from current location", "KP_Add"),
     "toggleFocusMode": ("Toggle browse or focus mode", "Insert+a"),
@@ -333,6 +335,16 @@ def runtime_ready(
     return all(components.values()), components
 
 
+def action_runtime_ready() -> tuple[bool, dict[str, bool]]:
+    # Full AT-SPI traversal is appropriate for state/health probes, but can
+    # block behind Chromium tree churn during rapid navigation. Actions only
+    # need live processes, CDP, and the active Chromium X11 window; Orca itself
+    # observes the subsequent physical gesture through AT-SPI.
+    components = runtime_components(include_accessibility=False)
+    components["browserWindowActive"] = browser_window_active()
+    return all(components.values()), components
+
+
 def append_action(action: str, gesture: str, after_sequence: int) -> None:
     ACTIONS_FILE.parent.mkdir(parents=True, exist_ok=True)
     value = {
@@ -439,7 +451,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(HTTPStatus.BAD_REQUEST, {"error": "unknown-action"})
             return
         with ACTION_LOCK:
-            ready, components = runtime_ready(include_accessibility=True)
+            ready, components = action_runtime_ready()
             if not ready:
                 self.send_json(
                     HTTPStatus.SERVICE_UNAVAILABLE,

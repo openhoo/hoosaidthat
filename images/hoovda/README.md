@@ -13,4 +13,5 @@ podman build --platform linux/amd64 -t hoosaidthat-hoovda:dev \
 ```
 
 Public publication remains disabled until `hoovda conformance` passes complete
-NVDA 2026.1.1 black-box oracle coverage.
+NVDA 2026.1.1 provenance-pinned assertion and native-Linux observation
+coverage.

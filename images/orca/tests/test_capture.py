@@ -76,6 +76,34 @@ class NormalizeSpeechTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "name=value"):
                 capture.handle("SET", io.StringIO("invalid\n.\n"), output)
 
+    def test_speak_acknowledges_then_emits_balanced_lifecycle(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            capture = MODULE.CaptureModule(Path(directory) / "events.jsonl")
+            output = io.StringIO()
+            capture.handle("INIT", io.StringIO(), output)
+            output.seek(0)
+            output.truncate(0)
+
+            capture.handle("SPEAK", io.StringIO("<speak>Ready</speak>\n.\n"), output)
+
+            self.assertEqual(
+                output.getvalue().splitlines(),
+                ["202 OK SEND DATA", "200 OK SPEAKING", "701 BEGIN", "702 END"],
+            )
+
+    def test_stop_and_pause_are_silent_when_no_utterance_is_active(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            capture = MODULE.CaptureModule(Path(directory) / "events.jsonl")
+            output = io.StringIO()
+            capture.handle("INIT", io.StringIO(), output)
+            output.seek(0)
+            output.truncate(0)
+
+            capture.handle("STOP", io.StringIO(), output)
+            capture.handle("PAUSE", io.StringIO(), output)
+
+            self.assertEqual(output.getvalue(), "")
+
 
 if __name__ == "__main__":
     unittest.main()

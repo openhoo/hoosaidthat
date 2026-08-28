@@ -193,11 +193,16 @@ class CaptureModule:
                 "loglevel:",
             )
         elif command == "STOP":
-            if self.initialized:
-                self.respond(output, "703 STOP")
+            # STOP is asynchronous and has no command reply. This capture
+            # module completes every utterance synchronously with 702 END, so
+            # there is no in-flight BEGIN to terminate with 703 STOP here.
+            # Emitting an unmatched STOP event wedges Speech Dispatcher's
+            # output-module state before the next SPEAK request.
+            return
         elif command == "PAUSE":
-            if self.initialized:
-                self.respond(output, "704 PAUSE")
+            # Same protocol rule as STOP: no reply and no unmatched event when
+            # the module is already idle.
+            return
         elif command == "LIST VOICES":
             self.respond(output, "200-hoosaidthat\ten\tnone", "200 OK VOICE LIST SENT")
         elif command.startswith("DEBUG ON") or command == "DEBUG OFF":

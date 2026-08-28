@@ -19,8 +19,9 @@
       <h1>Checkout</h1>
       <label for="email">Email</label>
       <input id="email" name="email" type="email" autocomplete="email" />
-      <button type="button" aria-describedby="continue-help">Continue</button>
+      <button type="button" aria-describedby="continue-help" aria-details="continue-details">Continue</button>
       <p id="continue-help">Review order before payment</p>
+      <p id="continue-details" role="note">Payment continues only after order review.</p>
       <section aria-labelledby="summary-heading">
         <h2 id="summary-heading">Order summary</h2>
         <ul>

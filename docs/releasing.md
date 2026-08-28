@@ -1,18 +1,17 @@
 # Releasing
 
 Releases are manual and fail closed. Run `.github/workflows/release.yml` from
-the exact `v<package-version>` tag. Supply an immutable HooVDA commit or tag and
-explicitly confirm publication.
+the exact `v<package-version>` tag. Supply the full lowercase 40-character SHA
+of an immutable HooVDA commit and explicitly confirm publication.
 
-Required repository secrets:
+Required repository secret:
 
-- `HOOVDA_REPOSITORY_TOKEN`: read-only access to private `openhoo/hoovda`.
 - `NPM_TOKEN`: automation token for `@openhoo/hoosaidthat`; configure npm
   provenance or trusted publishing for this workflow.
 
 The workflow refuses publication unless package version and Git tag match,
-HooVDA source resolves to the requested commit, the complete independently
-supplied oracle corpus matches exactly, security and test gates pass, both
+HooVDA source resolves to the requested commit, the complete provenance-pinned
+oracle corpus matches exactly, security and test gates pass, both
 runtime images pass real screenreader smoke and Playwright E2E, and npm packing
 succeeds. It publishes version-only Linux/amd64 tags; it does not move `latest`.
 

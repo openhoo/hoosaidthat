@@ -27,20 +27,24 @@ Session endpoints:
 
 - `GET /v2/sessions/{id}/state`
 - `POST /v2/sessions/{id}/actions` with `{"command":"nextHeading"}`
+- structured find input with `{"command":"find","argument":"order total"}`
 - `GET /v2/sessions/{id}/events?after=12&timeoutMs=15000`
 - `GET /v2/sessions/{id}/document`
 - `POST /v2/sessions/{id}/finish`
 - `GET /v2/sessions/{id}/artifacts/{name}`
 
-Actions inject complete physical X11 gestures. The AT-SPI global device
-listener maps that observed gesture back to the semantic command. Direct engine
-method calls are not used by production actions.
+Ordinary actions inject complete physical X11 gestures. The AT-SPI global
+device listener maps that observed gesture back to the semantic command. Find
+is the sole structured-input exception because its query would normally be
+typed into an NVDA-owned dialog; the bounded query is delivered directly and
+the response declares `"delivery":"structured"`. Other actions declare
+`"delivery":"physical"`. Find-next and find-previous remain physical.
 
 Ordered event kinds:
 
 - `commandStarted`, `commandSettled`
 - `speech` with structured speech commands
-- `braille` with translated cells and cursor
+- `braille` with logical NVDA-style buffer text plus translated cells and cursor
 - `focus`, `mode`, `liveRegion`
 - `audio` with monotonic offset and duration
 
@@ -48,6 +52,11 @@ Ordered event kinds:
 to place synthesized PCM into the recorded timeline. An action response includes
 all causally observed events after its pre-injection cursor and waits for a
 bounded quiet interval.
+
+State also exposes HooVDA browse/focus mode and `cursorInDocument`. The
+extension combines that virtual-buffer signal with browser-window and active
+document checks when Chromium reports its selected tab wrapper after a CDP
+page switch.
 
 Finish closes the test recording and returns SHA-256-bound artifacts:
 

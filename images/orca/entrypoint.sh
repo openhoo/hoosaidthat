@@ -2,6 +2,11 @@
 set -euo pipefail
 
 if [[ "${HST_INSIDE_DBUS:-0}" != "1" ]]; then
+  # Keep Orca settings in the disposable runtime tree and select the keyfile
+  # backend before the session bus starts.
+  export XDG_CONFIG_HOME=/tmp/hoosaidthat-runtime/config
+  export GSETTINGS_SCHEMA_DIR=/usr/local/share/glib-2.0/schemas
+  export GSETTINGS_BACKEND=keyfile
   exec dbus-run-session -- env HST_INSIDE_DBUS=1 "$0" "$@"
 fi
 
@@ -35,6 +40,8 @@ export XDG_CONFIG_HOME="$runtime_root/config"
 export XDG_CACHE_HOME="$runtime_root/cache"
 export XDG_DATA_HOME="$runtime_root/data"
 export XDG_RUNTIME_DIR="$runtime_root/run"
+export GSETTINGS_SCHEMA_DIR=/usr/local/share/glib-2.0/schemas
+export GSETTINGS_BACKEND=keyfile
 export DISPLAY=":$HST_DISPLAY_NUMBER"
 export NO_AT_BRIDGE=0
 export GTK_A11Y=1
@@ -110,6 +117,30 @@ for _attempt in $(seq 1 100); do
   sleep 0.05
 done
 [[ -S "$runtime_root/speechd.sock" ]]
+
+# Orca defaults to reading an entire web document as soon as it loads. That is
+# useful interactively, but it races ahead of the first explicit test action and
+# makes action-correlated observations nondeterministic. Persist the setting in
+# this container's isolated keyfile profile before Orca starts.
+python3 - <<'PY'
+import time
+
+from gi.repository import Gio
+
+settings = Gio.Settings.new_with_path(
+    "org.gnome.Orca.Document",
+    "/org/gnome/orca/default/document/",
+)
+if not settings.set_boolean("say-all-on-load", False):
+    raise SystemExit("failed to disable Orca say-all-on-load")
+Gio.Settings.sync()
+for _attempt in range(100):
+    if not settings.get_boolean("say-all-on-load"):
+        break
+    time.sleep(0.01)
+else:
+    raise SystemExit("Orca say-all-on-load setting did not persist")
+PY
 
 # Resolve immutable process metadata before starting Orca. Health polling must
 # stay side-effect free; spawning `orca --version` per request can contend with

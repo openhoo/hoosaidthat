@@ -8,7 +8,7 @@ on:
         required: true
         type: string
       hoovda_ref:
-        description: Immutable HooVDA tag or commit containing complete oracle corpus
+        description: Full 40-character HooVDA commit containing complete oracle corpus
         required: true
         type: string
       confirm_release:
@@ -42,7 +42,6 @@ jobs:
           repository: openhoo/hoovda
           ref: ${{ inputs.hoovda_ref }}
           path: hoovda
-          token: ${{ secrets.HOOVDA_REPOSITORY_TOKEN }}
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 24
@@ -62,7 +61,11 @@ jobs:
           fi
           test "$(node -p 'require("./package.json").version')" = "$RELEASE_VERSION"
           test "$(git rev-parse "refs/tags/v${RELEASE_VERSION}^{commit}")" = "$GITHUB_SHA"
-          test "$(git -C hoovda rev-parse HEAD)" = "$(git -C hoovda rev-parse "$HOOVDA_REF^{commit}")"
+          if [[ ! "$HOOVDA_REF" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "hoovda_ref must be a full lowercase 40-character commit SHA" >&2
+            exit 1
+          fi
+          test "$(git -C hoovda rev-parse HEAD)" = "$HOOVDA_REF"
       - name: Verify HooVDA release gate
         working-directory: hoovda
         run: |

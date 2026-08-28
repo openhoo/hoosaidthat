@@ -1,9 +1,10 @@
 # HooSaidThat for Playwright
 
 Normal Playwright tests with real Linux screenreader actions and evidence.
-Supported adapters: Orca protocol v1 and clean-room Go HooVDA protocol v2.
-HooVDA targets the immutable `nvda-web-2026.1.1` web profile through black-box
-conformance; it contains no NVDA code or binary.
+Supported adapters: Orca protocol v1 and independent Go HooVDA protocol v2.
+HooVDA targets the immutable `nvda-web-2026.1.1` web profile through pinned
+public behavior assertions and native-Linux observations; it contains no NVDA
+code or binary.
 
 ```ts
 import { expect, test } from '@openhoo/hoosaidthat';
@@ -23,15 +24,16 @@ test('checkout is announced', async ({ page, screenReader }) => {
 ## Release state
 
 Private development only. No npm package or OCI image may be published until
-HooVDA's independently captured NVDA 2026.1.1 oracle corpus is complete and
-`hoovda conformance` passes. Current code does not claim full NVDA parity.
+HooVDA's pinned official NVDA 2026.1.1 assertion corpus is complete, native
+Linux HooVDA observations match, and `hoovda conformance` passes. Current code
+does not claim full NVDA parity.
 The manual release workflow and required credentials are documented in
 [`docs/releasing.md`](docs/releasing.md); it performs this gate again before
 publishing version-only artifacts with SBOM and provenance attestations.
 
 ## Local build
 
-HooVDA engine and Playwright runtime use separate private repositories:
+HooVDA engine and Playwright runtime use separate public repositories:
 
 ```bash
 git clone git@github.com:openhoo/hoovda.git ../hoovda
@@ -85,14 +87,26 @@ token.
 
 ## Actions and evidence
 
-Actions become complete physical X11 gestures, then pass through the actual
-AT-SPI device listener:
+Ordinary actions become complete physical X11 gestures, then pass through the
+actual AT-SPI device listener:
 
 ```ts
 await screenReader.act('nextLandmark');
 await screenReader.act('nextHeading2');
 await screenReader.act('nextFormField');
 await screenReader.act('activate');
+await screenReader.reportDetails();
+await screenReader.elementsList();
+```
+
+Find needs a query. `findText()` sends that bounded string through HooVDA's
+structured control API; subsequent `findNext` and `findPrevious` actions use
+physical NVDA gestures:
+
+```ts
+await screenReader.findText('order total');
+await screenReader.act('findNext');
+await screenReader.act('findPrevious');
 ```
 
 Each observation contains ordered typed events plus derived text:
@@ -118,8 +132,12 @@ Regression-test a complete stable flow with Playwright snapshots:
 await screenReader.nextHeading();
 await screenReader.nextFormField();
 await screenReader.activate();
-await expect(screenReader.transcript()).toMatchSnapshot('checkout.hoovda.txt');
+await expect(screenReader.regressionTranscript()).toMatchSnapshot('checkout.hoovda.txt');
 ```
+
+`regressionTranscript()` removes internal page-focus setup and keeps output
+correlated with each recorded action. `transcript()` remains the complete raw
+flow, including browser focus transitions.
 
 Every HooVDA test attaches:
 
@@ -183,7 +201,8 @@ HooVDA consumes real Chromium AT-SPI objects. It produces structured
 presentation, braille translation, and eSpeak PCM from its own Go engine. This
 is stronger than asserting against a browser accessibility snapshot. It still
 does not certify WCAG conformance, simulate disabled people's lived experience,
-or prove NVDA parity until the black-box conformance gate passes.
+or prove NVDA parity until the provenance-pinned upstream assertion corpus and
+native Linux observation conformance gate passes.
 
 See [runtime protocol](docs/runtime-protocol.md),
 [HooVDA image](images/hoovda/README.md), and

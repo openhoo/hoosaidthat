@@ -90,6 +90,7 @@ export const SCREEN_READER_ACTIONS = {
   firstTableRow: 'First table row',
   lastTableRow: 'Last table row',
   readCurrent: 'Read current location',
+  reportDetails: 'Report details',
   sayAll: 'Read from current location',
   toggleFocusMode: 'Toggle browse or focus mode',
   toggleSingleLetterNavigation: 'Toggle single letter navigation',
@@ -241,6 +242,7 @@ export interface ScreenReaderState {
   protocolVersion: 1 | 2;
   lastSequence: number;
   cursorMode?: string;
+  virtualBufferActive?: boolean;
   focus: {
     browserWindowActive: boolean;
     webContentFocused: boolean;
