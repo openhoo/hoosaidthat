@@ -17,5 +17,5 @@
   "locales": ["en-US", "de-DE"],
   "keyboardLayouts": ["desktop", "laptop"],
   "explicitlyAbsent": ["Windows", "KVM", "Wine", "NVDA executable", "NVDA fork", "Orca"],
-  "releaseGate": "No package or image release before complete NVDA 2026.1.1 black-box conformance corpus"
+  "releaseGate": "No package or image release before complete NVDA 2026.1.1 provenance-pinned assertion and native-Linux observation corpus"
 }
