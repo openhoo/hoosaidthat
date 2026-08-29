@@ -66,6 +66,10 @@ jobs:
             exit 1
           fi
           test "$(git -C hoovda rev-parse HEAD)" = "$HOOVDA_REF"
+      - name: Verify npm publishing identity
+        run: npm whoami
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
       - name: Verify HooVDA release gate
         working-directory: hoovda
         run: |
