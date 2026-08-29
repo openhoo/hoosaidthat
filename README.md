@@ -38,6 +38,10 @@ unrestricted NVDA desktop, add-on, touch, or application-specific parity.
 
 Publishing remains an explicit tagged release operation. No unversioned npm
 package or OCI image is published from normal CI.
+Normal push and pull-request CI runs package checks and the small Orca image
+smoke/E2E gate only. The complete HooVDA parity matrix stays local and in the
+explicitly dispatched release workflow so ordinary commits do not spend hours
+of hosted-runner time.
 The hosted release workflow and required credentials are documented in
 [`docs/releasing.md`](docs/releasing.md). It requalifies npm, HooVDA, and Orca
 before publishing version-only artifacts with SBOM and provenance attestations.
