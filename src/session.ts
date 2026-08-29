@@ -188,11 +188,7 @@ export class ScreenReaderSession {
   ): Promise<ScreenReaderObservation> {
     return await playwrightTest.step(`Screen reader: ${label}`, async () => {
       await this.show(label, 'Listening...');
-      // Establish a quiet baseline before the operation. Otherwise late audio
-      // from the previous step can start the event quiet timer and let a
-      // delayed accessibility mutation escape this observation.
-      await this.page.waitForTimeout(this.options.quietMs);
-      const afterSequence = await this.client.cursor();
+      const afterSequence = await this.quietCursor();
       await operation();
       const observation = await this.collect(afterSequence, action, label);
       await this.afterObservation(observation);
@@ -764,6 +760,28 @@ export class ScreenReaderSession {
       action,
       label,
     );
+  }
+
+  private async quietCursor(): Promise<number> {
+    const deadline = Date.now() + this.options.actionTimeoutMs;
+    let cursor = await this.client.cursor();
+    let quietWindows = 0;
+    while (Date.now() < deadline) {
+      await this.page.waitForTimeout(this.options.quietMs);
+      const next = await this.client.cursor();
+      if (next === cursor) {
+        quietWindows += 1;
+      } else {
+        cursor = next;
+        quietWindows = 0;
+      }
+      // One fixed delay can end immediately before Chromium publishes a
+      // page-load focus or live-region registration event. Two unchanged
+      // cursor windows establish that accessibility output has actually
+      // settled before the observed DOM operation begins.
+      if (quietWindows === 2) return cursor;
+    }
+    throw new Error('screen-reader output did not settle before observed operation');
   }
 
   private observation(
