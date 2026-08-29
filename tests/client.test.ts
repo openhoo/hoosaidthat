@@ -7,6 +7,15 @@ import type { ScreenReaderPresentationSettings } from '../src/types.js';
 
 const token = 'unit-test-token';
 
+test('client strips an adversarial trailing-slash run in linear time', () => {
+  const client = new HttpScreenReaderClient({
+    controlEndpoint: `http://127.0.0.1:3000${'/'.repeat(1_000_000)}`,
+    cdpEndpoint: 'http://127.0.0.1:9222',
+    controlToken: token,
+  });
+  assert.equal(client.controlEndpoint, 'http://127.0.0.1:3000');
+});
+
 test('client performs action and reads captured speech', async (t) => {
   const server = createServer(handler);
   server.listen(0, '127.0.0.1');

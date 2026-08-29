@@ -3,13 +3,17 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
 import {
   chmodSync,
+  closeSync,
+  constants as fsConstants,
   existsSync,
+  fstatSync,
   mkdirSync,
+  openSync,
   readFileSync,
+  readSync,
   renameSync,
   rmSync,
   statfsSync,
-  statSync,
   writeFileSync,
 } from 'node:fs';
 import { createServer } from 'node:net';
@@ -178,28 +182,16 @@ function initialize() {
   mkdirSync(sshRoot, { recursive: true, mode: 0o700 });
   mkdirSync(join(sharedRoot, 'bootstrap'), { recursive: true, mode: 0o700 });
   initializeSshIdentity();
-  if (!existsSync(tokenPath)) {
-    writeFileSync(tokenPath, `${randomBytes(48).toString('base64url')}\n`, {
-      encoding: 'utf8',
-      mode: 0o600,
-      flag: 'wx',
-    });
-  }
-  if (!existsSync(environmentPath)) {
-    const password = randomBytes(24).toString('base64url');
-    const content = [
-      `WINDOWS_PASSWORD=${password}`,
-      `HST_NVDA_STATE=${stateRoot}`,
-      `HST_NVDA_SHARED=${sharedRoot}`,
-      `HST_NVDA_OEM=${join(deploymentRoot, 'oem')}`,
-      '',
-    ].join('\n');
-    writeFileSync(environmentPath, content, {
-      encoding: 'utf8',
-      mode: 0o600,
-      flag: 'wx',
-    });
-  }
+  createTextFileIfAbsent(tokenPath, `${randomBytes(48).toString('base64url')}\n`, 0o600);
+  const password = randomBytes(24).toString('base64url');
+  const content = [
+    `WINDOWS_PASSWORD=${password}`,
+    `HST_NVDA_STATE=${stateRoot}`,
+    `HST_NVDA_SHARED=${sharedRoot}`,
+    `HST_NVDA_OEM=${join(deploymentRoot, 'oem')}`,
+    '',
+  ].join('\n');
+  createTextFileIfAbsent(environmentPath, content, 0o600);
   chmodSync(runtimeRoot, 0o700);
   chmodSync(secretRoot, 0o700);
   chmodSync(sshRoot, 0o700);
@@ -210,10 +202,12 @@ function initialize() {
 }
 
 function initializeSshIdentity() {
-  if (existsSync(sshPublicKeyPath) && !existsSync(sshPrivateKeyPath)) {
+  const privateKeyExists = existsSync(sshPrivateKeyPath);
+  let publicKey = tryReadBoundedFile(sshPublicKeyPath, 16 * 1024);
+  if (publicKey !== undefined && !privateKeyExists) {
     throw new Error(`SSH public key exists without private key at ${sshRoot}`);
   }
-  if (!existsSync(sshPrivateKeyPath)) {
+  if (!privateKeyExists) {
     if (
       existsSync(environmentPath) ||
       existsSync(knownHostsPath) ||
@@ -233,7 +227,8 @@ function initializeSshIdentity() {
         `SSH identity generation failed: ${(generated.stderr || generated.error?.message || 'unknown error').trim()}`,
       );
     }
-  } else if (!existsSync(sshPublicKeyPath)) {
+  }
+  if (publicKey === undefined) {
     const derived = spawnSync('ssh-keygen', ['-y', '-f', sshPrivateKeyPath], {
       encoding: 'utf8',
     });
@@ -242,13 +237,14 @@ function initializeSshIdentity() {
         `SSH public key derivation failed: ${(derived.stderr || derived.error?.message || 'unknown error').trim()}`,
       );
     }
-    writeFileSync(sshPublicKeyPath, `${derived.stdout.trim()} hoosaidthat-nvda-oracle\n`, {
-      encoding: 'utf8',
-      mode: 0o644,
-      flag: 'wx',
-    });
+    createTextFileIfAbsent(
+      sshPublicKeyPath,
+      `${derived.stdout.trim()} hoosaidthat-nvda-oracle\n`,
+      0o644,
+    );
+    publicKey = readBoundedFile(sshPublicKeyPath, 16 * 1024);
   }
-  const publicKey = readFileSync(sshPublicKeyPath, 'utf8').trim();
+  publicKey = publicKey.trim();
   validateEd25519PublicKey(publicKey, 'client public key');
   writeFileSync(publishedClientKeyPath, `${publicKey}\n`, {
     encoding: 'utf8',
@@ -276,7 +272,7 @@ function compose(arguments_) {
 
 async function waitUntilReady() {
   requireInitialized();
-  const token = readFileSync(tokenPath, 'utf8').trim();
+  const token = readControlToken();
   const deadline = Date.now() + 45 * 60_000;
   let lastPhases = '';
   let lastError = 'not started';
@@ -287,7 +283,6 @@ async function waitUntilReady() {
     ];
     const phases = [];
     for (const path of statusFiles) {
-      if (!existsSync(path)) continue;
       try {
         const value = JSON.parse(readBoundedFile(path, 64 * 1024));
         const phase = `${value.schema ?? 'status'}:${value.phase ?? (value.ready ? 'ready' : 'waiting')}`;
@@ -298,7 +293,7 @@ async function waitUntilReady() {
           );
         }
       } catch (error) {
-        if (error instanceof SyntaxError) continue;
+        if (error instanceof SyntaxError || isFileError(error, 'ENOENT')) continue;
         throw error;
       }
     }
@@ -310,6 +305,9 @@ async function waitUntilReady() {
     try {
       const [control, cdp] = await Promise.all([
         fetch('http://127.0.0.1:3002/v2/health', {
+          // The validated secret is intentionally sent only to the fixed host-loopback
+          // control endpoint. It never influences request destination or path.
+          // codeql[js/file-access-to-http]
           headers: { authorization: `Bearer ${token}` },
           signal: AbortSignal.timeout(2_000),
         }),
@@ -360,7 +358,11 @@ function status() {
   console.log(probe.status === 0 ? probe.stdout.trim() : 'container absent');
   for (const name of ['oem-status.json', 'ssh-status.json', 'runtime-status.json']) {
     const path = join(sharedRoot, 'bootstrap', name);
-    if (existsSync(path)) console.log(`${name}: ${readBoundedFile(path, 64 * 1024).trim()}`);
+    try {
+      console.log(`${name}: ${readBoundedFile(path, 64 * 1024).trim()}`);
+    } catch (error) {
+      if (!isFileError(error, 'ENOENT')) throw error;
+    }
   }
   if (probe.status === 0 && existsSync(environmentPath) && existsSync(sshPrivateKeyPath)) {
     const guest = trySshControl('status');
@@ -388,27 +390,21 @@ function validateEd25519PublicKey(value, label) {
 }
 
 function pinGuestHostKey() {
-  if (!existsSync(publishedHostKeyPath)) {
+  const publishedHostKey = tryReadBoundedFile(publishedHostKeyPath, 16 * 1024);
+  if (publishedHostKey === undefined) {
     throw new Error(`guest SSH host key not published at ${publishedHostKeyPath}`);
   }
   const key = validateEd25519PublicKey(
-    readFileSync(publishedHostKeyPath, 'utf8'),
+    publishedHostKey,
     'guest SSH host key',
   );
   const expected = `[127.0.0.1]:2224 ${key}\n`;
-  if (existsSync(knownHostsPath)) {
-    const pinned = readFileSync(knownHostsPath, 'utf8');
-    if (pinned !== expected) {
-      throw new Error(
-        `guest SSH host key changed; verify VM identity before replacing ${knownHostsPath}`,
-      );
-    }
-  } else {
-    writeFileSync(knownHostsPath, expected, {
-      encoding: 'utf8',
-      mode: 0o600,
-      flag: 'wx',
-    });
+  createTextFileIfAbsent(knownHostsPath, expected, 0o600);
+  const pinned = readBoundedFile(knownHostsPath, 16 * 1024);
+  if (pinned !== expected) {
+    throw new Error(
+      `guest SSH host key changed; verify VM identity before replacing ${knownHostsPath}`,
+    );
   }
   chmodSync(knownHostsPath, 0o600);
 }
@@ -634,7 +630,7 @@ async function runParityMatrix() {
   requireInitialized();
   await waitUntilReady();
   execFileSync('npm', ['run', 'build'], { cwd: projectRoot, stdio: 'inherit' });
-  const token = readFileSync(tokenPath, 'utf8').trim();
+  const token = readControlToken();
   for (const [locale, keyboardLayout] of [
     ['en-US', 'desktop'],
     ['en-US', 'laptop'],
@@ -662,7 +658,7 @@ async function runParityCell(locale, keyboardLayout, options = {}) {
       stdio: 'inherit',
     });
   }
-  const token = options.token ?? readFileSync(tokenPath, 'utf8').trim();
+  const token = options.token ?? readControlToken();
   console.log(`NVDA parity ${locale}/${keyboardLayout}`);
   runSshControl(`locale-${locale}`);
   await waitUntilReady();
@@ -790,10 +786,61 @@ function oracleQemuRunning() {
 }
 
 function readBoundedFile(path, maximumBytes) {
-  if (statSync(path).size > maximumBytes) {
-    throw new Error(`file exceeds ${maximumBytes} bytes: ${path}`);
+  if (!Number.isSafeInteger(maximumBytes) || maximumBytes < 1) {
+    throw new Error('maximumBytes must be a positive safe integer');
   }
-  return readFileSync(path, 'utf8');
+  const descriptor = openSync(path, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+  try {
+    if (!fstatSync(descriptor).isFile()) throw new Error(`not a regular file: ${path}`);
+    const buffer = Buffer.allocUnsafe(maximumBytes + 1);
+    let offset = 0;
+    while (offset < buffer.byteLength) {
+      const bytesRead = readSync(
+        descriptor,
+        buffer,
+        offset,
+        buffer.byteLength - offset,
+        null,
+      );
+      if (bytesRead === 0) break;
+      offset += bytesRead;
+    }
+    if (offset > maximumBytes) throw new Error(`file exceeds ${maximumBytes} bytes: ${path}`);
+    return buffer.toString('utf8', 0, offset);
+  } finally {
+    closeSync(descriptor);
+  }
+}
+
+function tryReadBoundedFile(path, maximumBytes) {
+  try {
+    return readBoundedFile(path, maximumBytes);
+  } catch (error) {
+    if (isFileError(error, 'ENOENT')) return undefined;
+    throw error;
+  }
+}
+
+function createTextFileIfAbsent(path, content, mode) {
+  try {
+    writeFileSync(path, content, { encoding: 'utf8', mode, flag: 'wx' });
+    return true;
+  } catch (error) {
+    if (isFileError(error, 'EEXIST')) return false;
+    throw error;
+  }
+}
+
+function isFileError(error, code) {
+  return error !== null && typeof error === 'object' && error.code === code;
+}
+
+function readControlToken() {
+  const token = readBoundedFile(tokenPath, 256).trim();
+  if (!/^[A-Za-z0-9_-]{64}$/u.test(token)) {
+    throw new Error(`invalid NVDA control token at ${tokenPath}`);
+  }
+  return token;
 }
 
 async function readBoundedJsonResponse(response, maximumBytes, label) {

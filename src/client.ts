@@ -79,7 +79,11 @@ export class HttpScreenReaderClient {
     actionTimeoutMs = 5_000,
     configuration?: ScreenReaderClientConfiguration,
   ) {
-    this.controlEndpoint = endpoints.controlEndpoint.replace(/\/+$/, '');
+    let endpointLength = endpoints.controlEndpoint.length;
+    while (endpointLength > 0 && endpoints.controlEndpoint.charCodeAt(endpointLength - 1) === 47) {
+      endpointLength -= 1;
+    }
+    this.controlEndpoint = endpoints.controlEndpoint.slice(0, endpointLength);
     this.controlToken = endpoints.controlToken;
     this.screenReaderName = screenReaderName;
     this.actionTimeoutMs = actionTimeoutMs;
