@@ -25,3 +25,22 @@ for (const screenReader of ['orca', 'hoovda'] as const) {
     assert(!args.includes('--device'));
   });
 }
+
+test('NVDA cannot be rendered into Linux container arguments', () => {
+  const options = resolveOptions({
+    screenReader: 'nvda',
+    controlEndpoint: 'http://127.0.0.1:3002',
+    cdpEndpoint: 'http://127.0.0.1:9224',
+    controlToken: 'secret',
+  });
+  assert.throws(
+    () =>
+      buildContainerArguments(options, {
+        containerName: 'reader-nvda',
+        token: 'secret',
+        controlPort: 3002,
+        cdpPort: 9224,
+      }),
+    /cannot be launched as a Linux container/,
+  );
+});

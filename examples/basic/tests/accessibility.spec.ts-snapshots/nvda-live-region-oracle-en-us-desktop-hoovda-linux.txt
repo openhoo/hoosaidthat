@@ -1,10 +1,10 @@
 # Screen reader flow
 
 01. ACTION Focus element [focus]
-    SPEECH[focus] Update status  button
-    BRAILLE[focus] Update status btn
+    SPEECH[nextFocusable] Update status  button
+    BRAILLE[nextFocusable] Update status btn
     STATUS settled
 02. ACTION Activate current element [activate]
-    SPEECH[event] Order review ready
-    BRAILLE[event] Order review ready
+    SPEECH[activate] Order review ready
+    BRAILLE[activate] Order review ready
     STATUS settled

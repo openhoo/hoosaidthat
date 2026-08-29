@@ -1,0 +1,6 @@
+self-hosted-runner:
+  labels:
+    - kvm
+    - nvda-oracle
+
+config-variables: null

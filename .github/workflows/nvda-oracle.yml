@@ -1,0 +1,46 @@
+name: Real NVDA oracle
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: real-nvda-oracle
+  cancel-in-progress: false
+
+jobs:
+  parity:
+    runs-on: [self-hosted, linux, x64, kvm, nvda-oracle]
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run typecheck
+      - run: npx playwright install ffmpeg
+      - run: npm run nvda:windows:doctor
+      - run: npm run nvda:windows:up
+      - run: npm run nvda:windows:wait
+      - run: npm run nvda:windows:sync
+      - run: npm run nvda:windows:control -- restart
+      - run: npm run nvda:windows:wait
+      - run: npm run nvda:windows:parity
+      - name: Capture guest diagnostics on failure
+        if: failure()
+        run: npm run nvda:windows:control -- logs || true
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        if: always()
+        with:
+          name: real-nvda-playwright-evidence
+          path: test-results
+          if-no-files-found: ignore
+          retention-days: 30
+      - name: Stop licensed Windows oracle
+        if: always()
+        run: npm run nvda:windows:control -- shutdown || npm run nvda:windows:down || true

@@ -1,8 +1,8 @@
 # Screen reader flow
 
 01. ACTION Start of document [documentStart]
-    SPEECH[documentStart] Table navigation oracle  document
-    BRAILLE[documentStart] Table navigation oracle doc
+    SPEECH[documentStart] Paragraph
+    BRAILLE[documentStart] Paragraph
     STATUS settled
 02. ACTION Next table [nextTable]
     SPEECH[nextTable] table  with 2 rows and 2 columns  row 1  column 1  First heading

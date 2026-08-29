@@ -53,17 +53,22 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           repository: openhoo/hoovda
-          ref: a369caeaf06753a6ccc453c6c8247a1a2ca8b504
+          ref: be716317d99622fba60247aaf2455afc419e3e5a
           path: hoovda
       - name: Verify pinned HooVDA source
-        run: test "$(git -C hoovda rev-parse HEAD)" = "a369caeaf06753a6ccc453c6c8247a1a2ca8b504"
+        run: test "$(git -C hoovda rev-parse HEAD)" = "be716317d99622fba60247aaf2455afc419e3e5a"
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version: '1.27.0'
           cache-dependency-path: hoovda/go.sum
-      - name: Verify pinned HooVDA oracle
+      - name: Verify pinned HooVDA source and oracle
         working-directory: hoovda
-        run: go run ./cmd/hoovda conformance --manifest oracle/corpus/manifest.json
+        run: |
+          go generate ./internal/atspi
+          git diff --exit-code -- internal/atspi/zz_generated_interfaces.go
+          go test -race ./...
+          go vet ./...
+          go run ./cmd/hoovda conformance --manifest oracle/corpus/manifest.json
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 24
@@ -74,22 +79,23 @@ jobs:
       - run: docker build --platform linux/amd64 --tag hoovda-engine:dev hoovda
       - run: docker build --platform linux/amd64 --build-arg HOOVDA_IMAGE=hoovda-engine:dev --tag hoosaidthat-hoovda:dev --file images/hoovda/Dockerfile .
       - run: CONTAINER_ENGINE=docker bash images/hoovda/smoke-test.sh hoosaidthat-hoovda:dev
+      - name: Qualify complete HooVDA command surface
+        env:
+          CONTAINER_ENGINE: docker
+          SCREEN_READER_IMAGE: hoosaidthat-hoovda:dev
+        run: node scripts/hoovda-parity.mjs en-US desktop
       - run: CONTAINER_ENGINE=docker npm run test:e2e:hoovda -- --output test-results/hoovda-en-US-desktop
-      - name: Qualify remaining HooVDA locale and keyboard-layout cells
+      - name: Qualify remaining complete HooVDA parity cells
         shell: bash
         env:
           CONTAINER_ENGINE: docker
-          SCREEN_READER: hoovda
           SCREEN_READER_IMAGE: hoosaidthat-hoovda:dev
         run: |
           set -euo pipefail
           for matrix in en-US/laptop de-DE/desktop de-DE/laptop; do
             locale=${matrix%/*}
             layout=${matrix#*/}
-            SCREEN_READER_LOCALE="$locale" SCREEN_READER_KEYBOARD_LAYOUT="$layout" \
-              npx playwright test --config examples/basic/playwright.config.ts \
-                --output "test-results/hoovda-${locale}-${layout}" \
-                --grep 'matches pinned NVDA aria-details'
+            node scripts/hoovda-parity.mjs "$locale" "$layout"
           done
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         if: always()

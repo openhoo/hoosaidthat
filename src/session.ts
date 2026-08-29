@@ -1,5 +1,5 @@
 import { mkdir, writeFile } from 'node:fs/promises';
-import { dirname } from 'node:path';
+import { basename, dirname } from 'node:path';
 import { test as playwrightTest, type Locator, type Page, type TestInfo } from '@playwright/test';
 import { HttpScreenReaderClient } from './client.js';
 import { ensureOverlay, installOverlay, removeOverlay, updateOverlay } from './overlay.js';
@@ -10,9 +10,12 @@ import {
   type ScanOptions,
   type ScanResult,
   type ScreenReaderAction,
+  type ScreenReaderCapabilities,
   type ScreenReaderEvent,
   type ScreenReaderHealth,
   type ScreenReaderObservation,
+  type ScreenReaderPresentationSettings,
+  type ScreenReaderState,
   type SpeechEvent,
   type BrailleEvent,
 } from './types.js';
@@ -32,7 +35,7 @@ export class ScreenReaderSession {
   private readonly entries: FlowEntry[] = [];
   private readonly supportedActions: ReadonlySet<ScreenReaderAction>;
   private screenshotIndex = 0;
-  private currentCursor = 0;
+  private pageAriaSnapshotCaptured = false;
 
   private constructor(
     page: Page,
@@ -57,64 +60,73 @@ export class ScreenReaderSession {
     testInfo: TestInfo,
   ): Promise<ScreenReaderSession> {
     for (const sibling of page.context().pages()) {
-      if (
-        sibling !== page &&
-        sibling.url().startsWith('file:///opt/hoosaidthat/bootstrap.html')
-      ) {
+      if (sibling !== page && sibling.url().startsWith('file:///opt/hoosaidthat/bootstrap.html')) {
         await sibling.close();
       }
     }
-    const [health, capabilities] = await Promise.all([
-      client.health(),
-      client.capabilities(),
-    ]);
-    if (health.screenReader.name.toLowerCase() !== options.screenReader) {
-      throw new Error(
-        `runtime screen reader mismatch: requested ${options.screenReader}, got ${health.screenReader.name}`,
-      );
-    }
-    if (health.profile && health.profile !== options.profile) {
-      throw new Error(`runtime profile mismatch: requested ${options.profile}, got ${health.profile}`);
-    }
-    if (health.locale && health.locale !== options.locale) {
-      throw new Error(`runtime locale mismatch: requested ${options.locale}, got ${health.locale}`);
-    }
-    if (health.keyboardLayout && health.keyboardLayout !== options.keyboardLayout) {
-      throw new Error(
-        `runtime keyboard layout mismatch: requested ${options.keyboardLayout}, got ${health.keyboardLayout}`,
-      );
-    }
-    await client.beginSession(testInfo.testId, options.recording === 'on');
-    let cursor: number;
+    let sessionStarted = false;
     try {
-      cursor = await client.cursor();
+      if (options.screenReader === 'nvda') {
+        await assertNativeViewport(page);
+      }
+      if (options.screenReader === 'nvda') {
+        await client.beginSession(testInfo.testId, options.recording === 'on');
+        sessionStarted = true;
+      }
+      const [health, capabilities]: [ScreenReaderHealth, ScreenReaderCapabilities] =
+        await Promise.all([client.health(), client.capabilities()]);
+      if (health.screenReader.name.toLowerCase() !== options.screenReader) {
+        throw new Error(
+          `runtime screen reader mismatch: requested ${options.screenReader}, got ${health.screenReader.name}`,
+        );
+      }
+      if (health.profile && health.profile !== options.profile) {
+        throw new Error(
+          `runtime profile mismatch: requested ${options.profile}, got ${health.profile}`,
+        );
+      }
+      if (health.locale && health.locale !== options.locale) {
+        throw new Error(
+          `runtime locale mismatch: requested ${options.locale}, got ${health.locale}`,
+        );
+      }
+      if (health.keyboardLayout && health.keyboardLayout !== options.keyboardLayout) {
+        throw new Error(
+          `runtime keyboard layout mismatch: requested ${options.keyboardLayout}, got ${health.keyboardLayout}`,
+        );
+      }
+      if (!sessionStarted) {
+        await client.beginSession(testInfo.testId, options.recording === 'on');
+        sessionStarted = true;
+      }
+      const supportedActions = new Set(capabilities.actions.map((capability) => capability.action));
+      const session = new ScreenReaderSession(
+        page,
+        client,
+        options,
+        testInfo,
+        health,
+        supportedActions,
+      );
+      if (options.overlay) {
+        await installOverlay(page);
+        await updateOverlay(
+          page,
+          'Screen reader ready',
+          `${health.screenReader.name} ${health.screenReader.version}`,
+        );
+      }
+      await attachEvidenceFile(
+        testInfo,
+        'screen-reader-runtime.json',
+        `${JSON.stringify(health, null, 2)}\n`,
+        'application/json',
+      );
+      return session;
     } catch (error) {
-      await client.finishSession().catch(() => undefined);
+      if (sessionStarted) await client.finishSession().catch(() => undefined);
       throw error;
     }
-    const supportedActions = new Set(
-      capabilities.actions.map((capability) => capability.action),
-    );
-    const session = new ScreenReaderSession(
-      page,
-      client,
-      options,
-      testInfo,
-      health,
-      supportedActions,
-    );
-    session.currentCursor = cursor;
-    if (options.overlay) {
-      await installOverlay(page);
-      await updateOverlay(page, 'Screen reader ready', `${health.screenReader.name} ${health.screenReader.version}`);
-    }
-    await attachEvidenceFile(
-      testInfo,
-      'screen-reader-runtime.json',
-      `${JSON.stringify(health, null, 2)}\n`,
-      'application/json',
-    );
-    return session;
   }
 
   async act(action: ScreenReaderAction): Promise<ScreenReaderObservation> {
@@ -133,7 +145,6 @@ export class ScreenReaderSession {
             response.timedOut ?? false,
             action,
             label,
-            response.lastSequence,
           )
         : await this.collect(response.afterSequence, action, label);
       await this.afterObservation(observation);
@@ -167,7 +178,7 @@ export class ScreenReaderSession {
         return await this.relabelLastObservation(observation, 'focus', label);
       }
     }
-    throw new Error(`${label} target was not reached after 100 physical Tab gestures`);
+    throw new Error(`${label} target was not reached after 100 screen-reader Tab gestures`);
   }
 
   async observe<T>(
@@ -176,8 +187,12 @@ export class ScreenReaderSession {
     action: 'focus' | 'observe' = 'observe',
   ): Promise<ScreenReaderObservation> {
     return await playwrightTest.step(`Screen reader: ${label}`, async () => {
-      const afterSequence = await this.client.cursor();
       await this.show(label, 'Listening...');
+      // Establish a quiet baseline before the operation. Otherwise late audio
+      // from the previous step can start the event quiet timer and let a
+      // delayed accessibility mutation escape this observation.
+      await this.page.waitForTimeout(this.options.quietMs);
+      const afterSequence = await this.client.cursor();
       await operation();
       const observation = await this.collect(afterSequence, action, label);
       await this.afterObservation(observation);
@@ -187,6 +202,24 @@ export class ScreenReaderSession {
 
   async checkpoint(): Promise<number> {
     return await this.client.cursor();
+  }
+
+  async state(): Promise<ScreenReaderState> {
+    return await this.client.state();
+  }
+
+  async presentationSettings(): Promise<ScreenReaderPresentationSettings> {
+    return await this.client.presentationSettings();
+  }
+
+  async setPresentationSettings(
+    settings: ScreenReaderPresentationSettings,
+  ): Promise<ScreenReaderPresentationSettings> {
+    return await this.client.setPresentationSettings(settings);
+  }
+
+  async resetPresentationSettings(): Promise<ScreenReaderPresentationSettings> {
+    return await this.client.resetPresentationSettings();
   }
 
   async readFrom(
@@ -231,10 +264,7 @@ export class ScreenReaderSession {
           brailleEvents = (focusBraille.length > 0 ? focusBraille : brailleEvents).slice(-1);
         } else if (observation.action !== 'observe') {
           const commands = new Set<string>([observation.action]);
-          if (
-            observation.action === 'activate' ||
-            observation.action === 'activateWithSpace'
-          ) {
+          if (observation.action === 'activate' || observation.action === 'activateWithSpace') {
             commands.add('event');
           }
           speechEvents = speechEvents.filter(({ command }) => commands.has(command));
@@ -272,6 +302,21 @@ export class ScreenReaderSession {
     return await this.captureScreenshot(name, locator);
   }
 
+  async captureAriaSnapshot(
+    name = 'page',
+    locator: Locator = this.page.locator('body'),
+  ): Promise<string> {
+    if (this.page.isClosed()) throw new Error('cannot capture ARIA snapshot from a closed page');
+    const rawYaml = await locator.ariaSnapshot({
+      timeout: this.options.actionTimeoutMs,
+    });
+    const yaml = await redactProtectedAriaValues(this.page, rawYaml, this.options.actionTimeoutMs);
+    const filename = `screen-reader-${slug(name)}.aria.yml`;
+    await attachEvidenceFile(this.testInfo, filename, `${yaml.trimEnd()}\n`, 'application/yaml');
+    if (name === 'page') this.pageAriaSnapshotCaptured = true;
+    return yaml;
+  }
+
   async captureElement(name: string, locator: Locator): Promise<ScreenReaderObservation> {
     const observation = await this.focus(locator, `Focus ${name}`);
     await this.captureScreenshot(name, locator);
@@ -281,16 +326,38 @@ export class ScreenReaderSession {
   async captureElements(
     captures: readonly ElementCapture[],
   ): Promise<readonly ScreenReaderObservation[]> {
+    if (captures.length < 1 || captures.length > 500) {
+      throw new Error('captureElements requires between 1 and 500 elements');
+    }
+    const names = captures.map(({ name }) => name.trim());
+    if (
+      names.some((name) => name.length === 0 || Buffer.byteLength(name) > 200) ||
+      new Set(names).size !== names.length
+    ) {
+      throw new Error('captureElements names must be unique and contain 1 to 200 bytes');
+    }
     const observations: ScreenReaderObservation[] = [];
-    const manifest: Array<{ name: string; speech: string; braille: string; timedOut: boolean }> = [];
+    const manifest: Array<{
+      name: string;
+      screenshot: string;
+      speech: string;
+      braille: string;
+      timedOut: boolean;
+      provenance: string[];
+    }> = [];
     for (const capture of captures) {
-      const observation = await this.captureElement(capture.name, capture.locator);
+      const observation = await this.focus(capture.locator, `Focus ${capture.name}`);
+      const screenshot = await this.captureScreenshot(capture.name, capture.locator);
       observations.push(observation);
       manifest.push({
         name: capture.name,
+        screenshot: basename(screenshot),
         speech: observation.speech,
         braille: observation.braille,
         timedOut: observation.timedOut,
+        provenance: [
+          ...new Set(observation.events.flatMap((event) => event.provenance ?? [])),
+        ].sort(),
       });
     }
     await attachEvidenceFile(
@@ -314,28 +381,26 @@ export class ScreenReaderSession {
     let stoppedOnBoundary = false;
     for (let index = 0; index < max; index += 1) {
       const observation = await this.act(options.action);
-      if (
-        observation.events.some(
-          (event) =>
-            event.reason === 'navigationBoundary' || event.reason === 'tableBoundary',
-        )
-      ) {
+      if (isNavigationBoundary(observation)) {
         stoppedOnBoundary = true;
         break;
       }
-      observations.push(observation);
-      if (options.screenshots) {
-        screenshots.push(await this.captureScreenshot(`${options.name}-${index + 1}`));
-      }
       const source = observation.speechEvents.find((event) => event.source)?.source;
+      const navigator = source ? undefined : (await this.state()).navigator;
       const key = source
         ? `${source.bus}:${source.path}`
-        : observation.speech.trim();
+        : [navigator?.id, observation.speech.trim(), observation.braille.trim()]
+            .filter(Boolean)
+            .join('\u001f');
       if (options.stopOnRepeat !== false && key && seen.has(key)) {
         stoppedOnRepeat = true;
         break;
       }
       if (key) seen.add(key);
+      observations.push(observation);
+      if (options.screenshots) {
+        screenshots.push(await this.captureScreenshot(`${options.name}-${index + 1}`));
+      }
     }
     return {
       observations,
@@ -346,52 +411,144 @@ export class ScreenReaderSession {
     };
   }
 
-  async capturePageElements(options: {
-    maxPerKind?: number;
-    screenshots?: boolean;
-  } = {}): Promise<Readonly<Record<string, ScanResult>>> {
+  async capturePageElements(
+    options: {
+      maxPerKind?: number;
+      screenshots?: boolean;
+    } = {},
+  ): Promise<Readonly<Record<string, ScanResult>>> {
     const max = options.maxPerKind ?? 100;
     if (!Number.isInteger(max) || max < 1 || max > 500) {
       throw new Error('capturePageElements maxPerKind must be an integer between 1 and 500');
     }
     const groups = [
-      ['headings', 'nextHeading'],
-      ['landmarks', 'nextLandmark'],
-      ['buttons', 'nextButton'],
-      ['form-fields', 'nextFormField'],
-      ['links', 'nextLink'],
-      ['lists', 'nextList'],
-      ['list-items', 'nextListItem'],
-      ['tables', 'nextTable'],
-      ['graphics', 'nextImage'],
-      ['checkboxes', 'nextCheckbox'],
-      ['radio-buttons', 'nextRadioButton'],
-      ['combo-boxes', 'nextCombobox'],
-      ['edit-fields', 'nextEntry'],
-      ['text-paragraphs', 'nextParagraph'],
-      ['frames', 'nextFrame'],
-      ['separators', 'nextSeparator'],
-      ['block-quotes', 'nextBlockQuote'],
-      ['embedded-objects', 'nextEmbeddedObject'],
-      ['annotations', 'nextAnnotation'],
-      ['spelling-errors', 'nextSpellingError'],
-      ['non-link-text', 'nextNotLinkBlock'],
+      ['headings', 'nextHeading', 'previousHeading', 'heading'],
+      ['landmarks', 'nextLandmark', 'previousLandmark', 'landmark'],
+      ['articles', 'nextArticle', 'previousArticle', 'article'],
+      ['figures', 'nextFigure', 'previousFigure', 'figure'],
+      ['groupings', 'nextGrouping', 'previousGrouping', 'grouping'],
+      ['tabs', 'nextTab', 'previousTab', 'tab'],
+      ['menu-items', 'nextMenuItem', 'previousMenuItem', 'menuItem'],
+      ['toggle-buttons', 'nextToggleButton', 'previousToggleButton', 'toggleButton'],
+      ['progress-bars', 'nextProgressBar', 'previousProgressBar', 'progressBar'],
+      ['references', 'nextReference', 'previousReference', 'reference'],
+      ['math', 'nextMathFormula', 'previousMathFormula', 'math'],
+      ['vertical-paragraphs', 'nextVerticalParagraph', 'previousVerticalParagraph', undefined],
+      ['same-style-text', 'nextSameStyle', 'previousSameStyle', undefined],
+      ['different-style-text', 'nextDifferentStyle', 'previousDifferentStyle', undefined],
+      ['buttons', 'nextButton', 'previousButton', 'button'],
+      ['form-fields', 'nextFormField', 'previousFormField', 'formField'],
+      ['links', 'nextLink', 'previousLink', 'link'],
+      ['visited-links', 'nextVisitedLink', 'previousVisitedLink', 'visitedLink'],
+      ['unvisited-links', 'nextUnvisitedLink', 'previousUnvisitedLink', 'unvisitedLink'],
+      ['lists', 'nextList', 'previousList', 'list'],
+      ['list-items', 'nextListItem', 'previousListItem', 'listItem'],
+      ['tables', 'nextTable', 'previousTable', 'table'],
+      ['graphics', 'nextImage', 'previousImage', 'graphic'],
+      ['checkboxes', 'nextCheckbox', 'previousCheckbox', 'checkBox'],
+      ['radio-buttons', 'nextRadioButton', 'previousRadioButton', 'radioButton'],
+      ['combo-boxes', 'nextCombobox', 'previousCombobox', 'comboBox'],
+      ['edit-fields', 'nextEntry', 'previousEntry', 'edit'],
+      ['text-paragraphs', 'nextParagraph', 'previousParagraph', 'textParagraph'],
+      ['frames', 'nextFrame', 'previousFrame', 'frame'],
+      ['separators', 'nextSeparator', 'previousSeparator', 'separator'],
+      ['block-quotes', 'nextBlockQuote', 'previousBlockQuote', 'blockQuote'],
+      ['embedded-objects', 'nextEmbeddedObject', 'previousEmbeddedObject', 'embeddedObject'],
+      ['annotations', 'nextAnnotation', 'previousAnnotation', 'annotation'],
+      ['spelling-errors', 'nextSpellingError', 'previousSpellingError', 'error'],
+      ['non-link-text', 'nextNotLinkBlock', 'previousNotLinkBlock', 'notLinkBlock'],
     ] as const;
     const results: Record<string, ScanResult> = {};
-    for (const [name, action] of groups) {
-      await this.act('documentStart');
-      results[name] = await this.scan({
-        action,
-        name,
-        max,
-        screenshots: options.screenshots ?? true,
+    const screenshotsEnabled = options.screenshots ?? true;
+    for (const [name, nextAction, previousAction, target] of groups) {
+      const start = await this.act('documentStart');
+      const browse = (await this.state()).browse;
+      const includeStart =
+        target !== undefined && browse?.quickNavigationTargets?.includes(target) === true;
+      const startScreenshots =
+        includeStart && screenshotsEnabled
+          ? [await this.captureScreenshot(`${name}-1`)]
+          : [];
+      if (includeStart && max === 1) {
+        results[name] = {
+          observations: [start],
+          screenshots: startScreenshots,
+          stoppedOnRepeat: false,
+          stoppedOnBoundary: false,
+          stopReason: 'max',
+        };
+        continue;
+      }
+
+      const before = await this.scan({
+        action: previousAction,
+        name: `${name}-before-start`,
+        max: max - (includeStart ? 1 : 0),
+        screenshots: screenshotsEnabled,
         stopOnRepeat: true,
       });
+      const beforeObservations = [...before.observations].reverse();
+      const beforeScreenshots = [...before.screenshots].reverse();
+      const observations = [
+        ...beforeObservations,
+        ...(includeStart ? [start] : []),
+      ];
+      const screenshots = [
+        ...beforeScreenshots,
+        ...startScreenshots,
+      ];
+      const remaining = max - observations.length;
+
+      let after: ScanResult | undefined;
+      if (remaining > 0 && before.stopReason !== 'max') {
+        // A failed reverse quick-navigation command may still change native
+        // screen-reader browse state. Re-establish the origin unconditionally.
+        await this.act('documentStart');
+        after = await this.scan({
+          action: nextAction,
+          name: `${name}-after-start`,
+          max: remaining,
+          screenshots: screenshotsEnabled,
+          stopOnRepeat: true,
+        });
+        observations.push(...after.observations);
+        screenshots.push(...after.screenshots);
+      }
+
+      const stoppedOnRepeat = before.stoppedOnRepeat || (after?.stoppedOnRepeat ?? false);
+      const stoppedOnBoundary =
+        before.stoppedOnBoundary && (after?.stoppedOnBoundary ?? false);
+      results[name] = {
+        observations,
+        screenshots,
+        stoppedOnRepeat,
+        stoppedOnBoundary,
+        stopReason: stoppedOnBoundary ? 'boundary' : stoppedOnRepeat ? 'repeat' : 'max',
+      };
     }
+    const manifest = Object.fromEntries(
+      Object.entries(results).map(([name, result]) => [
+        name,
+        {
+          stopReason: result.stopReason,
+          items: result.observations.map((observation, index) => ({
+            index: index + 1,
+            screenshot: result.screenshots[index]
+              ? basename(result.screenshots[index]!)
+              : undefined,
+            speech: observation.speech,
+            braille: observation.braille,
+            provenance: [
+              ...new Set(observation.events.flatMap((event) => event.provenance ?? [])),
+            ].sort(),
+          })),
+        },
+      ]),
+    );
     await attachEvidenceFile(
       this.testInfo,
       'screen-reader-page-elements.json',
-      `${JSON.stringify(results, null, 2)}\n`,
+      `${JSON.stringify(manifest, null, 2)}\n`,
       'application/json',
     );
     return results;
@@ -433,30 +590,76 @@ export class ScreenReaderSession {
     return await this.act('elementsList');
   }
 
+  async brailleRoute(cell = 0): Promise<ScreenReaderObservation> {
+    return await this.brailleCellAction('brailleRoute', cell);
+  }
+
+  async brailleFormatting(cell = 0): Promise<ScreenReaderObservation> {
+    return await this.brailleCellAction('brailleReportFormatting', cell);
+  }
+
+  private async brailleCellAction(
+    action: 'brailleRoute' | 'brailleReportFormatting',
+    cell: number,
+  ): Promise<ScreenReaderObservation> {
+    if (!Number.isInteger(cell) || cell < 0 || cell > 199) {
+      throw new Error('braille cell must be an integer from 0 to 199');
+    }
+    if (this.health.protocolVersion !== 2) {
+      throw new Error('braille cell routing requires a protocol v2 adapter');
+    }
+    if (!this.supportedActions.has(action)) {
+      throw new Error(
+        `${this.health.screenReader.name} runtime does not support screen-reader action ${action}`,
+      );
+    }
+    const label = `${SCREEN_READER_ACTIONS[action]} ${cell}`;
+    return await playwrightTest.step(`Screen reader: ${label}`, async () => {
+      await this.show(label, 'Listening...');
+      const response = await this.client.perform(action, String(cell));
+      if (response.delivery !== 'structured') {
+        throw new Error(
+          `${this.health.screenReader.name} ${action} response did not confirm structured delivery`,
+        );
+      }
+      const observation = this.observation(
+        response.events ?? [],
+        response.timedOut ?? false,
+        action,
+        label,
+      );
+      await this.afterObservation(observation);
+      return observation;
+    });
+  }
+
   async findText(query: string): Promise<ScreenReaderObservation> {
     const normalized = query.trim();
     if (normalized.length === 0 || Buffer.byteLength(normalized) > 500) {
       throw new Error('findText query must contain 1 to 500 bytes');
     }
-    if (this.health.screenReader.name !== 'hoovda') {
-      throw new Error('findText structured query input requires HooVDA');
+    if (this.health.protocolVersion !== 2) {
+      throw new Error('findText structured query input requires a protocol v2 adapter');
     }
     if (!this.supportedActions.has('find')) {
-      throw new Error('HooVDA runtime does not support screen-reader action find');
+      throw new Error(
+        `${this.health.screenReader.name} runtime does not support screen-reader action find`,
+      );
     }
     const label = `Find: ${normalized}`;
     return await playwrightTest.step(`Screen reader: ${label}`, async () => {
       await this.show(label, 'Listening...');
       const response = await this.client.perform('find', normalized);
       if (response.delivery !== 'structured') {
-        throw new Error('HooVDA find response did not confirm structured query delivery');
+        throw new Error(
+          `${this.health.screenReader.name} find response did not confirm structured query delivery`,
+        );
       }
       const observation = this.observation(
         response.events ?? [],
         response.timedOut ?? false,
         'find',
         label,
-        response.lastSequence,
       );
       await this.afterObservation(observation);
       return observation;
@@ -475,18 +678,7 @@ export class ScreenReaderSession {
     await this.page.waitForTimeout(this.options.quietMs);
     const pageContextReady = async (): Promise<boolean> => {
       const state = await this.client.state();
-      if (state.focus.webContentFocused) return true;
-      // Chromium sometimes reports its selected tab wrapper as the final
-      // AT-SPI focus object even though the active document and HooVDA browse
-      // buffer remain live. Require all independent signals before accepting
-      // that known browser event-ordering case.
-      return (
-        this.health.screenReader.name === 'hoovda' &&
-        state.focus.browserWindowActive &&
-        state.cursorMode === 'browse' &&
-        state.virtualBufferActive === true &&
-        (await this.page.evaluate(() => document.hasFocus()))
-      );
+      return state.focus.webContentFocused;
     };
     if (await pageContextReady()) return;
     for (let attempt = 0; attempt < maxGestures; attempt += 1) {
@@ -494,13 +686,39 @@ export class ScreenReaderSession {
       if (await pageContextReady()) return;
     }
     throw new Error(
-      `web-content focus was not verified after ${maxGestures} physical F6 gestures`,
+      `web-content focus was not verified after ${maxGestures} screen-reader F6 gestures`,
     );
+  }
+
+  async ensureBrowseMode(): Promise<void> {
+    await this.ensureCursorMode('browse');
+  }
+
+  async ensureFocusMode(): Promise<void> {
+    await this.ensureCursorMode('focus');
+  }
+
+  private async ensureCursorMode(expected: 'browse' | 'focus'): Promise<void> {
+    const before = await this.client.state();
+    if (before.cursorMode === expected) return;
+    if (before.cursorMode !== 'browse' && before.cursorMode !== 'focus') {
+      throw new Error(`screen-reader cursor mode is unavailable; expected ${expected}`);
+    }
+    await this.act('toggleFocusMode');
+    const after = await this.client.state();
+    if (after.cursorMode !== expected) {
+      throw new Error(
+        `screen-reader cursor mode did not become ${expected}; got ${after.cursorMode ?? 'unknown'}`,
+      );
+    }
   }
 
   async finish(): Promise<void> {
     let evidenceError: unknown;
     try {
+      if (!this.pageAriaSnapshotCaptured && !this.page.isClosed()) {
+        await this.captureAriaSnapshot();
+      }
       await attachEvidenceFile(
         this.testInfo,
         'screen-reader-flow.txt',
@@ -545,7 +763,6 @@ export class ScreenReaderSession {
       response.timedOut,
       action,
       label,
-      response.lastSequence,
     );
   }
 
@@ -554,33 +771,30 @@ export class ScreenReaderSession {
     timedOut: boolean,
     action: ScreenReaderObservation['action'],
     label: string,
-    lastSequence: number,
   ): ScreenReaderObservation {
-    this.currentCursor = Math.max(this.currentCursor, lastSequence);
-    const speechEvents = events.filter(
-      (event): event is SpeechEvent => event.kind === 'speech',
-    );
-    const brailleEvents = events.filter(
-      (event): event is BrailleEvent => event.kind === 'braille',
-    );
+    const speechEvents = events.filter((event): event is SpeechEvent => event.kind === 'speech');
+    const brailleEvents = events.filter((event): event is BrailleEvent => event.kind === 'braille');
     return {
       action,
       label,
       events,
       speechEvents,
       brailleEvents,
-      speech: speechEvents.map((event) => event.text).join(' ').trim(),
-      braille: brailleEvents.map((event) => event.text).join(' ').trim(),
+      speech: speechEvents
+        .map((event) => event.text)
+        .join(' ')
+        .trim(),
+      braille: brailleEvents
+        .map((event) => event.text)
+        .join(' ')
+        .trim(),
       timedOut,
     };
   }
 
   private async afterObservation(observation: ScreenReaderObservation): Promise<void> {
     this.entries.push({ index: this.entries.length + 1, observation });
-    await this.show(
-      observation.label,
-      formatOverlayOutput(observation),
-    );
+    await this.show(observation.label, formatOverlayOutput(observation));
     if (this.options.actionScreenshots === 'on') {
       await this.captureScreenshot(`${this.entries.length}-${observation.action}`);
     }
@@ -679,6 +893,57 @@ function isDeepActiveElement(element: Element): boolean {
   return active === element;
 }
 
+async function assertNativeViewport(page: Page): Promise<void> {
+  const geometry = await page.evaluate(() => ({
+    innerWidth,
+    innerHeight,
+    outerWidth,
+    outerHeight,
+  }));
+  if (
+    geometry.outerWidth <= 0 ||
+    geometry.outerHeight <= 0 ||
+    geometry.innerWidth > geometry.outerWidth ||
+    geometry.innerHeight >= geometry.outerHeight
+  ) {
+    throw new Error(
+      `NVDA requires Playwright's native browser viewport; use defineConfig from @openhoo/hoosaidthat or set use.viewport=null (${JSON.stringify(geometry)})`,
+    );
+  }
+}
+
+async function redactProtectedAriaValues(
+  page: Page,
+  yaml: string,
+  timeout: number,
+): Promise<string> {
+  let redacted = yaml;
+  const protectedControls = page.locator(
+    'input[type="password"], input[autocomplete="current-password" i], input[autocomplete="new-password" i]',
+  );
+  const count = await protectedControls.count();
+  for (let index = 0; index < count; index += 1) {
+    const control = protectedControls.nth(index);
+    const [protectedSnapshot, protectedValue] = await Promise.all([
+      control.ariaSnapshot({ timeout }).then((value) => value.trim()),
+      control.inputValue({ timeout }),
+    ]);
+    // Locator snapshots can differ from their page-level representation. Remove
+    // the complete protected subtree first, then scrub the literal value as a
+    // fail-closed fallback. Never put protected content in an error message.
+    if (protectedSnapshot) {
+      redacted = redacted.replaceAll(protectedSnapshot, '- textbox: [redacted]');
+    }
+    if (protectedValue) {
+      redacted = redacted.replaceAll(protectedValue, '[redacted]');
+      if (redacted.includes(protectedValue)) {
+        throw new Error('failed to redact a protected control from the ARIA snapshot');
+      }
+    }
+  }
+  return redacted;
+}
+
 function slug(value: string): string {
   const normalized = value
     .normalize('NFKD')
@@ -689,9 +954,22 @@ function slug(value: string): string {
 }
 
 function formatOverlayOutput(observation: ScreenReaderObservation): string {
-  const speech = observation.speech ||
-    (observation.timedOut ? '(no speech before timeout)' : '(no speech)');
+  const speech =
+    observation.speech || (observation.timedOut ? '(no speech before timeout)' : '(no speech)');
   return observation.braille ? `${speech}\nBraille: ${observation.braille}` : speech;
+}
+
+function isNavigationBoundary(observation: ScreenReaderObservation): boolean {
+  if (
+    observation.events.some(
+      (event) => event.reason === 'navigationBoundary' || event.reason === 'tableBoundary',
+    )
+  ) {
+    return true;
+  }
+  return /(?:^|\b)(?:no (?:next|previous|more)|not supported in this document|keine? (?:weitere|vorherige|unterstützung)|kein (?:weiterer|vorheriger)|nicht unterstützt)(?:\b|$)/iu.test(
+    `${observation.speech}\n${observation.braille}`,
+  );
 }
 
 async function attachEvidenceFile(
@@ -722,5 +1000,8 @@ async function attachBinaryEvidenceFile(
   const path = testInfo.outputPath('screenreader', `${artifact.name}.${extension}`);
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, artifact.body, { mode: 0o600 });
-  await testInfo.attach(artifact.name, { path, contentType: artifact.contentType });
+  await testInfo.attach(artifact.name, {
+    path,
+    contentType: artifact.contentType,
+  });
 }

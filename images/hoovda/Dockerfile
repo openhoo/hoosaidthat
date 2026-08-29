@@ -73,6 +73,6 @@ WORKDIR /tmp/hoosaidthat
 EXPOSE 3000 9222
 STOPSIGNAL SIGTERM
 HEALTHCHECK --interval=5s --timeout=2s --start-period=20s --retries=3 \
-  CMD curl --fail --silent --show-error --max-time 1 --header "Authorization: Bearer $${HST_CONTROL_TOKEN}" "http://127.0.0.1:$${HST_CONTROL_PORT}/v2/health" >/dev/null || exit 1
+  CMD curl --fail --silent --show-error --max-time 1 --header "Authorization: Bearer ${HST_CONTROL_TOKEN}" "http://127.0.0.1:${HST_CONTROL_PORT}/v2/health" >/dev/null || exit 1
 
 ENTRYPOINT ["/usr/bin/tini", "--", "/opt/hoosaidthat/entrypoint.sh"]

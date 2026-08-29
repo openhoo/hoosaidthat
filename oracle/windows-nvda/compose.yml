@@ -1,0 +1,42 @@
+services:
+  hoosaidthat-nvda-oracle:
+    image: docker.io/dockurr/windows@sha256:0cff9eb0e7aee9953e55bc682852ca4fdca233145a58ae1ec94f0b0c01a2ed30
+    container_name: hoosaidthat-nvda-oracle
+    hostname: HST-NVDA-ORACLE
+    stop_grace_period: 2m
+    restart: "on-failure:3"
+    environment:
+      HOST: HST-NVDA-ORACLE
+      VERSION: "11"
+      CPU_CORES: "6"
+      RAM_SIZE: "8G"
+      DISK_SIZE: "96G"
+      DISK_TYPE: scsi
+      DISK_FMT: raw
+      ALLOCATE: "N"
+      WIDTH: "1920"
+      HEIGHT: "1080"
+      AUDIO: "Y"
+      LANGUAGE: English
+      REGION: en-US
+      KEYBOARD: en-US
+      USERNAME: HstOracle
+      PASSWORD: "${WINDOWS_PASSWORD:?WINDOWS_PASSWORD must be set}"
+      VERIFY: "Y"
+      USER_PORTS: "22,3000,9222"
+    devices:
+      - /dev/kvm:/dev/kvm
+      - /dev/net/tun:/dev/net/tun
+    cap_add:
+      - NET_ADMIN
+    ports:
+      - 127.0.0.1:8008:8006/tcp
+      - 127.0.0.1:3392:3389/tcp
+      - 127.0.0.1:3392:3389/udp
+      - 127.0.0.1:2224:22/tcp
+      - 127.0.0.1:3002:3000/tcp
+      - 127.0.0.1:9224:9222/tcp
+    volumes:
+      - ${HST_NVDA_STATE:?HST_NVDA_STATE must be set}:/storage:Z
+      - ${HST_NVDA_SHARED:?HST_NVDA_SHARED must be set}:/shared:Z
+      - ${HST_NVDA_OEM:?HST_NVDA_OEM must be set}:/oem:ro,Z

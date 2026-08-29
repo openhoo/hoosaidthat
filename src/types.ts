@@ -71,6 +71,30 @@ export const SCREEN_READER_ACTIONS = {
   previousSpellingError: 'Previous spelling or grammar error',
   nextNotLinkBlock: 'Next text after block of links',
   previousNotLinkBlock: 'Previous text after block of links',
+  nextArticle: 'Next article',
+  previousArticle: 'Previous article',
+  nextFigure: 'Next figure',
+  previousFigure: 'Previous figure',
+  nextGrouping: 'Next grouping',
+  previousGrouping: 'Previous grouping',
+  nextTab: 'Next tab',
+  previousTab: 'Previous tab',
+  nextMenuItem: 'Next menu item',
+  previousMenuItem: 'Previous menu item',
+  nextToggleButton: 'Next toggle button',
+  previousToggleButton: 'Previous toggle button',
+  nextProgressBar: 'Next progress bar',
+  previousProgressBar: 'Previous progress bar',
+  nextReference: 'Next reference',
+  previousReference: 'Previous reference',
+  nextMathFormula: 'Next math formula',
+  previousMathFormula: 'Previous math formula',
+  nextVerticalParagraph: 'Next vertically aligned paragraph',
+  previousVerticalParagraph: 'Previous vertically aligned paragraph',
+  nextSameStyle: 'Next same style text',
+  previousSameStyle: 'Previous same style text',
+  nextDifferentStyle: 'Next different style text',
+  previousDifferentStyle: 'Previous different style text',
   nextCharacter: 'Next character',
   previousCharacter: 'Previous character',
   nextWord: 'Next word',
@@ -81,6 +105,11 @@ export const SCREEN_READER_ACTIONS = {
   previousParagraphText: 'Previous paragraph by text',
   documentStart: 'Start of document',
   documentEnd: 'End of document',
+  moveToContainerStart: 'Move to start of containing element',
+  movePastContainerEnd: 'Move past end of containing element',
+  refreshBrowseDocument: 'Refresh browse-mode document',
+  exitEmbeddedObject: 'Exit current embedded object',
+  toggleNativeSelection: 'Toggle native selection mode',
   previousTableColumn: 'Previous table column',
   nextTableColumn: 'Next table column',
   previousTableRow: 'Previous table row',
@@ -92,6 +121,70 @@ export const SCREEN_READER_ACTIONS = {
   readCurrent: 'Read current location',
   reportDetails: 'Report details',
   sayAll: 'Read from current location',
+  reportTitle: 'Report window title',
+  readActiveWindow: 'Read active window',
+  reportShortcutKey: 'Report focused element shortcut key',
+  reportCurrentLine: 'Report current line',
+  reportTextSelection: 'Report current text selection',
+  reportTextFormatting: 'Report text formatting at caret',
+  reportLanguage: 'Report language at caret',
+  reportLinkDestination: 'Report link destination',
+  reportCaretLocation: 'Report caret location',
+  sayAllTableColumn: 'Read table column from current cell',
+  sayAllTableRow: 'Read table row from current cell',
+  readTableColumn: 'Read complete table column',
+  readTableRow: 'Read complete table row',
+  reportCurrentObject: 'Report current navigator object',
+  moveToContainingObject: 'Move to containing object',
+  moveToPreviousObject: 'Move to previous sibling object',
+  moveToPreviousObjectFlat: 'Move to previous object in flattened view',
+  moveToNextObject: 'Move to next sibling object',
+  moveToNextObjectFlat: 'Move to next object in flattened view',
+  moveToFirstContainedObject: 'Move to first contained object',
+  moveToFocusObject: 'Move navigator object to focus',
+  activateNavigatorObject: 'Activate navigator object',
+  moveFocusToReviewPosition: 'Move focus to review position',
+  reportReviewLocation: 'Report review cursor location',
+  reviewTopLine: 'Move review cursor to top line',
+  reviewPreviousLine: 'Move review cursor to previous line',
+  reviewCurrentLine: 'Report current review line',
+  reviewNextLine: 'Move review cursor to next line',
+  reviewBottomLine: 'Move review cursor to bottom line',
+  reviewPreviousWord: 'Move review cursor to previous word',
+  reviewCurrentWord: 'Report current review word',
+  reviewNextWord: 'Move review cursor to next word',
+  reviewLineStart: 'Move review cursor to line start',
+  reviewPreviousCharacter: 'Move review cursor to previous character',
+  reviewCurrentCharacter: 'Report current review character',
+  reviewNextCharacter: 'Move review cursor to next character',
+  reviewLineEnd: 'Move review cursor to line end',
+  reviewPreviousPage: 'Move review cursor to previous page',
+  reviewNextPage: 'Move review cursor to next page',
+  reviewSelectionStart: 'Move review cursor to selection start',
+  reviewSelectionEnd: 'Move review cursor to selection end',
+  sayAllReview: 'Read from review cursor',
+  setReviewCopyStart: 'Mark review copy start',
+  copyToReviewPosition: 'Select text through review position',
+  moveToReviewCopyStart: 'Move review cursor to copy start',
+  reportReviewFormatting: 'Report formatting at review cursor',
+  nextReviewMode: 'Switch to next review mode',
+  previousReviewMode: 'Switch to previous review mode',
+  leftMouseClick: 'Click left mouse button',
+  leftMouseLock: 'Toggle left mouse button lock',
+  rightMouseClick: 'Click right mouse button',
+  rightMouseLock: 'Toggle right mouse button lock',
+  moveMouseToNavigatorObject: 'Move mouse to navigator object',
+  moveNavigatorToMouseObject: 'Move navigator object to mouse object',
+  stopSpeech: 'Stop speech',
+  pauseSpeech: 'Pause or resume speech',
+  cycleSpeechMode: 'Cycle speech mode',
+  braillePanBack: 'Pan braille display back',
+  braillePanForward: 'Pan braille display forward',
+  braillePreviousLine: 'Move braille display to previous line',
+  brailleNextLine: 'Move braille display to next line',
+  brailleRoute: 'Route braille cell',
+  brailleToggleTether: 'Toggle braille tether',
+  brailleReportFormatting: 'Report formatting at braille cell',
   toggleFocusMode: 'Toggle browse or focus mode',
   toggleSingleLetterNavigation: 'Toggle single letter navigation',
   elementsList: 'Elements list',
@@ -101,7 +194,48 @@ export const SCREEN_READER_ACTIONS = {
 } as const;
 
 export type ScreenReaderAction = keyof typeof SCREEN_READER_ACTIONS;
-export type ScreenReaderName = 'orca' | 'hoovda';
+
+/**
+ * Commands exposed by NVDA without a default keyboard gesture. Adapters invoke
+ * NVDA's real browse-mode script and report structured delivery explicitly.
+ */
+export const STRUCTURED_SCREEN_READER_ACTIONS = new Set<ScreenReaderAction>([
+  'nextArticle',
+  'previousArticle',
+  'nextFigure',
+  'previousFigure',
+  'nextGrouping',
+  'previousGrouping',
+  'nextTab',
+  'previousTab',
+  'nextMenuItem',
+  'previousMenuItem',
+  'nextToggleButton',
+  'previousToggleButton',
+  'nextProgressBar',
+  'previousProgressBar',
+  'nextReference',
+  'previousReference',
+  'nextMathFormula',
+  'previousMathFormula',
+  'nextVerticalParagraph',
+  'previousVerticalParagraph',
+  'nextSameStyle',
+  'previousSameStyle',
+  'nextDifferentStyle',
+  'previousDifferentStyle',
+  'reportLanguage',
+  'reportCaretLocation',
+  'stopSpeech',
+  'pauseSpeech',
+  'braillePanBack',
+  'braillePanForward',
+  'braillePreviousLine',
+  'brailleNextLine',
+  'brailleRoute',
+  'brailleReportFormatting',
+]);
+export type ScreenReaderName = 'orca' | 'hoovda' | 'nvda';
 export type ScreenReaderProfile = 'nvda-web-2026.1.1';
 export type ScreenReaderLocale = 'en-US' | 'de-DE';
 export type KeyboardLayout = 'desktop' | 'laptop';
@@ -110,7 +244,8 @@ export type ActionScreenshotMode = 'off' | 'on';
 export type RecordingMode = 'off' | 'on';
 export type CaptureBoundary =
   | 'speech-dispatcher-output-module'
-  | 'hoovda-structured-presentation';
+  | 'hoovda-structured-presentation'
+  | 'nvda-presentation-hooks';
 
 export interface ScreenReaderOptions {
   screenReader?: ScreenReaderName;
@@ -131,6 +266,48 @@ export interface ScreenReaderOptions {
   keepContainer?: boolean;
   containerEngineArgs?: readonly string[];
   viewport?: { width: number; height: number };
+}
+
+export type SpeechSymbolLevel = 'none' | 'some' | 'most' | 'all' | 'character';
+export type BrailleTether = 'auto' | 'focus' | 'review';
+export type FontAttributeReporting = 'off' | 'speech' | 'braille' | 'speechAndBraille';
+export type TableHeaderReporting = 'off' | 'rowsAndColumns' | 'rows' | 'columns';
+export type SpellingErrorChannel = 'speech' | 'sound' | 'braille';
+
+/** Web-relevant presentation preferences pinned for one screen-reader session. */
+export interface ScreenReaderPresentationSettings {
+  speechSymbolLevel: SpeechSymbolLevel;
+  brailleTether: BrailleTether;
+  reportKeyboardShortcuts: boolean;
+  reportObjectPositionInformation: boolean;
+  reportObjectDescriptions: boolean;
+  reportDynamicContentChanges: boolean;
+  reportAriaDescription: boolean;
+  reportDetails: boolean;
+  reportFontName: boolean;
+  reportFontSize: boolean;
+  fontAttributeReporting: FontAttributeReporting;
+  reportColor: boolean;
+  reportStyle: boolean;
+  reportSpellingErrors: readonly SpellingErrorChannel[];
+  reportTables: boolean;
+  includeLayoutTables: boolean;
+  reportTableHeaders: TableHeaderReporting;
+  reportTableCellCoordinates: boolean;
+  reportLinks: boolean;
+  reportLinkType: boolean;
+  reportGraphics: boolean;
+  reportComments: boolean;
+  reportBookmarks: boolean;
+  reportLists: boolean;
+  reportHeadings: boolean;
+  reportBlockQuotes: boolean;
+  reportGroupings: boolean;
+  reportLandmarks: boolean;
+  reportArticles: boolean;
+  reportFrames: boolean;
+  reportFigures: boolean;
+  reportClickable: boolean;
 }
 
 export interface ResolvedScreenReaderOptions {
@@ -154,6 +331,13 @@ export interface ResolvedScreenReaderOptions {
   viewport: { width: number; height: number };
 }
 
+export type EventProvenance =
+  | 'screenReaderOutput'
+  | 'screenReaderEvent'
+  | 'accessibilityEvent'
+  | 'adapterLifecycle'
+  | 'synthesizedAudio';
+
 interface EventBase {
   sequence: number;
   monotonicNs: number;
@@ -162,6 +346,8 @@ interface EventBase {
   text: string;
   reason?: string;
   source?: AccessibleSource;
+  provenance?: EventProvenance;
+  redacted?: boolean;
 }
 
 export interface AccessibleSource {
@@ -196,7 +382,12 @@ export interface AudioEvent extends EventBase {
 }
 
 export interface LifecycleEvent extends EventBase {
-  kind: 'commandStarted' | 'commandSettled' | 'liveRegion';
+  kind: 'commandStarted' | 'commandSettled';
+}
+
+export interface LiveRegionEvent extends EventBase {
+  kind: 'liveRegion';
+  priority?: 'polite' | 'assertive';
 }
 
 export type ScreenReaderEvent =
@@ -205,7 +396,8 @@ export type ScreenReaderEvent =
   | FocusEvent
   | ModeEvent
   | AudioEvent
-  | LifecycleEvent;
+  | LifecycleEvent
+  | LiveRegionEvent;
 
 export interface ScreenReaderObservation {
   action: ScreenReaderAction | 'focus' | 'observe';
@@ -230,7 +422,7 @@ export interface ScreenReaderHealth {
   locale?: ScreenReaderLocale;
   keyboardLayout?: KeyboardLayout;
   browser?: { name: string; version: string; cdpPort: number };
-  platform: 'linux';
+  platform: 'linux' | 'windows';
 }
 
 export interface ScreenReaderCapabilities {
@@ -249,6 +441,38 @@ export interface ScreenReaderState {
     role: string | null;
     name: string | null;
   };
+  /** Runtime-native diagnostic state when the adapter can expose it safely. */
+  browse?: ScreenReaderRuntimeObject | null;
+  navigator?: ScreenReaderRuntimeObject | null;
+  review?: ScreenReaderRuntimeObject | null;
+  mouse?: {
+    x: number;
+    y: number;
+    object: ScreenReaderRuntimeObject | null;
+  };
+  speech?: {
+    mode: string;
+    paused: boolean;
+  };
+}
+
+export interface ScreenReaderRuntimeObject {
+  /** Opaque, session-local identity for repeat detection. */
+  id?: string;
+  role: string | null;
+  name: string | null;
+  /** Link visitation state when this object is a link. */
+  visited?: boolean;
+  /** True when the runtime intentionally withheld protected object text. */
+  redacted?: boolean;
+  /** Exact HooVDA quick-navigation predicates matched by this object. */
+  quickNavigationTargets?: readonly string[];
+  location: {
+    left: number;
+    top: number;
+    width: number;
+    height: number;
+  } | null;
 }
 
 export interface RuntimeEndpoints {
@@ -289,12 +513,10 @@ export interface ScanResult {
   stopReason: 'boundary' | 'repeat' | 'max';
 }
 
-export function resolveOptions(
-  options: ScreenReaderOptions = {},
-): ResolvedScreenReaderOptions {
+export function resolveOptions(options: ScreenReaderOptions = {}): ResolvedScreenReaderOptions {
   const screenReader = options.screenReader ?? 'orca';
-  if (screenReader !== 'orca' && screenReader !== 'hoovda') {
-    throw new Error('screenReaderOptions.screenReader must be "orca" or "hoovda"');
+  if (screenReader !== 'orca' && screenReader !== 'hoovda' && screenReader !== 'nvda') {
+    throw new Error('screenReaderOptions.screenReader must be "orca", "hoovda", or "nvda"');
   }
   const profile = options.profile ?? 'nvda-web-2026.1.1';
   if (profile !== 'nvda-web-2026.1.1') {
@@ -313,28 +535,38 @@ export function resolveOptions(
     throw new Error('screenReaderOptions.runtime is not supported');
   }
   const viewport = options.viewport ?? { width: 1280, height: 720 };
-  if (!Number.isInteger(viewport.width) || viewport.width < 320) {
-    throw new Error('screenReaderOptions.viewport.width must be an integer >= 320');
+  if (!Number.isInteger(viewport.width) || viewport.width < 320 || viewport.width > 8192) {
+    throw new Error('screenReaderOptions.viewport.width must be an integer between 320 and 8192');
   }
-  if (!Number.isInteger(viewport.height) || viewport.height < 240) {
-    throw new Error('screenReaderOptions.viewport.height must be an integer >= 240');
+  if (!Number.isInteger(viewport.height) || viewport.height < 240 || viewport.height > 8192) {
+    throw new Error('screenReaderOptions.viewport.height must be an integer between 240 and 8192');
   }
   const resolved: ResolvedScreenReaderOptions = {
     screenReader,
     profile,
     locale,
     keyboardLayout,
-    runtime: options.runtime ?? 'auto',
+    runtime: options.runtime ?? (screenReader === 'nvda' ? 'external' : 'auto'),
     image:
       options.image ??
       (screenReader === 'hoovda'
-        ? process.env.HOOSAIDTHAT_HOOVDA_IMAGE ?? 'ghcr.io/openhoo/hoosaidthat-hoovda:0.1.0'
-        : process.env.HOOSAIDTHAT_ORCA_IMAGE ?? 'ghcr.io/openhoo/hoosaidthat-orca:0.1.0'),
-    controlEndpoint: options.controlEndpoint,
-    cdpEndpoint: options.cdpEndpoint,
-    controlToken: options.controlToken,
+        ? (process.env.HOOSAIDTHAT_HOOVDA_IMAGE ?? 'ghcr.io/openhoo/hoosaidthat-hoovda:0.1.0')
+        : screenReader === 'nvda'
+          ? 'external:nvda-windows'
+          : (process.env.HOOSAIDTHAT_ORCA_IMAGE ?? 'ghcr.io/openhoo/hoosaidthat-orca:0.1.0')),
+    controlEndpoint:
+      options.controlEndpoint ??
+      (screenReader === 'nvda' ? process.env.HOOSAIDTHAT_NVDA_CONTROL_ENDPOINT : undefined),
+    cdpEndpoint:
+      options.cdpEndpoint ??
+      (screenReader === 'nvda' ? process.env.HOOSAIDTHAT_NVDA_CDP_ENDPOINT : undefined),
+    controlToken:
+      options.controlToken ??
+      (screenReader === 'nvda' ? process.env.HOOSAIDTHAT_NVDA_CONTROL_TOKEN : undefined),
     startupTimeoutMs: options.startupTimeoutMs ?? 60_000,
-    actionTimeoutMs: options.actionTimeoutMs ?? (screenReader === 'hoovda' ? 15_000 : 5_000),
+    actionTimeoutMs:
+      options.actionTimeoutMs ??
+      (screenReader === 'hoovda' || screenReader === 'nvda' ? 15_000 : 5_000),
     quietMs: options.quietMs ?? 300,
     overlay: options.overlay ?? true,
     recording: options.recording ?? 'on',
@@ -354,8 +586,11 @@ export function resolveOptions(
   }
   if (screenReader === 'hoovda' && resolved.actionTimeoutMs <= 5_000) {
     throw new Error(
-      'screenReaderOptions.actionTimeoutMs must exceed HooVDA\'s 5000ms graph refresh deadline',
+      "screenReaderOptions.actionTimeoutMs must exceed HooVDA's 5000ms graph refresh deadline",
     );
+  }
+  if (screenReader === 'nvda' && resolved.runtime !== 'external') {
+    throw new Error('NVDA is a Windows reference oracle and requires runtime "external"');
   }
   if (typeof resolved.image !== 'string' || !resolved.image.trim()) {
     throw new Error('screenReaderOptions.image must be a non-empty string');
@@ -374,15 +609,32 @@ export function resolveOptions(
   }
   if (
     !Array.isArray(resolved.containerEngineArgs) ||
+    resolved.containerEngineArgs.length > 100 ||
     resolved.containerEngineArgs.some(
-      (argument) => typeof argument !== 'string' || argument.length === 0,
+      (argument) =>
+        typeof argument !== 'string' ||
+        argument.length === 0 ||
+        Buffer.byteLength(argument) > 4_096,
     )
   ) {
-    throw new Error('screenReaderOptions.containerEngineArgs must contain only strings');
+    throw new Error(
+      'screenReaderOptions.containerEngineArgs must contain at most 100 non-empty strings of at most 4096 bytes',
+    );
+  }
+  if (screenReader === 'nvda' && resolved.containerEngineArgs.length > 0) {
+    throw new Error('screenReaderOptions.containerEngineArgs are not supported by external NVDA');
   }
   if (resolved.runtime === 'external') {
     if (!resolved.controlEndpoint || !resolved.cdpEndpoint || !resolved.controlToken) {
       throw new Error('external runtime requires controlEndpoint, cdpEndpoint, and controlToken');
+    }
+    if (
+      Buffer.byteLength(resolved.controlToken) > 4_096 ||
+      /[\u0000-\u001f\u007f]/u.test(resolved.controlToken)
+    ) {
+      throw new Error(
+        'screenReaderOptions.controlToken must contain 1 to 4096 bytes without control characters',
+      );
     }
     validateEndpoint(resolved.controlEndpoint, 'controlEndpoint');
     validateEndpoint(resolved.cdpEndpoint, 'cdpEndpoint');
@@ -397,7 +649,22 @@ function validateEndpoint(value: string, name: string): void {
   } catch {
     throw new Error(`screenReaderOptions.${name} must be an absolute HTTP URL`);
   }
-  if ((url.protocol !== 'http:' && url.protocol !== 'https:') || !url.hostname) {
+  if (
+    (url.protocol !== 'http:' && url.protocol !== 'https:') ||
+    !url.hostname ||
+    url.username !== '' ||
+    url.password !== '' ||
+    url.search !== '' ||
+    url.hash !== ''
+  ) {
     throw new Error(`screenReaderOptions.${name} must be an absolute HTTP URL`);
+  }
+  if (
+    url.protocol === 'http:' &&
+    url.hostname !== '127.0.0.1' &&
+    url.hostname !== 'localhost' &&
+    url.hostname !== '[::1]'
+  ) {
+    throw new Error(`screenReaderOptions.${name} must use HTTPS unless it targets host loopback`);
   }
 }

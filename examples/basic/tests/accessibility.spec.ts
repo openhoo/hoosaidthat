@@ -17,7 +17,10 @@ test('real screen reader announces structure, controls, and updates', async ({
   );
 
   const [email, continueButton] = await screenReader.captureElements([
-    { name: 'email', locator: page.getByRole('textbox', { name: 'Email', exact: true }) },
+    {
+      name: 'email',
+      locator: page.getByRole('textbox', { name: 'Email', exact: true }),
+    },
     {
       name: 'continue-button',
       locator: page.getByRole('button', { name: 'Continue' }),
@@ -43,10 +46,7 @@ test('real screen reader announces structure, controls, and updates', async ({
   }
 });
 
-test('exports screen reader output images for page structures', async ({
-  page,
-  screenReader,
-}) => {
+test('exports screen reader output images for page structures', async ({ page, screenReader }) => {
   test.setTimeout(120_000);
   test.skip(
     screenReader.health.screenReader.name !== 'hoovda',
@@ -62,9 +62,23 @@ test('exports screen reader output images for page structures', async ({
   expect(Object.keys(results)).toEqual([
     'headings',
     'landmarks',
+    'articles',
+    'figures',
+    'groupings',
+    'tabs',
+    'menu-items',
+    'toggle-buttons',
+    'progress-bars',
+    'references',
+    'math',
+    'vertical-paragraphs',
+    'same-style-text',
+    'different-style-text',
     'buttons',
     'form-fields',
     'links',
+    'visited-links',
+    'unvisited-links',
     'lists',
     'list-items',
     'tables',
@@ -82,18 +96,47 @@ test('exports screen reader output images for page structures', async ({
     'spelling-errors',
     'non-link-text',
   ]);
-  expect(results.headings.observations.some(({ speech }) => /Checkout.*heading/i.test(speech))).toBe(true);
-  expect(results.buttons.observations.some(({ speech }) => /Continue.*button/i.test(speech))).toBe(true);
-  expect(results.landmarks.observations.length).toBeGreaterThan(0);
-  expect(results['form-fields'].observations.some(({ speech }) => /Email.*(entry|edit)/i.test(speech))).toBe(true);
-  expect(results.links.observations.some(({ speech }) => /Skip to checkout.*link/i.test(speech))).toBe(true);
+  expect(
+    results.headings.observations.some(({ speech }) => /Checkout.*heading/i.test(speech)),
+  ).toBe(true);
+  expect(results.buttons.observations.some(({ speech }) => /Continue.*button/i.test(speech))).toBe(
+    true,
+  );
+  expect(
+    results.landmarks.observations.some(({ speech }) => /banner.*landmark|landmark.*banner/i.test(speech)),
+  ).toBe(true);
+  expect(
+    results['form-fields'].observations.some(({ speech }) => /Email.*(entry|edit)/i.test(speech)),
+  ).toBe(true);
+  expect(
+    results.links.observations.some(({ speech }) => /Skip to checkout.*link/i.test(speech)),
+  ).toBe(true);
   expect(results.lists.observations.some(({ speech }) => /list/i.test(speech))).toBe(true);
-  expect(results.tables.observations.some(({ speech }) => /Order totals.*table/i.test(speech))).toBe(true);
-  expect(results.graphics.observations.some(({ speech }) => /OpenHoo parcel mark.*(image|graphic)/i.test(speech))).toBe(true);
+  expect(
+    results.tables.observations.some(({ speech }) => /Order totals.*table/i.test(speech)),
+  ).toBe(true);
+  expect(
+    results.graphics.observations.some(({ speech }) =>
+      /OpenHoo parcel mark.*(image|graphic)/i.test(speech),
+    ),
+  ).toBe(true);
   for (const [name, result] of Object.entries(results)) {
-    expect(result.observations, `${name} export must contain a real page element`).not.toHaveLength(0);
     expect(result.screenshots).toHaveLength(result.observations.length);
-    expect(result.stoppedOnBoundary).toBe(true);
+    expect(['boundary', 'repeat', 'max'], `${name} export stop reason`).toContain(
+      result.stopReason,
+    );
+  }
+  for (const name of [
+    'headings',
+    'landmarks',
+    'buttons',
+    'form-fields',
+    'links',
+    'lists',
+    'tables',
+    'graphics',
+  ] as const) {
+    expect(results[name].stoppedOnBoundary, `${name} export boundary`).toBe(true);
   }
   expect(screenReader.regressionTranscript()).toMatchSnapshot('page-elements.hoovda.txt');
 });

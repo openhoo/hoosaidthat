@@ -1,7 +1,8 @@
 # HooSaidThat for Playwright
 
-Normal Playwright tests with real Linux screenreader actions and evidence.
-Supported adapters: Orca protocol v1 and independent Go HooVDA protocol v2.
+Normal Playwright tests with real screenreader actions and evidence. Supported
+adapters: Orca protocol v1, independent Go HooVDA protocol v2, and real NVDA
+2026.1.1 through an externally managed Windows reference oracle.
 HooVDA targets the immutable `nvda-web-2026.1.1` web profile through pinned
 public behavior assertions and native-Linux observations; it contains no NVDA
 code or binary.
@@ -23,16 +24,26 @@ test('checkout is announced', async ({ page, screenReader }) => {
 
 ## Release state
 
-HooVDA's seven-case locked-profile corpus now passes. It includes live Linux
-observations for all four `en-US`/`de-DE` and desktop/laptop cells plus browse,
-quick-navigation, text-paragraph, table, live-region, speech, and braille
-assertions. This proves the declared corpus, not full NVDA parity.
+The declared `nvda-web-2026.1.1` browser profile contains 190 unique actions.
+HooVDA and real NVDA run the same command-specific semantic oracle, core web
+behavior corpus, presentation-settings/reset contract, privacy checks, and
+event-provenance assertions. Release qualification executes every action in all
+four `en-US`/`de-DE` and desktop/laptop cells. Command shards keep each browser
+session bounded without weakening total coverage.
+
+Chrome 151's visited-link and spelling-error quick-navigation boundaries are
+asserted as exact real-NVDA English/German output, not mislabeled as successful
+element traversal. These gates prove the declared browser-testing profile, not
+unrestricted NVDA desktop, add-on, touch, or application-specific parity.
 
 Publishing remains an explicit tagged release operation. No unversioned npm
 package or OCI image is published from normal CI.
-The manual release workflow and required credentials are documented in
-[`docs/releasing.md`](docs/releasing.md); it performs this gate again before
-publishing version-only artifacts with SBOM and provenance attestations.
+The hosted release workflow and required credentials are documented in
+[`docs/releasing.md`](docs/releasing.md). It requalifies npm, HooVDA, and Orca
+before publishing version-only artifacts with SBOM and provenance attestations.
+Real-NVDA qualification runs separately on a trusted self-hosted KVM runner or
+an operator workstation because GitHub-hosted Linux runners do not provide this
+persistent licensed Windows oracle.
 
 ## Local build
 
@@ -53,8 +64,20 @@ npm run image:build:orca
 npm run image:smoke:orca
 ```
 
-Both paths are Linux/amd64. No Windows, VM, KVM, Wine, NVDA executable, or
-NVDA fork enters normal runtime or CI.
+Both container paths are Linux/amd64. Normal runtime and CI require no Windows,
+VM, KVM, Wine, NVDA executable, or NVDA fork. Optional real-NVDA qualification
+uses the repository's Windows 11 KVM oracle:
+
+```bash
+npm run nvda:windows:doctor
+npm run nvda:windows:up
+npm run nvda:windows:wait
+npm run nvda:windows:parity
+```
+
+Windows state, generated SSH identity, pinned host key, password, and bearer
+token stay outside Git under `~/VMs/hoosaidthat-nvda`. See the
+[Windows NVDA oracle guide](oracle/windows-nvda/README.md).
 
 ## Configuration
 
@@ -79,6 +102,25 @@ export default defineConfig({
 });
 ```
 
+Real NVDA uses the same fixtures against external endpoints:
+
+```ts
+export default defineConfig({
+  use: {
+    screenReaderOptions: {
+      screenReader: 'nvda',
+      runtime: 'external',
+      profile: 'nvda-web-2026.1.1',
+      locale: 'en-US',
+      keyboardLayout: 'desktop',
+      controlEndpoint: 'http://127.0.0.1:3002',
+      cdpEndpoint: 'http://127.0.0.1:9224',
+      controlToken: process.env.HOOSAIDTHAT_NVDA_CONTROL_TOKEN,
+    },
+  },
+});
+```
+
 One runtime container starts per Playwright worker. Playwright connects over
 CDP to Chromium inside it. Ordinary `page`, `context`, trace, screenshot, and
 assertion APIs remain available. Host networking lets container Chromium reach
@@ -90,8 +132,9 @@ token.
 
 ## Actions and evidence
 
-Ordinary actions become complete physical X11 gestures, then pass through the
-actual AT-SPI device listener:
+For Linux runtimes, ordinary actions become complete physical X11 gestures and
+pass through the AT-SPI device listener. Real NVDA delivers gestures through
+NVDA's official system-test emulation boundary:
 
 ```ts
 await screenReader.act('nextLandmark');
@@ -102,9 +145,9 @@ await screenReader.reportDetails();
 await screenReader.elementsList();
 ```
 
-Find needs a query. `findText()` sends that bounded string through HooVDA's
+Find needs a query. `findText()` sends that bounded string through the v2
 structured control API; subsequent `findNext` and `findPrevious` actions use
-physical NVDA gestures:
+the runtime's normal gesture path:
 
 ```ts
 await screenReader.findText('order total');
@@ -153,7 +196,9 @@ Every HooVDA test attaches:
 
 The page overlay shows current action, speech, and braille evidence in normal
 Playwright video. HooVDA also records container A/V, so its WebM contains real
-eSpeak audio synchronized to the browser display.
+eSpeak audio synchronized to the browser display. Real NVDA uses Playwright's
+browser video with the same synchronized overlay; its capture boundary is
+structured presentation hooks, not acoustic Windows audio.
 
 ## Element images
 
@@ -172,8 +217,8 @@ Automated structural export:
 await screenReader.capturePageElements({ maxPerKind: 100, screenshots: true });
 ```
 
-This visits every HooVDA semantic quick-navigation class: headings, landmarks,
-buttons, form fields and their subtypes, links, lists and list items, tables,
+This visits every exported structural group: headings, landmarks, buttons,
+form fields and their subtypes, links, lists and list items, tables,
 graphics, text paragraphs, frames, separators, block quotes, embedded objects,
 annotations, spelling or grammar errors, and non-link text. It exports an image
 for each observed output plus a JSON manifest. Each result includes its ordered
@@ -181,7 +226,7 @@ for each observed output plus a JSON manifest. Each result includes its ordered
 
 ## Options
 
-- `screenReader`: `orca` or `hoovda`; default `orca`
+- `screenReader`: `orca`, `hoovda`, or `nvda`; default `orca`
 - `profile`: `nvda-web-2026.1.1`
 - `locale`: `en-US` or `de-DE`
 - `keyboardLayout`: `desktop` or `laptop`
@@ -189,16 +234,18 @@ for each observed output plus a JSON manifest. Each result includes its ordered
 - `image`: OCI image reference
 - `recording`: `on` or `off`; default `on`
 - `startupTimeoutMs`: default `60000`, maximum `600000`
-- `actionTimeoutMs`: default `5000` for Orca and `15000` for HooVDA; maximum `30000`
+- `actionTimeoutMs`: default `5000` for Orca and `15000` for HooVDA/NVDA; maximum `30000`
 - `quietMs`: default `300`, maximum `5000`
 - `overlay`: default `true`
 - `actionScreenshots`: `off` or `on`
 - `keepContainer`: retain stopped container for diagnosis
 - `viewport`: Xvfb dimensions; default `1280x720`
-- `containerEngineArgs`: extra trusted Docker/Podman arguments
+- `containerEngineArgs`: extra trusted Docker/Podman arguments; rejected for external NVDA
 
 Externally managed runtimes require `controlEndpoint`, `cdpEndpoint`, and
-`controlToken`.
+`controlToken`. Plain HTTP endpoints must target host loopback; use HTTPS for
+non-loopback endpoints, normally behind an SSH tunnel or equivalent secure
+transport.
 
 ## Evidence boundary
 
@@ -209,6 +256,12 @@ does not certify WCAG conformance, simulate disabled people's lived experience,
 or prove unrestricted NVDA parity. The passing provenance-pinned gate proves
 only its declared browser-profile cases.
 
+Real NVDA evidence is captured at `speech.extensions.pre_speechQueued` and
+`braille.pre_writeCells`. It proves NVDA presentation requests and braille
+display writes, not acoustic output or user perception. Windows is a reference
+oracle; no Windows or NVDA image is published as an OCI container.
+
 See [runtime protocol](docs/runtime-protocol.md),
 [HooVDA image](images/hoovda/README.md), and
-[Orca image](images/orca/README.md).
+[Orca image](images/orca/README.md), and the
+[Windows NVDA oracle](oracle/windows-nvda/README.md).

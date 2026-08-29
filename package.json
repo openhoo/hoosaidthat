@@ -20,6 +20,8 @@
     "screenreader",
     "screen-reader",
     "orca",
+    "nvda",
+    "windows",
     "hoovda",
     "testing"
   ],
@@ -33,12 +35,21 @@
     },
     "./package.json": "./package.json"
   },
+  "bin": {
+    "hoosaidthat-nvda-windows": "./scripts/nvda-windows.mjs"
+  },
   "types": "./dist/index.d.ts",
   "files": [
     "dist",
     "docs",
     "images/*/README.md",
     "images/*/runtime-contract.json",
+    "oracle/windows-nvda",
+    "oracle/parity",
+    "!oracle/**/__pycache__",
+    "!oracle/**/*.pyc",
+    "scripts/hoovda-parity.mjs",
+    "scripts/nvda-windows.mjs",
     "README.md",
     "LICENSE"
   ],
@@ -51,14 +62,26 @@
     "test:e2e:orca": "npm run build && playwright test --config examples/basic/playwright.config.ts",
     "test:e2e:hoovda": "npm run build && SCREEN_READER=hoovda SCREEN_READER_IMAGE=hoosaidthat-hoovda:dev playwright test --config examples/basic/playwright.config.ts",
     "test:e2e:hoovda:oracle": "npm run build && SCREEN_READER=hoovda SCREEN_READER_IMAGE=hoosaidthat-hoovda:dev playwright test --config examples/basic/playwright.config.ts --grep 'oracle'",
+    "test:e2e:hoovda:parity": "npm run build && node scripts/hoovda-parity.mjs",
     "test:e2e": "npm run test:e2e:orca && npm run test:e2e:hoovda",
     "test": "npm run clean && npm run build && npm run test:unit && npm run test:python",
     "pack:check": "npm pack --dry-run",
-    "image:build:orca": "podman build --tag hoosaidthat-orca:dev --file images/orca/Dockerfile .",
+    "image:build:orca": "podman build --format docker --tag hoosaidthat-orca:dev --file images/orca/Dockerfile .",
     "image:smoke:orca": "bash images/orca/smoke-test.sh hoosaidthat-orca:dev orca",
-    "image:build:hoovda-engine": "podman build --platform linux/amd64 --tag hoovda-engine:dev ../hoovda",
-    "image:build:hoovda": "npm run image:build:hoovda-engine && podman build --platform linux/amd64 --tag hoosaidthat-hoovda:dev --file images/hoovda/Dockerfile .",
-    "image:smoke:hoovda": "bash images/hoovda/smoke-test.sh hoosaidthat-hoovda:dev"
+    "image:build:hoovda-engine": "podman build --format docker --platform linux/amd64 --tag hoovda-engine:dev ../hoovda",
+    "image:build:hoovda": "npm run image:build:hoovda-engine && podman build --format docker --platform linux/amd64 --tag hoosaidthat-hoovda:dev --file images/hoovda/Dockerfile .",
+    "image:smoke:hoovda": "bash images/hoovda/smoke-test.sh hoosaidthat-hoovda:dev",
+    "nvda:windows:doctor": "node scripts/nvda-windows.mjs doctor",
+    "nvda:windows:init": "node scripts/nvda-windows.mjs init",
+    "nvda:windows:up": "node scripts/nvda-windows.mjs up",
+    "nvda:windows:wait": "node scripts/nvda-windows.mjs wait",
+    "nvda:windows:wait-ssh": "node scripts/nvda-windows.mjs wait-ssh",
+    "nvda:windows:status": "node scripts/nvda-windows.mjs status",
+    "nvda:windows:control": "node scripts/nvda-windows.mjs control",
+    "nvda:windows:sync": "node scripts/nvda-windows.mjs sync",
+    "nvda:windows:parity": "node scripts/nvda-windows.mjs parity",
+    "nvda:windows:parity-cell": "node scripts/nvda-windows.mjs parity-cell",
+    "nvda:windows:down": "node scripts/nvda-windows.mjs down"
   },
   "peerDependencies": {
     "@playwright/test": ">=1.62.1 <1.63.0"

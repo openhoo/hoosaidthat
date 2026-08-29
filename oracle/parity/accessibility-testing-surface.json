@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "objective": "Behavioral parity for screen-reader features reasonably used while testing web accessibility, with real NVDA 2026.1.1 as the reference oracle.",
+  "reference": {
+    "product": "NVDA",
+    "version": "2026.1.1",
+    "releaseCommit": "5d92106f17e461dac62aa48257bbbf4183e033d0",
+    "userGuide": "https://download.nvaccess.org/releases/2026.1.1/documentation/userGuide.html",
+    "commandReference": "https://download.nvaccess.org/releases/2026.1.1/documentation/keyCommands.html",
+    "browseModeSource": "https://github.com/nvaccess/nvda/blob/5d92106f17e461dac62aa48257bbbf4183e033d0/source/browseMode.py"
+  },
+  "included": [
+    "web focus and activation",
+    "browse and focus modes",
+    "all assigned and unassigned browse-mode quick navigation",
+    "text, paragraph, document, container, and table navigation",
+    "system-caret, object, review-cursor, and mouse inspection",
+    "accessible name, role, state, value, description, details, error, language, formatting, and link reporting",
+    "live regions including priority",
+    "speech and braille presentation",
+    "screen-reader settings that alter web presentation",
+    "flow transcripts, snapshots, screenshots, video overlays, and runtime artifacts"
+  ],
+  "excluded": [
+    "Windows desktop administration",
+    "battery, clock, OCR, screen curtain, add-on management, and NVDA update commands",
+    "application-specific Word, Excel, Outlook, terminal, and IDE commands",
+    "touch-screen gestures",
+    "hardware-specific braille-display key maps beyond generic routing and panning"
+  ],
+  "implementedCommandManifest": "coverage.json",
+  "pendingCommandGroups": {
+    "browse-document": [],
+    "reporting": [],
+    "object-navigation": [],
+    "review-text": [],
+    "mouse": [],
+    "speech-and-braille-control": []
+  },
+  "implementedBehaviorGroups": [
+    "session-scoped presentation settings with exact readback and reset",
+    "live-region priority, atomicity, relevance, busy suppression, deduplication, and command causality",
+    "selection and review-copy evidence without exporting clipboard contents",
+    "redacted ARIA snapshot attachment beside screen-reader presentation",
+    "shared HooVDA-versus-NVDA semantic oracle for all 190 included actions",
+    "release-gated four-cell locale and keyboard-layout evidence",
+    "cross-adapter browser integration cases for atomic, relevant, busy, and interrupted live-region sequences"
+  ],
+  "pendingBehaviorGroups": []
+}

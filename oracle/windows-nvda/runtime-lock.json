@@ -1,0 +1,75 @@
+{
+  "schemaVersion": 1,
+  "profile": "nvda-web-2026.1.1",
+  "windows": {
+    "edition": "Windows 11 Pro",
+    "licenseBoundary": "Operator supplies or accepts responsibility for a valid Windows license. This repository contains no Windows media or license key."
+  },
+  "dockur": {
+    "release": "6.05",
+    "image": "docker.io/dockurr/windows@sha256:0cff9eb0e7aee9953e55bc682852ca4fdca233145a58ae1ec94f0b0c01a2ed30",
+    "upstreamRevision": "efe47da76d49c9d77c0a26799c70315fa4d91055"
+  },
+  "nvda": {
+    "version": "2026.1.1",
+    "url": "https://download.nvaccess.org/releases/2026.1.1/nvda_2026.1.1.exe",
+    "sha256": "6e0289eb5a3aa076eb97ea99c5d5465cb48b5ecc6a3257dc3d811f881a1747c9",
+    "bytes": 62914952
+  },
+  "chromeForTesting": {
+    "version": "151.0.7922.47",
+    "url": "https://storage.googleapis.com/chrome-for-testing-public/151.0.7922.47/win64/chrome-win64.zip",
+    "sha256": "fc77bb98b550b7da23b14edfa282b59a022e7fdb075ac7625d2a5152ceb22396",
+    "bytes": 201077750
+  },
+  "capture": {
+    "speech": "speech.extensions.pre_speechQueued",
+    "braille": "braille.pre_writeCells plus braille.filter_displayDimensions",
+    "gestureDelivery": "inputCore.manager.emulateGesture, matching the official NVDA system-test boundary",
+    "claimBoundary": "Presentation-request and braille-display-write evidence from real NVDA. Not acoustic output or user-perception evidence."
+  },
+  "ports": {
+    "viewer": 8008,
+    "rdp": 3392,
+    "ssh": 2224,
+    "control": 3002,
+    "cdp": 9224
+  },
+  "sshControl": {
+    "hostBind": "127.0.0.1",
+    "hostPort": 2224,
+    "guestPort": 22,
+    "clientPrivateKey": "<runtime-root>/ssh/id_ed25519",
+    "knownHosts": "<runtime-root>/ssh/known_hosts",
+    "publicKeyPublishPath": "<runtime-root>/shared/bootstrap/authorized_key.pub",
+    "hostKeyPublishPath": "<runtime-root>/shared/bootstrap/ssh_host_ed25519_key.pub",
+    "hostKeyPolicy": "Pin through the existing host-mounted bootstrap channel; never trust on first network use and fail closed on change.",
+    "windowsCapability": "OpenSSH.Server~~~~0.0.1.0",
+    "authentication": "ed25519 public key only; password and keyboard-interactive authentication disabled",
+    "remoteCommands": [
+      "status",
+      "start",
+      "stop",
+      "restart",
+      "logs",
+      "time-sync",
+      "reconfigure-ssh",
+      "locale-en-US",
+      "locale-de-DE",
+      "shutdown",
+      "reboot"
+    ],
+    "payloadUpdate": "npm run nvda:windows:sync stages the seven allowlisted runtime files with exact byte counts and SHA-256 hashes. The forced dispatcher independently validates the manifest, file set, and content-derived generation before installation, validates the new sshd configuration, restarts sshd out of band, and waits for key-only control to recover.",
+    "localeControl": "locale-en-US and locale-de-DE atomically select the runtime locale and restart the owned NVDA/Chrome task. NVDA starts with its official --lang override; runtime status attests the active locale and session creation fails closed on mismatch.",
+    "restrictions": [
+      "ForceCommand allowlist dispatcher",
+      "no TTY",
+      "no TCP forwarding",
+      "no agent forwarding",
+      "no X11 forwarding",
+      "no tunnel"
+    ]
+  },
+  "cdpBoundary": "Chrome listens on guest loopback 9223; the NVDA plugin provides an unprivileged byte-for-byte TCP proxy on guest 9222 for QEMU, whose host mapping binds only 127.0.0.1:9224.",
+  "startup": "The supervised runtime has both a Task Scheduler AtLogOn trigger and a Common Startup launcher. A global named mutex prevents duplicate supervisors."
+}

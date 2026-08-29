@@ -14,6 +14,7 @@ export type {
   DownloadedArtifact,
   ElementCapture,
   FocusEvent,
+  EventProvenance,
   KeyboardLayout,
   LifecycleEvent,
   ModeEvent,
@@ -33,6 +34,13 @@ export type {
   ScreenReaderOptions,
   ScreenReaderProfile,
   ScreenReaderState,
+  ScreenReaderRuntimeObject,
+  ScreenReaderPresentationSettings,
+  SpeechSymbolLevel,
+  BrailleTether,
+  FontAttributeReporting,
+  TableHeaderReporting,
+  SpellingErrorChannel,
   SpeechEvent,
 } from './types.js';
 export { devices } from '@playwright/test';

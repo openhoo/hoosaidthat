@@ -1,30 +1,30 @@
 # Screen reader flow
 
 01. ACTION Start of document [documentStart]
-    SPEECH[documentStart] Checkout example  document
-    BRAILLE[documentStart] Checkout example doc
+    SPEECH[documentStart] Skip to checkout  link
+    BRAILLE[documentStart] Skip to checkout lnk
     STATUS settled
 02. ACTION Next heading [nextHeading]
     SPEECH[nextHeading] Checkout  heading  level 1
     BRAILLE[nextHeading] Checkout h1
     STATUS settled
 03. ACTION Next focusable element [nextFocusable]
-    SPEECH[focus] Skip to checkout  link
-    BRAILLE[focus] Skip to checkout lnk
+    SPEECH[nextFocusable] Skip to checkout  link
+    BRAILLE[nextFocusable] Skip to checkout lnk
     STATUS settled
 04. ACTION Focus email [focus]
-    SPEECH[focus] Email  entry
-    BRAILLE[focus] Email edt
+    SPEECH[nextFocusable] Email  entry
+    BRAILLE[nextFocusable] Email edt
     STATUS settled
 05. ACTION Focus continue-button [focus]
-    SPEECH[focus] Continue  button  Review order before payment  has details
-    BRAILLE[focus] Continue Review order before payment btn details
+    SPEECH[nextFocusable] Continue  button  Review order before payment  has details
+    BRAILLE[nextFocusable] Continue Review order before payment btn details
     STATUS settled
 06. ACTION Report details [reportDetails]
     SPEECH[reportDetails] Payment continues only after order review.
     BRAILLE[reportDetails] Payment continues only after order review.
     STATUS settled
 07. ACTION Activate current element [activate]
-    SPEECH[event] Order review ready
-    BRAILLE[event] Order review ready
+    SPEECH[activate] Order review ready
+    BRAILLE[activate] Order review ready
     STATUS settled

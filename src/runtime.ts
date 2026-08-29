@@ -44,6 +44,10 @@ export class ScreenReaderRuntime {
       return runtime;
     }
 
+    if (options.screenReader === 'nvda') {
+      throw new Error('NVDA requires an externally managed Windows reference VM');
+    }
+
     const engine = await resolveEngine(options.runtime);
     const [controlPort, cdpPort] = await reserveTwoPorts();
     const token = randomBytes(32).toString('base64url');
@@ -76,11 +80,7 @@ export class ScreenReaderRuntime {
       await waitUntilReady(endpoints, options.startupTimeoutMs, options.screenReader);
       return runtime;
     } catch (error) {
-      const logs = await runCommand(
-        engine,
-        ['logs', '--tail', '100', containerName],
-        5_000,
-      );
+      const logs = await runCommand(engine, ['logs', '--tail', '100', containerName], 5_000);
       let cleanupFailure = '';
       try {
         await runtime.stop();
@@ -116,11 +116,7 @@ export class ScreenReaderRuntime {
       stopFailure = error instanceof Error ? error.message : String(error);
     }
     if (!this.keepContainer) {
-      const remove = await runCommand(
-        this.engine,
-        ['rm', '--force', this.containerName],
-        5_000,
-      );
+      const remove = await runCommand(this.engine, ['rm', '--force', this.containerName], 5_000);
       if (remove.code !== 0) {
         throw new Error(
           `failed to remove screen-reader container ${this.containerName}: ${
@@ -145,6 +141,9 @@ export function buildContainerArguments(
     cdpPort: number;
   },
 ): string[] {
+  if (options.screenReader === 'nvda') {
+    throw new Error('NVDA cannot be launched as a Linux container');
+  }
   return [
     'run',
     '--detach',
@@ -216,15 +215,20 @@ async function waitUntilReady(
   while (Date.now() < deadline) {
     try {
       const [control, cdp] = await Promise.all([
-        fetch(`${endpoints.controlEndpoint}/${screenReader === 'hoovda' ? 'v2' : 'v1'}/health`, {
+        fetch(`${endpoints.controlEndpoint}/${screenReader === 'orca' ? 'v1' : 'v2'}/health`, {
+          redirect: 'error',
           headers: { authorization: `Bearer ${endpoints.controlToken}` },
           signal: AbortSignal.timeout(1_000),
         }),
         fetch(`${endpoints.cdpEndpoint}/json/version`, {
+          redirect: 'error',
           signal: AbortSignal.timeout(1_000),
         }),
       ]);
-      const [controlBody, cdpBody] = await Promise.all([control.text(), cdp.text()]);
+      const [controlBody, cdpBody] = await Promise.all([
+        readBoundedText(control, 64 * 1024),
+        readBoundedText(cdp, 64 * 1024),
+      ]);
       if (control.ok && cdp.ok) {
         const controlValue: unknown = JSON.parse(controlBody);
         const cdpValue: unknown = JSON.parse(cdpBody);
@@ -233,10 +237,11 @@ async function waitUntilReady(
           ((screenReader === 'orca' &&
             controlValue.protocolVersion === 1 &&
             controlValue.status === 'ready') ||
-            (screenReader === 'hoovda' &&
+            ((screenReader === 'hoovda' || screenReader === 'nvda') &&
               controlValue.protocolVersion === '2.0' &&
               controlValue.status === 'ok' &&
-              controlValue.ready === true)) &&
+              controlValue.ready === true &&
+              (screenReader !== 'nvda' || controlValue.screenReader === 'nvda'))) &&
           isObject(cdpValue) &&
           typeof cdpValue.webSocketDebuggerUrl === 'string' &&
           cdpValue.webSocketDebuggerUrl.length > 0
@@ -252,14 +257,45 @@ async function waitUntilReady(
     }
     await delay(200);
   }
-  throw new Error(
-    `screen-reader runtime did not become ready within ${timeoutMs}ms: ${lastError}`,
-  );
+  throw new Error(`screen-reader runtime did not become ready within ${timeoutMs}ms: ${lastError}`);
 }
 
 function boundedBody(value: string): string {
   const normalized = value.replace(/\s+/g, ' ').trim();
   return normalized.length > 1_000 ? `${normalized.slice(0, 1_000)}...` : normalized;
+}
+
+async function readBoundedText(response: Response, maximumBytes: number): Promise<string> {
+  const declaredLength = Number(response.headers.get('content-length'));
+  if (Number.isFinite(declaredLength) && declaredLength > maximumBytes) {
+    await response.body?.cancel().catch(() => undefined);
+    throw new Error(`runtime readiness response exceeded ${maximumBytes} bytes`);
+  }
+  if (!response.body) return '';
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maximumBytes) {
+        await reader.cancel();
+        throw new Error(`runtime readiness response exceeded ${maximumBytes} bytes`);
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
 }
 
 async function reserveTwoPorts(): Promise<[number, number]> {

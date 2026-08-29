@@ -104,7 +104,7 @@ if (!action.events.some((event) => event.kind === 'audio' && event.audioDuration
 await request(`/v2/sessions/${session.id}/actions`, { command: 'documentStart' });
 const characterAction = await request(`/v2/sessions/${session.id}/actions`, { command: 'nextCharacter' });
 const characterSpeech = characterAction.events.filter((event) => event.kind === 'speech').map((event) => event.text).join(' ');
-if (characterSpeech !== 'H') {
+if (characterSpeech !== 'o') {
   throw new Error(`HooVDA character cursor did not move inside Chromium text: ${JSON.stringify(characterAction)}`);
 }
 const wordAction = await request(`/v2/sessions/${session.id}/actions`, { command: 'nextWord' });

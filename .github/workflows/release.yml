@@ -55,8 +55,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [[ ! "$RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]]; then
-            echo "version must be valid SemVer without a v prefix" >&2
+          if [[ ! "$RELEASE_VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]] || (( ${#RELEASE_VERSION} > 128 )); then
+            echo "version must be valid SemVer, fit an OCI tag, omit build metadata, and have no v prefix" >&2
             exit 1
           fi
           test "$(node -p 'require("./package.json").version')" = "$RELEASE_VERSION"
@@ -82,34 +82,63 @@ jobs:
           npm test
           npm run typecheck
           npm run pack:check
-      - name: Build release candidates
+      - name: Authenticate GHCR
+        shell: bash
+        run: echo "$GITHUB_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Create Buildx builder
+        run: docker buildx create --name hoosaidthat-release --use
+      - name: Build attested release candidates
         shell: bash
         run: |
           set -euo pipefail
+          candidate_tag="candidate-${GITHUB_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           hoovda_commit=$(git -C hoovda rev-parse HEAD)
           hoovda_date=$(git -C hoovda show -s --format=%cI HEAD)
-          docker build --platform linux/amd64 \
+          docker buildx build --platform linux/amd64 --push --sbom=true --provenance=mode=max \
             --build-arg "VERSION=${RELEASE_VERSION}" \
             --build-arg "COMMIT=${hoovda_commit}" \
             --build-arg "BUILD_DATE=${hoovda_date}" \
-            --tag hoovda-engine:release hoovda
-          docker build --platform linux/amd64 \
-            --build-arg HOOVDA_IMAGE=hoovda-engine:release \
+            --metadata-file "$RUNNER_TEMP/hoovda-engine-metadata.json" \
+            --tag "${ENGINE_IMAGE}:${candidate_tag}" hoovda
+          engine_digest=$(jq -er '."containerimage.digest" | select(test("^sha256:[0-9a-f]{64}$"))' "$RUNNER_TEMP/hoovda-engine-metadata.json")
+          docker buildx build --platform linux/amd64 --push --sbom=true --provenance=mode=max \
+            --build-arg "HOOVDA_IMAGE=${ENGINE_IMAGE}@${engine_digest}" \
             --build-arg "IMAGE_VERSION=${RELEASE_VERSION}" \
-            --tag hoosaidthat-hoovda:release \
+            --metadata-file "$RUNNER_TEMP/hoovda-metadata.json" \
+            --tag "${HOOVDA_IMAGE}:${candidate_tag}" \
             --file images/hoovda/Dockerfile .
-          docker build --platform linux/amd64 \
+          hoovda_digest=$(jq -er '."containerimage.digest" | select(test("^sha256:[0-9a-f]{64}$"))' "$RUNNER_TEMP/hoovda-metadata.json")
+          docker buildx build --platform linux/amd64 --push --sbom=true --provenance=mode=max \
             --build-arg "IMAGE_VERSION=${RELEASE_VERSION}" \
-            --tag hoosaidthat-orca:release \
+            --metadata-file "$RUNNER_TEMP/orca-metadata.json" \
+            --tag "${ORCA_IMAGE}:${candidate_tag}" \
             --file images/orca/Dockerfile .
+          orca_digest=$(jq -er '."containerimage.digest" | select(test("^sha256:[0-9a-f]{64}$"))' "$RUNNER_TEMP/orca-metadata.json")
+          {
+            printf 'ENGINE_CANDIDATE=%s@%s\n' "$ENGINE_IMAGE" "$engine_digest"
+            printf 'HOOVDA_CANDIDATE=%s@%s\n' "$HOOVDA_IMAGE" "$hoovda_digest"
+            printf 'ORCA_CANDIDATE=%s@%s\n' "$ORCA_IMAGE" "$orca_digest"
+          } >> "$GITHUB_ENV"
       - name: Qualify release candidates
         env:
           CONTAINER_ENGINE: docker
         run: |
           set -euo pipefail
+          docker pull --platform linux/amd64 "$HOOVDA_CANDIDATE"
+          docker tag "$(docker image inspect --format '{{.Id}}' "$HOOVDA_CANDIDATE")" hoosaidthat-hoovda:release
+          docker pull --platform linux/amd64 "$ORCA_CANDIDATE"
+          docker tag "$(docker image inspect --format '{{.Id}}' "$ORCA_CANDIDATE")" hoosaidthat-orca:release
           npx playwright install ffmpeg
           bash images/hoovda/smoke-test.sh hoosaidthat-hoovda:release
           bash images/orca/smoke-test.sh hoosaidthat-orca:release orca
+          for matrix in en-US/desktop en-US/laptop de-DE/desktop de-DE/laptop; do
+            locale=${matrix%/*}
+            layout=${matrix#*/}
+            CONTAINER_ENGINE=docker SCREEN_READER_IMAGE=hoosaidthat-hoovda:release \
+              node scripts/hoovda-parity.mjs "$locale" "$layout"
+          done
           SCREEN_READER=hoovda SCREEN_READER_IMAGE=hoosaidthat-hoovda:release \
             npx playwright test --config examples/basic/playwright.config.ts \
               --output test-results/hoovda-en-US-desktop
@@ -132,32 +161,21 @@ jobs:
           path: test-results
           if-no-files-found: ignore
           retention-days: 30
-      - name: Authenticate GHCR
-        shell: bash
-        run: echo "$GITHUB_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Publish image manifests, SBOMs, and provenance
+      - name: Promote qualified image manifests
         shell: bash
         run: |
           set -euo pipefail
-          docker buildx create --name hoosaidthat-release --use
-          hoovda_commit=$(git -C hoovda rev-parse HEAD)
-          hoovda_date=$(git -C hoovda show -s --format=%cI HEAD)
-          docker buildx build --platform linux/amd64 --push --sbom=true --provenance=mode=max \
-            --build-arg "VERSION=${RELEASE_VERSION}" \
-            --build-arg "COMMIT=${hoovda_commit}" \
-            --build-arg "BUILD_DATE=${hoovda_date}" \
-            --tag "${ENGINE_IMAGE}:${RELEASE_VERSION}" hoovda
-          docker buildx build --platform linux/amd64 --push --sbom=true --provenance=mode=max \
-            --build-arg "HOOVDA_IMAGE=${ENGINE_IMAGE}:${RELEASE_VERSION}" \
-            --build-arg "IMAGE_VERSION=${RELEASE_VERSION}" \
-            --tag "${HOOVDA_IMAGE}:${RELEASE_VERSION}" \
-            --file images/hoovda/Dockerfile .
-          docker buildx build --platform linux/amd64 --push --sbom=true --provenance=mode=max \
-            --build-arg "IMAGE_VERSION=${RELEASE_VERSION}" \
-            --tag "${ORCA_IMAGE}:${RELEASE_VERSION}" \
-            --file images/orca/Dockerfile .
+          promote() {
+            source_ref=$1
+            destination_ref=$2
+            expected_digest=${source_ref##*@}
+            docker buildx imagetools create --tag "$destination_ref" "$source_ref"
+            actual_digest=$(docker buildx imagetools inspect "$destination_ref" | awk '$1 == "Digest:" { print $2; exit }')
+            test "$actual_digest" = "$expected_digest"
+          }
+          promote "$ENGINE_CANDIDATE" "${ENGINE_IMAGE}:${RELEASE_VERSION}"
+          promote "$HOOVDA_CANDIDATE" "${HOOVDA_IMAGE}:${RELEASE_VERSION}"
+          promote "$ORCA_CANDIDATE" "${ORCA_IMAGE}:${RELEASE_VERSION}"
       - name: Publish npm package with provenance
         run: npm publish --access public --provenance
         env:

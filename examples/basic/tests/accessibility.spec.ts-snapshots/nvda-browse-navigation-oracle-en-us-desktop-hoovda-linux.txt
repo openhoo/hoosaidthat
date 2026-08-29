@@ -1,8 +1,8 @@
 # Screen reader flow
 
 01. ACTION Start of document [documentStart]
-    SPEECH[documentStart] Browse navigation oracle  document
-    BRAILLE[documentStart] Browse navigation oracle doc
+    SPEECH[documentStart] Some name.  A bunch of text.
+    BRAILLE[documentStart] Some name. A bunch of text.
     STATUS settled
 02. ACTION Next heading [nextHeading]
     SPEECH[nextHeading] Quick Nav Target  heading  level 1

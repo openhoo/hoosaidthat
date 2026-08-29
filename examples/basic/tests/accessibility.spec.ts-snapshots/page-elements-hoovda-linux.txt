@@ -1,314 +1,742 @@
 # Screen reader flow
 
 01. ACTION Start of document [documentStart]
-    SPEECH[documentStart] Checkout example  document
-    BRAILLE[documentStart] Checkout example doc
+    SPEECH[documentStart] Skip to checkout  link
+    BRAILLE[documentStart] Skip to checkout lnk
     STATUS settled
-02. ACTION Next heading [nextHeading]
+02. ACTION Previous heading [previousHeading]
+    SPEECH[previousHeading] no previous heading
+    BRAILLE[previousHeading] no previous heading
+    STATUS settled
+03. ACTION Start of document [documentStart]
+    SPEECH[documentStart] Skip to checkout  link
+    BRAILLE[documentStart] Skip to checkout lnk
+    STATUS settled
+04. ACTION Next heading [nextHeading]
     SPEECH[nextHeading] Checkout  heading  level 1
     BRAILLE[nextHeading] Checkout h1
     STATUS settled
-03. ACTION Next heading [nextHeading]
+05. ACTION Next heading [nextHeading]
     SPEECH[nextHeading] Order summary  heading  level 2
     BRAILLE[nextHeading] Order summary h2
     STATUS settled
-04. ACTION Next heading [nextHeading]
+06. ACTION Next heading [nextHeading]
     SPEECH[nextHeading] no next heading
     BRAILLE[nextHeading] no next heading
     STATUS settled
-05. ACTION Start of document [documentStart]
-    SPEECH[documentStart] Checkout example  document
-    BRAILLE[documentStart] Checkout example doc
+07. ACTION Start of document [documentStart]
+    SPEECH[documentStart] Skip to checkout  link
+    BRAILLE[documentStart] Skip to checkout lnk
     STATUS settled
-06. ACTION Next landmark [nextLandmark]
-    SPEECH[nextLandmark] banner landmark
-    BRAILLE[nextLandmark] landmark
+08. ACTION Previous landmark [previousLandmark]
+    SPEECH[previousLandmark] banner landmark  Skip to checkout  link
+    BRAILLE[previousLandmark] lmk bnnr Skip to checkout lnk
     STATUS settled
-07. ACTION Next landmark [nextLandmark]
-    SPEECH[nextLandmark] main landmark
-    BRAILLE[nextLandmark] landmark
+09. ACTION Previous landmark [previousLandmark]
+    SPEECH[previousLandmark] no previous landmark
+    BRAILLE[previousLandmark] no previous landmark
     STATUS settled
-08. ACTION Next landmark [nextLandmark]
-    SPEECH[nextLandmark] Order summary  region landmark
-    BRAILLE[nextLandmark] Order summary landmark
+10. ACTION Start of document [documentStart]
+    SPEECH[documentStart] Skip to checkout  link
+    BRAILLE[documentStart] Skip to checkout lnk
     STATUS settled
-09. ACTION Next landmark [nextLandmark]
-    SPEECH[nextLandmark] Delivery preferences  form landmark
-    BRAILLE[nextLandmark] Delivery preferences landmark
+11. ACTION Next landmark [nextLandmark]
+    SPEECH[nextLandmark] main landmark  Checkout  heading  level 1
+    BRAILLE[nextLandmark] lmk main Checkout h1
     STATUS settled
-10. ACTION Next landmark [nextLandmark]
+12. ACTION Next landmark [nextLandmark]
+    SPEECH[nextLandmark] Order summary  region landmark  Order summary  heading  level 2
+    BRAILLE[nextLandmark] Order summary lmk rgn Order summary h2
+    STATUS settled
+13. ACTION Next landmark [nextLandmark]
+    SPEECH[nextLandmark] Delivery preferences  form landmark  Email receipt  check box  not checked
+    BRAILLE[nextLandmark] Delivery preferences lmk form Email receipt chk ⣏⣀⣹
+    STATUS settled
+14. ACTION Next landmark [nextLandmark]
     SPEECH[nextLandmark] no next landmark
     BRAILLE[nextLandmark] no next landmark
     STATUS settled
-11. ACTION Start of document [documentStart]
-    SPEECH[documentStart] Checkout example  document
-    BRAILLE[documentStart] Checkout example doc
+15. ACTION Start of document [documentStart]
+    SPEECH[documentStart] Skip to checkout  link
+    BRAILLE[documentStart] Skip to checkout lnk
     STATUS settled
-12. ACTION Next button [nextButton]
+16. ACTION Previous article [previousArticle]
+    SPEECH[previousArticle] no previous article
+    BRAILLE[previousArticle] no previous article
+    STATUS settled
+17. ACTION Start of document [documentStart]
+    SPEECH[documentStart] Skip to checkout  link
+    BRAILLE[documentStart] Skip to checkout lnk
+    STATUS settled
+18. ACTION Next article [nextArticle]
+    SPEECH[nextArticle] no next article
+    BRAILLE[nextArticle] no next article
+    STATUS settled
+19. ACTION Start of document [documentStart]
+    SPEECH[documentStart] Skip to checkout  link
+    BRAILLE[documentStart] Skip to checkout lnk
+    STATUS settled
+20. ACTION Previous figure [previousFigure]
+    SPEECH[previousFigure] no previous figure
+    BRAILLE[previousFigure] no previous figure
+    STATUS settled
+21. ACTION Start of document [documentStart]
+    SPEECH[documentStart] Skip to checkout  link
+    BRAILLE[documentStart] Skip to checkout lnk
+    STATUS settled
+22. ACTION Next figure [nextFigure]
+    SPEECH[nextFigure] no next figure
+    BRAILLE[nextFigure] no next figure
+    STATUS settled
+23. ACTION Start of document [documentStart]
+    SPEECH[documentStart] Skip to checkout  link
+    BRAILLE[documentStart] Skip to checkout lnk
+    STATUS settled
+24. ACTION Previous grouping [previousGrouping]
+    SPEECH[previousGrouping] no previous grouping
+    BRAILLE[previousGrouping] no previous grouping
+    STATUS settled
+25. ACTION Start of document [documentStart]
+    SPEECH[documentStart] Skip to checkout  link
+    BRAILLE[documentStart] Skip to checkout lnk
+    STATUS settled
+26. ACTION Next grouping [nextGrouping]
+    SPEECH[nextGrouping] no next grouping
+    BRAILLE[nextGrouping] no next grouping
+    STATUS settled
+27. ACTION Start of document [documentStart]
+    SPEECH[documentStart] Skip to checkout  link
+    BRAILLE[documentStart] Skip to checkout lnk
+    STATUS settled
+28. ACTION Previous tab [previousTab]
+    SPEECH[previousTab] no previous tab
+    BRAILLE[previousTab] no previous tab
+    STATUS settled
+29. ACTION Start of document [documentStart]
+    SPEECH[documentStart] Skip to checkout  link
+    BRAILLE[documentStart] Skip to checkout lnk
+    STATUS settled
+30. ACTION Next tab [nextTab]
+    SPEECH[nextTab] no next tab
+    BRAILLE[nextTab] no next tab
+    STATUS settled
+31. ACTION Start of document [documentStart]
+    SPEECH[documentStart] Skip to checkout  link
+    BRAILLE[documentStart] Skip to checkout lnk
+    STATUS settled
+32. ACTION Previous menu item [previousMenuItem]
+    SPEECH[previousMenuItem] no previous menu item
+    BRAILLE[previousMenuItem] no previous menu item
+    STATUS settled
+33. ACTION Start of document [documentStart]
+    SPEECH[documentStart] Skip to checkout  link
+    BRAILLE[documentStart] Skip to checkout lnk
+    STATUS settled
+34. ACTION Next menu item [nextMenuItem]
+    SPEECH[nextMenuItem] no next menu item
+    BRAILLE[nextMenuItem] no next menu item
+    STATUS settled
+35. ACTION Start of document [documentStart]
+    SPEECH[documentStart] Skip to checkout  link
+    BRAILLE[documentStart] Skip to checkout lnk
+    STATUS settled
+36. ACTION Previous toggle button [previousToggleButton]
+    SPEECH[previousToggleButton] no previous toggle button
+    BRAILLE[previousToggleButton] no previous toggle button
+    STATUS settled
+37. ACTION Start of document [documentStart]
+    SPEECH[documentStart] Skip to checkout  link
+    BRAILLE[documentStart] Skip to checkout lnk
+    STATUS settled
+38. ACTION Next toggle button [nextToggleButton]
+    SPEECH[nextToggleButton] no next toggle button
+    BRAILLE[nextToggleButton] no next toggle button
+    STATUS settled
+39. ACTION Start of document [documentStart]
+    SPEECH[documentStart] Skip to checkout  link
+    BRAILLE[documentStart] Skip to checkout lnk
+    STATUS settled
+40. ACTION Previous progress bar [previousProgressBar]
+    SPEECH[previousProgressBar] no previous progress bar
+    BRAILLE[previousProgressBar] no previous progress bar
+    STATUS settled
+41. ACTION Start of document [documentStart]
+    SPEECH[documentStart] Skip to checkout  link
+    BRAILLE[documentStart] Skip to checkout lnk
+    STATUS settled
+42. ACTION Next progress bar [nextProgressBar]
+    SPEECH[nextProgressBar] no next progress bar
+    BRAILLE[nextProgressBar] no next progress bar
+    STATUS settled
+43. ACTION Start of document [documentStart]
+    SPEECH[documentStart] Skip to checkout  link
+    BRAILLE[documentStart] Skip to checkout lnk
+    STATUS settled
+44. ACTION Previous reference [previousReference]
+    SPEECH[previousReference] Not supported in this document
+    BRAILLE[previousReference] Not supported in this document
+    STATUS settled
+45. ACTION Start of document [documentStart]
+    SPEECH[documentStart] Skip to checkout  link
+    BRAILLE[documentStart] Skip to checkout lnk
+    STATUS settled
+46. ACTION Next reference [nextReference]
+    SPEECH[nextReference] Not supported in this document
+    BRAILLE[nextReference] Not supported in this document
+    STATUS settled
+47. ACTION Start of document [documentStart]
+    SPEECH[documentStart] Skip to checkout  link
+    BRAILLE[documentStart] Skip to checkout lnk
+    STATUS settled
+48. ACTION Previous math formula [previousMathFormula]
+    SPEECH[previousMathFormula] no previous math formula
+    BRAILLE[previousMathFormula] no previous math formula
+    STATUS settled
+49. ACTION Start of document [documentStart]
+    SPEECH[documentStart] Skip to checkout  link
+    BRAILLE[documentStart] Skip to checkout lnk
+    STATUS settled
+50. ACTION Next math formula [nextMathFormula]
+    SPEECH[nextMathFormula] no next math formula
+    BRAILLE[nextMathFormula] no next math formula
+    STATUS settled
+51. ACTION Start of document [documentStart]
+    SPEECH[documentStart] Skip to checkout  link
+    BRAILLE[documentStart] Skip to checkout lnk
+    STATUS settled
+52. ACTION Previous vertically aligned paragraph [previousVerticalParagraph]
+    SPEECH[previousVerticalParagraph] no previous vertically aligned paragraph
+    BRAILLE[previousVerticalParagraph] no previous vertically aligned paragraph
+    STATUS settled
+53. ACTION Start of document [documentStart]
+    SPEECH[documentStart] Skip to checkout  link
+    BRAILLE[documentStart] Skip to checkout lnk
+    STATUS settled
+54. ACTION Next vertically aligned paragraph [nextVerticalParagraph]
+    SPEECH[nextVerticalParagraph] Review order before payment  paragraph
+    BRAILLE[nextVerticalParagraph] Review order before payment paragraph
+    STATUS settled
+55. ACTION Next vertically aligned paragraph [nextVerticalParagraph]
+    SPEECH[nextVerticalParagraph] Payment continues only after order review.  comment
+    BRAILLE[nextVerticalParagraph] Payment continues only after order review. comment
+    STATUS settled
+56. ACTION Next vertically aligned paragraph [nextVerticalParagraph]
+    SPEECH[nextVerticalParagraph] Receipt pending  paragraph
+    BRAILLE[nextVerticalParagraph] Receipt pending paragraph
+    STATUS settled
+57. ACTION Next vertically aligned paragraph [nextVerticalParagraph]
+    SPEECH[nextVerticalParagraph] Big meos  paragraph
+    BRAILLE[nextVerticalParagraph] Big meos paragraph
+    STATUS settled
+58. ACTION Next vertically aligned paragraph [nextVerticalParagraph]
+    SPEECH[nextVerticalParagraph] no next vertically aligned paragraph
+    BRAILLE[nextVerticalParagraph] no next vertically aligned paragraph
+    STATUS settled
+59. ACTION Start of document [documentStart]
+    SPEECH[documentStart] Skip to checkout  link
+    BRAILLE[documentStart] Skip to checkout lnk
+    STATUS settled
+60. ACTION Previous same style text [previousSameStyle]
+    SPEECH[previousSameStyle] No previous same style text
+    BRAILLE[previousSameStyle] No previous same style text
+    STATUS settled
+61. ACTION Start of document [documentStart]
+    SPEECH[documentStart] Skip to checkout  link
+    BRAILLE[documentStart] Skip to checkout lnk
+    STATUS settled
+62. ACTION Next same style text [nextSameStyle]
+    SPEECH[nextSameStyle] Skip to checkout  static
+    BRAILLE[nextSameStyle] Skip to checkout static
+    STATUS settled
+63. ACTION Next same style text [nextSameStyle]
+    SPEECH[nextSameStyle] No next same style text
+    BRAILLE[nextSameStyle] No next same style text
+    STATUS settled
+64. ACTION Start of document [documentStart]
+    SPEECH[documentStart] Skip to checkout  link
+    BRAILLE[documentStart] Skip to checkout lnk
+    STATUS settled
+65. ACTION Previous different style text [previousDifferentStyle]
+    SPEECH[previousDifferentStyle] Checkout example  document
+    BRAILLE[previousDifferentStyle] Checkout example doc
+    STATUS settled
+66. ACTION Previous different style text [previousDifferentStyle]
+    SPEECH[previousDifferentStyle] No previous different style text
+    BRAILLE[previousDifferentStyle] No previous different style text
+    STATUS settled
+67. ACTION Start of document [documentStart]
+    SPEECH[documentStart] Skip to checkout  link
+    BRAILLE[documentStart] Skip to checkout lnk
+    STATUS settled
+68. ACTION Next different style text [nextDifferentStyle]
+    SPEECH[nextDifferentStyle] Checkout  heading  level 1
+    BRAILLE[nextDifferentStyle] Checkout h1
+    STATUS settled
+69. ACTION Next different style text [nextDifferentStyle]
+    SPEECH[nextDifferentStyle] Email  label
+    BRAILLE[nextDifferentStyle] Email label
+    STATUS settled
+70. ACTION Next different style text [nextDifferentStyle]
+    SPEECH[nextDifferentStyle] Continue  button  Review order before payment  has details
+    BRAILLE[nextDifferentStyle] Continue Review order before payment btn details
+    STATUS settled
+71. ACTION Next different style text [nextDifferentStyle]
+    SPEECH[nextDifferentStyle] Review order before payment  paragraph
+    BRAILLE[nextDifferentStyle] Review order before payment paragraph
+    STATUS settled
+72. ACTION Next different style text [nextDifferentStyle]
+    SPEECH[nextDifferentStyle] Order summary  region landmark
+    BRAILLE[nextDifferentStyle] Order summary lmk rgn
+    STATUS settled
+73. ACTION Next different style text [nextDifferentStyle]
+    SPEECH[nextDifferentStyle] • Accessibility toolkit  list item  level 1  1 of 2
+    BRAILLE[nextDifferentStyle] • Accessibility toolkit lst item 1 of 2
+    STATUS settled
+74. ACTION Next different style text [nextDifferentStyle]
+    SPEECH[nextDifferentStyle] Item  column header  row 1 column 1
+    BRAILLE[nextDifferentStyle] Item ch r1 c1
+    STATUS settled
+75. ACTION Next different style text [nextDifferentStyle]
+    SPEECH[nextDifferentStyle] Free  cell  row 2 column 2
+    BRAILLE[nextDifferentStyle] Free cell r2 c2
+    STATUS settled
+76. ACTION Next different style text [nextDifferentStyle]
+    SPEECH[nextDifferentStyle] Country  combo box  has popup  1 of 1
+    BRAILLE[nextDifferentStyle] Country cbo submnu 1 of 1
+    STATUS settled
+77. ACTION Start of document [documentStart]
+    SPEECH[documentStart] Skip to checkout  link
+    BRAILLE[documentStart] Skip to checkout lnk
+    STATUS settled
+78. ACTION Previous button [previousButton]
+    SPEECH[previousButton] no previous button
+    BRAILLE[previousButton] no previous button
+    STATUS settled
+79. ACTION Start of document [documentStart]
+    SPEECH[documentStart] Skip to checkout  link
+    BRAILLE[documentStart] Skip to checkout lnk
+    STATUS settled
+80. ACTION Next button [nextButton]
     SPEECH[nextButton] Continue  button  Review order before payment  has details
     BRAILLE[nextButton] Continue Review order before payment btn details
     STATUS settled
-13. ACTION Next button [nextButton]
+81. ACTION Next button [nextButton]
     SPEECH[nextButton] no next button
     BRAILLE[nextButton] no next button
     STATUS settled
-14. ACTION Start of document [documentStart]
-    SPEECH[documentStart] Checkout example  document
-    BRAILLE[documentStart] Checkout example doc
+82. ACTION Start of document [documentStart]
+    SPEECH[documentStart] Skip to checkout  link
+    BRAILLE[documentStart] Skip to checkout lnk
     STATUS settled
-15. ACTION Next form field [nextFormField]
+83. ACTION Previous form field [previousFormField]
+    SPEECH[previousFormField] no previous form field
+    BRAILLE[previousFormField] no previous form field
+    STATUS settled
+84. ACTION Start of document [documentStart]
+    SPEECH[documentStart] Skip to checkout  link
+    BRAILLE[documentStart] Skip to checkout lnk
+    STATUS settled
+85. ACTION Next form field [nextFormField]
     SPEECH[nextFormField] Email  entry
     BRAILLE[nextFormField] Email edt
     STATUS settled
-16. ACTION Next form field [nextFormField]
+86. ACTION Next form field [nextFormField]
     SPEECH[nextFormField] Continue  button  Review order before payment  has details
     BRAILLE[nextFormField] Continue Review order before payment btn details
     STATUS settled
-17. ACTION Next form field [nextFormField]
+87. ACTION Next form field [nextFormField]
     SPEECH[nextFormField] Email receipt  check box  not checked
     BRAILLE[nextFormField] Email receipt chk ⣏⣀⣹
     STATUS settled
-18. ACTION Next form field [nextFormField]
+88. ACTION Next form field [nextFormField]
     SPEECH[nextFormField] Standard delivery  radio button  not checked  1 of 1
     BRAILLE[nextFormField] Standard delivery rbtn ⣏⣀⣹ 1 of 1
     STATUS settled
-19. ACTION Next form field [nextFormField]
+89. ACTION Next form field [nextFormField]
     SPEECH[nextFormField] Country  combo box  has popup  1 of 1
     BRAILLE[nextFormField] Country cbo submnu 1 of 1
     STATUS settled
-20. ACTION Next form field [nextFormField]
-    SPEECH[nextFormField] Order reference  entry
-    BRAILLE[nextFormField] Order reference edt
+90. ACTION Next form field [nextFormField]
+    SPEECH[nextFormField] Germany  menu item  selected  1 of 1
+    BRAILLE[nextFormField] Germany menu item sel 1 of 1
     STATUS settled
-21. ACTION Next form field [nextFormField]
+91. ACTION Next form field [nextFormField]
+    SPEECH[nextFormField] Order reference  receipt  entry
+    BRAILLE[nextFormField] Order reference receipt edt
+    STATUS settled
+92. ACTION Next form field [nextFormField]
     SPEECH[nextFormField] no next form field
     BRAILLE[nextFormField] no next form field
     STATUS settled
-22. ACTION Start of document [documentStart]
-    SPEECH[documentStart] Checkout example  document
-    BRAILLE[documentStart] Checkout example doc
+93. ACTION Start of document [documentStart]
+    SPEECH[documentStart] Skip to checkout  link
+    BRAILLE[documentStart] Skip to checkout lnk
     STATUS settled
-23. ACTION Next link [nextLink]
-    SPEECH[nextLink] Skip to checkout  link
-    BRAILLE[nextLink] Skip to checkout lnk
+94. ACTION Previous link [previousLink]
+    SPEECH[previousLink] no previous link
+    BRAILLE[previousLink] no previous link
     STATUS settled
-24. ACTION Next link [nextLink]
+95. ACTION Start of document [documentStart]
+    SPEECH[documentStart] Skip to checkout  link
+    BRAILLE[documentStart] Skip to checkout lnk
+    STATUS settled
+96. ACTION Next link [nextLink]
     SPEECH[nextLink] no next link
     BRAILLE[nextLink] no next link
     STATUS settled
-25. ACTION Start of document [documentStart]
-    SPEECH[documentStart] Checkout example  document
-    BRAILLE[documentStart] Checkout example doc
+97. ACTION Start of document [documentStart]
+    SPEECH[documentStart] Skip to checkout  link
+    BRAILLE[documentStart] Skip to checkout lnk
     STATUS settled
-26. ACTION Next list [nextList]
-    SPEECH[nextList] list
-    BRAILLE[nextList] lst
+98. ACTION Previous visited link [previousVisitedLink]
+    SPEECH[previousVisitedLink] no previous visited link
+    BRAILLE[previousVisitedLink] no previous visited link
     STATUS settled
-27. ACTION Next list [nextList]
+99. ACTION Start of document [documentStart]
+    SPEECH[documentStart] Skip to checkout  link
+    BRAILLE[documentStart] Skip to checkout lnk
+    STATUS settled
+100. ACTION Next visited link [nextVisitedLink]
+    SPEECH[nextVisitedLink] no next visited link
+    BRAILLE[nextVisitedLink] no next visited link
+    STATUS settled
+101. ACTION Start of document [documentStart]
+    SPEECH[documentStart] Skip to checkout  link
+    BRAILLE[documentStart] Skip to checkout lnk
+    STATUS settled
+102. ACTION Previous unvisited link [previousUnvisitedLink]
+    SPEECH[previousUnvisitedLink] no previous unvisited link
+    BRAILLE[previousUnvisitedLink] no previous unvisited link
+    STATUS settled
+103. ACTION Start of document [documentStart]
+    SPEECH[documentStart] Skip to checkout  link
+    BRAILLE[documentStart] Skip to checkout lnk
+    STATUS settled
+104. ACTION Next unvisited link [nextUnvisitedLink]
+    SPEECH[nextUnvisitedLink] no next unvisited link
+    BRAILLE[nextUnvisitedLink] no next unvisited link
+    STATUS settled
+105. ACTION Start of document [documentStart]
+    SPEECH[documentStart] Skip to checkout  link
+    BRAILLE[documentStart] Skip to checkout lnk
+    STATUS settled
+106. ACTION Previous list [previousList]
+    SPEECH[previousList] no previous list
+    BRAILLE[previousList] no previous list
+    STATUS settled
+107. ACTION Start of document [documentStart]
+    SPEECH[documentStart] Skip to checkout  link
+    BRAILLE[documentStart] Skip to checkout lnk
+    STATUS settled
+108. ACTION Next list [nextList]
+    SPEECH[nextList] list  with 2 items  • Accessibility toolkit
+    BRAILLE[nextList] lst2 • Accessibility toolkit
+    STATUS settled
+109. ACTION Next list [nextList]
     SPEECH[nextList] no next list
     BRAILLE[nextList] no next list
     STATUS settled
-28. ACTION Start of document [documentStart]
-    SPEECH[documentStart] Checkout example  document
-    BRAILLE[documentStart] Checkout example doc
+110. ACTION Start of document [documentStart]
+    SPEECH[documentStart] Skip to checkout  link
+    BRAILLE[documentStart] Skip to checkout lnk
     STATUS settled
-29. ACTION Next list item [nextListItem]
+111. ACTION Previous list item [previousListItem]
+    SPEECH[previousListItem] no previous list item
+    BRAILLE[previousListItem] no previous list item
+    STATUS settled
+112. ACTION Start of document [documentStart]
+    SPEECH[documentStart] Skip to checkout  link
+    BRAILLE[documentStart] Skip to checkout lnk
+    STATUS settled
+113. ACTION Next list item [nextListItem]
     SPEECH[nextListItem] • Accessibility toolkit  list item  level 1  1 of 2
     BRAILLE[nextListItem] • Accessibility toolkit lst item 1 of 2
     STATUS settled
-30. ACTION Next list item [nextListItem]
+114. ACTION Next list item [nextListItem]
     SPEECH[nextListItem] • Container runtime  list item  level 1  2 of 2
     BRAILLE[nextListItem] • Container runtime lst item 2 of 2
     STATUS settled
-31. ACTION Next list item [nextListItem]
+115. ACTION Next list item [nextListItem]
     SPEECH[nextListItem] no next list item
     BRAILLE[nextListItem] no next list item
     STATUS settled
-32. ACTION Start of document [documentStart]
-    SPEECH[documentStart] Checkout example  document
-    BRAILLE[documentStart] Checkout example doc
+116. ACTION Start of document [documentStart]
+    SPEECH[documentStart] Skip to checkout  link
+    BRAILLE[documentStart] Skip to checkout lnk
     STATUS settled
-33. ACTION Next table [nextTable]
+117. ACTION Previous table [previousTable]
+    SPEECH[previousTable] no previous table
+    BRAILLE[previousTable] no previous table
+    STATUS settled
+118. ACTION Start of document [documentStart]
+    SPEECH[documentStart] Skip to checkout  link
+    BRAILLE[documentStart] Skip to checkout lnk
+    STATUS settled
+119. ACTION Next table [nextTable]
     SPEECH[nextTable] Order totals  table  with 2 rows and 2 columns  row 1  column 1  Item
     BRAILLE[nextTable] Order totals tbl 2r 2c r1 c1 Item
     STATUS settled
-34. ACTION Next table [nextTable]
+120. ACTION Next table [nextTable]
     SPEECH[nextTable] no next table
     BRAILLE[nextTable] no next table
     STATUS settled
-35. ACTION Start of document [documentStart]
-    SPEECH[documentStart] Checkout example  document
-    BRAILLE[documentStart] Checkout example doc
+121. ACTION Start of document [documentStart]
+    SPEECH[documentStart] Skip to checkout  link
+    BRAILLE[documentStart] Skip to checkout lnk
     STATUS settled
-36. ACTION Next graphic [nextImage]
+122. ACTION Previous graphic [previousImage]
+    SPEECH[previousImage] no previous graphic
+    BRAILLE[previousImage] no previous graphic
+    STATUS settled
+123. ACTION Start of document [documentStart]
+    SPEECH[documentStart] Skip to checkout  link
+    BRAILLE[documentStart] Skip to checkout lnk
+    STATUS settled
+124. ACTION Next graphic [nextImage]
     SPEECH[nextImage] OpenHoo parcel mark  image
     BRAILLE[nextImage] OpenHoo parcel mark image
     STATUS settled
-37. ACTION Next graphic [nextImage]
+125. ACTION Next graphic [nextImage]
     SPEECH[nextImage] no next graphic
     BRAILLE[nextImage] no next graphic
     STATUS settled
-38. ACTION Start of document [documentStart]
-    SPEECH[documentStart] Checkout example  document
-    BRAILLE[documentStart] Checkout example doc
+126. ACTION Start of document [documentStart]
+    SPEECH[documentStart] Skip to checkout  link
+    BRAILLE[documentStart] Skip to checkout lnk
     STATUS settled
-39. ACTION Next check box [nextCheckbox]
+127. ACTION Previous check box [previousCheckbox]
+    SPEECH[previousCheckbox] no previous check box
+    BRAILLE[previousCheckbox] no previous check box
+    STATUS settled
+128. ACTION Start of document [documentStart]
+    SPEECH[documentStart] Skip to checkout  link
+    BRAILLE[documentStart] Skip to checkout lnk
+    STATUS settled
+129. ACTION Next check box [nextCheckbox]
     SPEECH[nextCheckbox] Email receipt  check box  not checked
     BRAILLE[nextCheckbox] Email receipt chk ⣏⣀⣹
     STATUS settled
-40. ACTION Next check box [nextCheckbox]
+130. ACTION Next check box [nextCheckbox]
     SPEECH[nextCheckbox] no next check box
     BRAILLE[nextCheckbox] no next check box
     STATUS settled
-41. ACTION Start of document [documentStart]
-    SPEECH[documentStart] Checkout example  document
-    BRAILLE[documentStart] Checkout example doc
+131. ACTION Start of document [documentStart]
+    SPEECH[documentStart] Skip to checkout  link
+    BRAILLE[documentStart] Skip to checkout lnk
     STATUS settled
-42. ACTION Next radio button [nextRadioButton]
+132. ACTION Previous radio button [previousRadioButton]
+    SPEECH[previousRadioButton] no previous radio button
+    BRAILLE[previousRadioButton] no previous radio button
+    STATUS settled
+133. ACTION Start of document [documentStart]
+    SPEECH[documentStart] Skip to checkout  link
+    BRAILLE[documentStart] Skip to checkout lnk
+    STATUS settled
+134. ACTION Next radio button [nextRadioButton]
     SPEECH[nextRadioButton] Standard delivery  radio button  not checked  1 of 1
     BRAILLE[nextRadioButton] Standard delivery rbtn ⣏⣀⣹ 1 of 1
     STATUS settled
-43. ACTION Next radio button [nextRadioButton]
+135. ACTION Next radio button [nextRadioButton]
     SPEECH[nextRadioButton] no next radio button
     BRAILLE[nextRadioButton] no next radio button
     STATUS settled
-44. ACTION Start of document [documentStart]
-    SPEECH[documentStart] Checkout example  document
-    BRAILLE[documentStart] Checkout example doc
+136. ACTION Start of document [documentStart]
+    SPEECH[documentStart] Skip to checkout  link
+    BRAILLE[documentStart] Skip to checkout lnk
     STATUS settled
-45. ACTION Next combo box [nextCombobox]
+137. ACTION Previous combo box [previousCombobox]
+    SPEECH[previousCombobox] no previous combo box
+    BRAILLE[previousCombobox] no previous combo box
+    STATUS settled
+138. ACTION Start of document [documentStart]
+    SPEECH[documentStart] Skip to checkout  link
+    BRAILLE[documentStart] Skip to checkout lnk
+    STATUS settled
+139. ACTION Next combo box [nextCombobox]
     SPEECH[nextCombobox] Country  combo box  has popup  1 of 1
     BRAILLE[nextCombobox] Country cbo submnu 1 of 1
     STATUS settled
-46. ACTION Next combo box [nextCombobox]
+140. ACTION Next combo box [nextCombobox]
     SPEECH[nextCombobox] no next combo box
     BRAILLE[nextCombobox] no next combo box
     STATUS settled
-47. ACTION Start of document [documentStart]
-    SPEECH[documentStart] Checkout example  document
-    BRAILLE[documentStart] Checkout example doc
+141. ACTION Start of document [documentStart]
+    SPEECH[documentStart] Skip to checkout  link
+    BRAILLE[documentStart] Skip to checkout lnk
     STATUS settled
-48. ACTION Next edit field [nextEntry]
+142. ACTION Previous edit field [previousEntry]
+    SPEECH[previousEntry] no previous edit field
+    BRAILLE[previousEntry] no previous edit field
+    STATUS settled
+143. ACTION Start of document [documentStart]
+    SPEECH[documentStart] Skip to checkout  link
+    BRAILLE[documentStart] Skip to checkout lnk
+    STATUS settled
+144. ACTION Next edit field [nextEntry]
     SPEECH[nextEntry] Email  entry
     BRAILLE[nextEntry] Email edt
     STATUS settled
-49. ACTION Next edit field [nextEntry]
-    SPEECH[nextEntry] Order reference  entry
-    BRAILLE[nextEntry] Order reference edt
+145. ACTION Next edit field [nextEntry]
+    SPEECH[nextEntry] Order reference  receipt  entry
+    BRAILLE[nextEntry] Order reference receipt edt
     STATUS settled
-50. ACTION Next edit field [nextEntry]
+146. ACTION Next edit field [nextEntry]
     SPEECH[nextEntry] no next edit field
     BRAILLE[nextEntry] no next edit field
     STATUS settled
-51. ACTION Start of document [documentStart]
-    SPEECH[documentStart] Checkout example  document
-    BRAILLE[documentStart] Checkout example doc
+147. ACTION Start of document [documentStart]
+    SPEECH[documentStart] Skip to checkout  link
+    BRAILLE[documentStart] Skip to checkout lnk
     STATUS settled
-52. ACTION Next text paragraph [nextParagraph]
+148. ACTION Previous text paragraph [previousParagraph]
+    SPEECH[previousParagraph] no previous text paragraph
+    BRAILLE[previousParagraph] no previous text paragraph
+    STATUS settled
+149. ACTION Start of document [documentStart]
+    SPEECH[documentStart] Skip to checkout  link
+    BRAILLE[documentStart] Skip to checkout lnk
+    STATUS settled
+150. ACTION Next text paragraph [nextParagraph]
     SPEECH[nextParagraph] Payment continues only after order review.
     BRAILLE[nextParagraph] Payment continues only after order review.
     STATUS settled
-53. ACTION Next text paragraph [nextParagraph]
+151. ACTION Next text paragraph [nextParagraph]
     SPEECH[nextParagraph] Shipping help frame.
     BRAILLE[nextParagraph] Shipping help frame.
     STATUS settled
-54. ACTION Next text paragraph [nextParagraph]
+152. ACTION Next text paragraph [nextParagraph]
     SPEECH[nextParagraph] no next text paragraph
     BRAILLE[nextParagraph] no next text paragraph
     STATUS settled
-55. ACTION Start of document [documentStart]
-    SPEECH[documentStart] Checkout example  document
-    BRAILLE[documentStart] Checkout example doc
+153. ACTION Start of document [documentStart]
+    SPEECH[documentStart] Skip to checkout  link
+    BRAILLE[documentStart] Skip to checkout lnk
     STATUS settled
-56. ACTION Next frame [nextFrame]
+154. ACTION Previous frame [previousFrame]
+    SPEECH[previousFrame] no previous frame
+    BRAILLE[previousFrame] no previous frame
+    STATUS settled
+155. ACTION Start of document [documentStart]
+    SPEECH[documentStart] Skip to checkout  link
+    BRAILLE[documentStart] Skip to checkout lnk
+    STATUS settled
+156. ACTION Next frame [nextFrame]
     SPEECH[nextFrame] Shipping help  frame
     BRAILLE[nextFrame] Shipping help frm
     STATUS settled
-57. ACTION Next frame [nextFrame]
+157. ACTION Next frame [nextFrame]
     SPEECH[nextFrame] no next frame
     BRAILLE[nextFrame] no next frame
     STATUS settled
-58. ACTION Start of document [documentStart]
-    SPEECH[documentStart] Checkout example  document
-    BRAILLE[documentStart] Checkout example doc
+158. ACTION Start of document [documentStart]
+    SPEECH[documentStart] Skip to checkout  link
+    BRAILLE[documentStart] Skip to checkout lnk
     STATUS settled
-59. ACTION Next separator [nextSeparator]
+159. ACTION Previous separator [previousSeparator]
+    SPEECH[previousSeparator] no previous separator
+    BRAILLE[previousSeparator] no previous separator
+    STATUS settled
+160. ACTION Start of document [documentStart]
+    SPEECH[documentStart] Skip to checkout  link
+    BRAILLE[documentStart] Skip to checkout lnk
+    STATUS settled
+161. ACTION Next separator [nextSeparator]
     SPEECH[nextSeparator] separator
     BRAILLE[nextSeparator] separator
     STATUS settled
-60. ACTION Next separator [nextSeparator]
+162. ACTION Next separator [nextSeparator]
     SPEECH[nextSeparator] no next separator
     BRAILLE[nextSeparator] no next separator
     STATUS settled
-61. ACTION Start of document [documentStart]
-    SPEECH[documentStart] Checkout example  document
-    BRAILLE[documentStart] Checkout example doc
+163. ACTION Start of document [documentStart]
+    SPEECH[documentStart] Skip to checkout  link
+    BRAILLE[documentStart] Skip to checkout lnk
     STATUS settled
-62. ACTION Next block quote [nextBlockQuote]
+164. ACTION Previous block quote [previousBlockQuote]
+    SPEECH[previousBlockQuote] no previous block quote
+    BRAILLE[previousBlockQuote] no previous block quote
+    STATUS settled
+165. ACTION Start of document [documentStart]
+    SPEECH[documentStart] Skip to checkout  link
+    BRAILLE[documentStart] Skip to checkout lnk
+    STATUS settled
+166. ACTION Next block quote [nextBlockQuote]
     SPEECH[nextBlockQuote] Accessibility belongs in every delivery flow.  block quote
     BRAILLE[nextBlockQuote] Accessibility belongs in every delivery flow. block quote
     STATUS settled
-63. ACTION Next block quote [nextBlockQuote]
+167. ACTION Next block quote [nextBlockQuote]
     SPEECH[nextBlockQuote] no next block quote
     BRAILLE[nextBlockQuote] no next block quote
     STATUS settled
-64. ACTION Start of document [documentStart]
-    SPEECH[documentStart] Checkout example  document
-    BRAILLE[documentStart] Checkout example doc
+168. ACTION Start of document [documentStart]
+    SPEECH[documentStart] Skip to checkout  link
+    BRAILLE[documentStart] Skip to checkout lnk
     STATUS settled
-65. ACTION Next embedded object [nextEmbeddedObject]
+169. ACTION Previous embedded object [previousEmbeddedObject]
+    SPEECH[previousEmbeddedObject] no previous embedded object
+    BRAILLE[previousEmbeddedObject] no previous embedded object
+    STATUS settled
+170. ACTION Start of document [documentStart]
+    SPEECH[documentStart] Skip to checkout  link
+    BRAILLE[documentStart] Skip to checkout lnk
+    STATUS settled
+171. ACTION Next embedded object [nextEmbeddedObject]
     SPEECH[nextEmbeddedObject] Embedded receipt preview  embedded
     BRAILLE[nextEmbeddedObject] Embedded receipt preview embedded
     STATUS settled
-66. ACTION Next embedded object [nextEmbeddedObject]
+172. ACTION Next embedded object [nextEmbeddedObject]
     SPEECH[nextEmbeddedObject] no next embedded object
     BRAILLE[nextEmbeddedObject] no next embedded object
     STATUS settled
-67. ACTION Start of document [documentStart]
-    SPEECH[documentStart] Checkout example  document
-    BRAILLE[documentStart] Checkout example doc
+173. ACTION Start of document [documentStart]
+    SPEECH[documentStart] Skip to checkout  link
+    BRAILLE[documentStart] Skip to checkout lnk
     STATUS settled
-68. ACTION Next annotation [nextAnnotation]
-    SPEECH[nextAnnotation] Reviewer annotation  section  level 1  1 of 1
-    BRAILLE[nextAnnotation] Reviewer annotation section 1 of 1
+174. ACTION Previous annotation [previousAnnotation]
+    SPEECH[previousAnnotation] no previous annotation
+    BRAILLE[previousAnnotation] no previous annotation
     STATUS settled
-69. ACTION Next annotation [nextAnnotation]
+175. ACTION Start of document [documentStart]
+    SPEECH[documentStart] Skip to checkout  link
+    BRAILLE[documentStart] Skip to checkout lnk
+    STATUS settled
+176. ACTION Next annotation [nextAnnotation]
     SPEECH[nextAnnotation] no next annotation
     BRAILLE[nextAnnotation] no next annotation
     STATUS settled
-70. ACTION Start of document [documentStart]
-    SPEECH[documentStart] Checkout example  document
-    BRAILLE[documentStart] Checkout example doc
+177. ACTION Start of document [documentStart]
+    SPEECH[documentStart] Skip to checkout  link
+    BRAILLE[documentStart] Skip to checkout lnk
     STATUS settled
-71. ACTION Next spelling or grammar error [nextSpellingError]
+178. ACTION Previous spelling or grammar error [previousSpellingError]
+    SPEECH[previousSpellingError] Not supported in this document
+    BRAILLE[previousSpellingError] Not supported in this document
+    STATUS settled
+179. ACTION Start of document [documentStart]
+    SPEECH[documentStart] Skip to checkout  link
+    BRAILLE[documentStart] Skip to checkout lnk
+    STATUS settled
+180. ACTION Next spelling or grammar error [nextSpellingError]
     SPEECH[nextSpellingError] spelling error  caat
     BRAILLE[nextSpellingError] caat
     STATUS settled
-72. ACTION Next spelling or grammar error [nextSpellingError]
-    SPEECH[nextSpellingError] no next error
-    BRAILLE[nextSpellingError] no next error
+181. ACTION Next spelling or grammar error [nextSpellingError]
+    SPEECH[nextSpellingError] Not supported in this document
+    BRAILLE[nextSpellingError] Not supported in this document
     STATUS settled
-73. ACTION Start of document [documentStart]
-    SPEECH[documentStart] Checkout example  document
-    BRAILLE[documentStart] Checkout example doc
+182. ACTION Start of document [documentStart]
+    SPEECH[documentStart] Skip to checkout  link
+    BRAILLE[documentStart] Skip to checkout lnk
     STATUS settled
-74. ACTION Next text after block of links [nextNotLinkBlock]
-    SPEECH[nextNotLinkBlock] Review order before payment  paragraph
-    BRAILLE[nextNotLinkBlock] Review order before payment paragraph
+183. ACTION Previous text after block of links [previousNotLinkBlock]
+    SPEECH[previousNotLinkBlock] no more text before a block of links
+    BRAILLE[previousNotLinkBlock] no more text before a block of links
     STATUS settled
-75. ACTION Next text after block of links [nextNotLinkBlock]
-    SPEECH[nextNotLinkBlock] Receipt pending  paragraph
-    BRAILLE[nextNotLinkBlock] Receipt pending paragraph
+184. ACTION Start of document [documentStart]
+    SPEECH[documentStart] Skip to checkout  link
+    BRAILLE[documentStart] Skip to checkout lnk
     STATUS settled
-76. ACTION Next text after block of links [nextNotLinkBlock]
-    SPEECH[nextNotLinkBlock] Big meos  paragraph
-    BRAILLE[nextNotLinkBlock] Big meos paragraph
-    STATUS settled
-77. ACTION Next text after block of links [nextNotLinkBlock]
-    SPEECH[nextNotLinkBlock] Shipping help frame.  paragraph
-    BRAILLE[nextNotLinkBlock] Shipping help frame. paragraph
-    STATUS settled
-78. ACTION Next text after block of links [nextNotLinkBlock]
+185. ACTION Next text after block of links [nextNotLinkBlock]
     SPEECH[nextNotLinkBlock] no more text after a block of links
     BRAILLE[nextNotLinkBlock] no more text after a block of links
     STATUS settled

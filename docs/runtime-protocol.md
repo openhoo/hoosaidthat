@@ -7,7 +7,8 @@ Authorization: Bearer <token>
 ```
 
 The runtime owns graphical Chromium. Playwright connects separately over CDP.
-HooSaidThat supports legacy Orca protocol v1 and HooVDA protocol v2.
+HooSaidThat supports legacy Orca protocol v1 plus protocol v2 implementations
+for HooVDA and the real-NVDA Windows oracle.
 
 ## HooVDA protocol v2
 
@@ -48,15 +49,21 @@ Ordered event kinds:
 - `focus`, `mode`, `liveRegion`
 - `audio` with monotonic offset and duration
 
-`sequence` is process-global and monotonic. `monotonicNs` shares the clock used
+`sequence` is process-global and monotonic. Clients reject truncated history,
+backward cursors, malformed UTF-8, oversized JSON, duplicate artifact names,
+and artifact byte-count or SHA-256 mismatches. `monotonicNs` shares the clock used
 to place synthesized PCM into the recorded timeline. An action response includes
 all causally observed events after its pre-injection cursor and waits for a
 bounded quiet interval.
 
-State also exposes HooVDA browse/focus mode and `cursorInDocument`. The
-extension combines that virtual-buffer signal with browser-window and active
-document checks when Chromium reports its selected tab wrapper after a CDP
-page switch.
+State also exposes HooVDA browse/focus mode and `cursorInDocument`. The optional
+`browse` object identifies the current virtual-buffer object and includes exact
+`quickNavigationTargets` matched by HooVDA. Link objects include `visited`.
+Protected object names are withheld and marked `redacted`. These fields let page
+element export include an element already selected by `documentStart`, without
+guessing from localized speech. Page-focus verification requires a runtime-native
+web-content focus signal; a Chromium tab wrapper or an active CDP document alone
+is insufficient.
 
 Finish closes the test recording and returns SHA-256-bound artifacts:
 
@@ -66,6 +73,9 @@ Finish closes the test recording and returns SHA-256-bound artifacts:
 - `screenreader-video` when recording was enabled
 
 Clients must verify byte length and SHA-256 after download. HooSaidThat does.
+Successful finish calls are idempotent while their artifacts remain retained,
+so a client can safely retry after a lost HTTP response. HooVDA bounds retained
+finished sessions to 32 and removes expired session directories.
 
 ## Orca protocol v1
 
@@ -81,12 +91,48 @@ Orca events contain captured Speech Dispatcher presentation text. Protocol v1
 has no per-test runtime A/V artifact lifecycle; Playwright video plus the page
 overlay remains its recording path.
 
+## Real NVDA protocol v2
+
+The Windows oracle implements the same health, action catalog, exclusive
+session, state, action, event, finish, and `screenreader-events` artifact
+contracts used by the v2 client. It deliberately does not claim HooVDA's
+accessible-document, synthesized-audio, or container-video artifacts.
+
+Ordinary commands call `inputCore.manager.emulateGesture` on NVDA's main
+thread and declare `"delivery":"emulated"`. Structured find is the sole
+exception and declares `"delivery":"structured"`. Speech comes from
+`speech.extensions.pre_speechQueued`; braille comes from
+`braille.pre_writeCells` plus display dimensions. These are presentation-hook
+observations, not physical-keyboard or acoustic evidence.
+The NVDA oracle likewise makes successful finish calls idempotent and retains
+the eight most recent event artifacts.
+
+Locale is a process boundary. The SSH controller atomically selects `en-US` or
+`de-DE`, restarts the owned runtime, and starts NVDA with its official `--lang`
+override. Runtime status attests that locale. Session creation fails closed when
+the requested locale does not match the running process; changing gettext state
+inside an already-imported NVDA process is not accepted as localization proof.
+
+Every declared action has a semantic speech or braille oracle. Chrome for
+Testing 151 exposes no visited-link target and reports spelling quick navigation
+as unsupported through its NVDA accessibility backend in this isolated profile.
+The four commands remain exercised, but the gate asserts their exact localized
+boundary presentation instead of claiming successful traversal.
+
+Chrome listens on guest loopback. The NVDA plugin exposes a byte-for-byte CDP
+proxy to the QEMU user-network boundary. Both host mappings remain loopback
+only. A separate key-only, host-key-pinned SSH control plane manages the VM;
+its forced dispatcher is not part of the browser/runtime HTTP protocol.
+
 ## Security and platform rules
 
-- Linux/amd64 only.
+- Orca and HooVDA containers are Linux/amd64; real NVDA is Windows 11 on KVM.
 - Loopback control and CDP endpoints.
 - Random bearer token per worker.
-- One active HooVDA session per runtime.
+- One active protocol-v2 session per runtime.
 - Strict JSON decoding and bounded request bodies/timeouts.
-- No Windows guest, KVM, QEMU, Wine, NVDA executable, or NVDA source.
+- Plain HTTP external endpoints are accepted only on host loopback; remote
+  endpoints require HTTPS or a secure local tunnel.
+- Normal container runtime needs no Windows, KVM, QEMU, Wine, or NVDA binary.
+- The optional Windows oracle installs a hash-pinned official NVDA binary at runtime; repository and npm package contain no NVDA binary or source.
 - Unknown commands and artifact names fail closed.

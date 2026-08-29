@@ -55,6 +55,11 @@ export const test = base.extend<ScreenReaderFixtures, ScreenReaderWorkerFixtures
           screenReaderRuntime.endpoints,
           screenReaderResolvedOptions.screenReader,
           screenReaderResolvedOptions.actionTimeoutMs,
+          {
+            profile: screenReaderResolvedOptions.profile,
+            locale: screenReaderResolvedOptions.locale,
+            keyboardLayout: screenReaderResolvedOptions.keyboardLayout,
+          },
         ),
       );
     },
@@ -84,9 +89,9 @@ export const test = base.extend<ScreenReaderFixtures, ScreenReaderWorkerFixtures
     // Drive the runtime-owned foreground tab. Creating a second CDP page can
     // leave Chromium's bootstrap tab as the X11/AT-SPI active tab, making
     // Playwright and the screenreader observe different documents.
-    const existing = context.pages().find((candidate) =>
-      candidate.url().startsWith('file:///opt/hoosaidthat/bootstrap.html'),
-    );
+    const existing = context
+      .pages()
+      .find((candidate) => candidate.url().startsWith('file:///opt/hoosaidthat/bootstrap.html'));
     const page = existing ?? context.pages()[0] ?? (await context.newPage());
     await page.bringToFront();
     try {
@@ -120,7 +125,13 @@ export function defineConfig(
   ...configs: PlaywrightTestConfig<ScreenReaderFixtures, ScreenReaderWorkerFixtures>[]
 ): PlaywrightTestConfig<ScreenReaderFixtures, ScreenReaderWorkerFixtures> {
   return baseDefineConfig<ScreenReaderFixtures, ScreenReaderWorkerFixtures>(
-    config,
-    ...configs,
+    withNativeViewport(config),
+    ...configs.map(withNativeViewport),
   );
+}
+
+function withNativeViewport(
+  config: PlaywrightTestConfig<ScreenReaderFixtures, ScreenReaderWorkerFixtures>,
+): PlaywrightTestConfig<ScreenReaderFixtures, ScreenReaderWorkerFixtures> {
+  return { ...config, use: { ...config.use, viewport: null } };
 }
