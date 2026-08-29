@@ -778,9 +778,12 @@ async function prepareAction(
       },
     );
     let focusEvents = focus.events;
-    let focused = focusEvents.some(
-      (event) => event.kind === "focus" && event.text === "Frame action",
-    );
+    const reachedFrameAction = (
+      event: (typeof focusEvents)[number],
+    ): boolean =>
+      event.kind === "focus" &&
+      (event.text === "Frame action" || event.text.startsWith("Frame action "));
+    let focused = focusEvents.some(reachedFrameAction);
     if (!focused) {
       const afterFocus = focusEvents.at(-1)?.sequence ?? beforeFocus;
       focusEvents = (
@@ -789,9 +792,7 @@ async function prepareAction(
           "Wait for embedded-frame control native focus",
         )
       ).events;
-      focused = focusEvents.some(
-        (event) => event.kind === "focus" && event.text === "Frame action",
-      );
+      focused = focusEvents.some(reachedFrameAction);
     }
     // Chromium can expose the child document before its focused control. Do
     // not let that delayed native focus event cross the next command boundary.

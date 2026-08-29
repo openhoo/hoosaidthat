@@ -106,7 +106,11 @@ thread and declare `"delivery":"emulated"`. Structured find is the sole
 exception and declares `"delivery":"structured"`. Speech comes from
 `speech.extensions.pre_speechQueued`; braille comes from
 `braille.pre_writeCells` plus display dimensions. These are presentation-hook
-observations, not physical-keyboard or acoustic evidence.
+observations, not physical-keyboard or acoustic evidence. Consecutive
+byte-identical idle braille refresh writes are coalesced. NVDA's blinking
+cursor overlay is normalized into stable translated cells plus the separate
+cursor index. Command-caused writes and identical frames separated by any
+other event remain observable.
 The NVDA oracle likewise makes successful finish calls idempotent and retains
 the eight most recent event artifacts.
 

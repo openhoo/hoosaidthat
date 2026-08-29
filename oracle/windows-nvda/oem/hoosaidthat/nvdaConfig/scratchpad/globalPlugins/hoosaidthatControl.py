@@ -1531,15 +1531,42 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
         text = str(rawText or "").strip()
         if text or values:
             redacted = current_focus_is_protected()
-            STATE.append(
-                "braille",
-                text,
-                brailleCells=base64.b64encode(
-                    bytes(value & 0xFF for value in values)
-                ).decode("ascii"),
-                brailleCursor=0,
-                **({"redacted": True} if redacted else {}),
-            )
+            # pre_writeCells receives the display frame after NVDA applies its
+            # blinking cursor shape. Preserve stable translated cells and
+            # expose the cursor independently, matching the protocol model.
+            stable_cells = list(getattr(braille.handler, "_cells", []))
+            if len(stable_cells) != len(values):
+                stable_cells = values
+            cursor_position = getattr(braille.handler, "_cursorPos", None)
+            if (
+                isinstance(cursor_position, bool)
+                or not isinstance(cursor_position, int)
+                or cursor_position < 0
+                or cursor_position >= len(stable_cells)
+            ):
+                cursor_position = 0
+            encoded_cells = base64.b64encode(
+                bytes(value & 0xFF for value in stable_cells)
+            ).decode("ascii")
+            with STATE.lock:
+                previous = STATE.events[-1] if STATE.events else None
+                duplicate_idle_refresh = (
+                    STATE.command == "event"
+                    and previous is not None
+                    and previous.get("kind") == "braille"
+                    and previous.get("text") == text
+                    and previous.get("brailleCells") == encoded_cells
+                    and bool(previous.get("redacted", False)) == redacted
+                )
+                if duplicate_idle_refresh:
+                    return
+                STATE.append(
+                    "braille",
+                    text,
+                    brailleCells=encoded_cells,
+                    brailleCursor=cursor_position,
+                    **({"redacted": True} if redacted else {}),
+                )
 
     def display_dimensions(self, value):
         return braille.DisplayDimensions(1, 120)

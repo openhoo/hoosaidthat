@@ -164,6 +164,12 @@ test('NVDA control serializes mutating operations and fails closed on event loss
   assert.match(plugin, /completed\["result"\]/);
   assert.match(plugin, /finish request must be empty/);
   assert.match(plugin, /reason="timeout" if timed_out else "completed"/);
+  assert.match(plugin, /duplicate_idle_refresh = \(/);
+  assert.match(plugin, /STATE\.command == "event"/);
+  assert.match(plugin, /getattr\(braille\.handler, "_cells", \[\]\)/);
+  assert.match(plugin, /getattr\(braille\.handler, "_cursorPos", None\)/);
+  assert.match(plugin, /previous\.get\("kind"\) == "braille"/);
+  assert.match(plugin, /previous\.get\("brailleCells"\) == encoded_cells/);
   assert.match(plugin, /len\(pending\[peers\[endpoint\]\]\) < 1024 \* 1024/);
   assert.match(plugin, /NVDA process language does not match requested session locale/);
 });
