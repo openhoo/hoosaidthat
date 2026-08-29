@@ -53,10 +53,10 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           repository: openhoo/hoovda
-          ref: 431ec70b6c864f9df01dca83b1a393d5f51baa92
+          ref: 64ac5f81af8c7e994dc643e5efbbc5fc8bdbc832
           path: hoovda
       - name: Verify pinned HooVDA source
-        run: test "$(git -C hoovda rev-parse HEAD)" = "431ec70b6c864f9df01dca83b1a393d5f51baa92"
+        run: test "$(git -C hoovda rev-parse HEAD)" = "64ac5f81af8c7e994dc643e5efbbc5fc8bdbc832"
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version: '1.27.0'
@@ -83,7 +83,28 @@ jobs:
         env:
           CONTAINER_ENGINE: docker
           SCREEN_READER_IMAGE: hoosaidthat-hoovda:dev
+          KEEP_SCREEN_READER_CONTAINER: '1'
         run: node scripts/hoovda-parity.mjs en-US desktop
+      - name: Print retained HooVDA diagnostics
+        if: failure()
+        shell: bash
+        run: |
+          set -u
+          logs="$RUNNER_TEMP/hoovda-diagnostics"
+          mkdir -p "$logs"
+          while IFS= read -r container; do
+            destination="$logs/${container}.log"
+            if docker cp "$container:/tmp/hoosaidthat-runtime/logs/hoovda.stderr.log" "$destination"; then
+              echo "===== $container ====="
+              tail -n 500 "$destination"
+            fi
+          done < <(docker ps --all --filter label=dev.hoosaidthat.managed=true --format '{{.Names}}')
+      - name: Remove retained HooVDA containers
+        if: always()
+        shell: bash
+        run: |
+          docker ps --all --quiet --filter label=dev.hoosaidthat.managed=true \
+            | xargs --no-run-if-empty docker rm --force
       - run: CONTAINER_ENGINE=docker npm run test:e2e:hoovda -- --output test-results/hoovda-en-US-desktop
       - name: Qualify remaining complete HooVDA parity cells
         shell: bash
