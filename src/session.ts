@@ -187,6 +187,11 @@ export class ScreenReaderSession {
     action: 'focus' | 'observe' = 'observe',
   ): Promise<ScreenReaderObservation> {
     return await playwrightTest.step(`Screen reader: ${label}`, async () => {
+      // Playwright can mutate the foreground CDP Page while native browser
+      // focus remains in browser chrome. Re-enter and verify web content
+      // immediately before the operation so DOM focus and accessibility
+      // events cannot diverge.
+      await this.returnToPage();
       await this.show(label, 'Listening...');
       const afterSequence = await this.quietCursor();
       await operation();
