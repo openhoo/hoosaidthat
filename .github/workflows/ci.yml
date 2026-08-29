@@ -53,10 +53,10 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           repository: openhoo/hoovda
-          ref: a18f7fc14dc25c13e013da5c42ee769f6e6e959f
+          ref: a38ffc6522091e967e439544346778e5878f1265
           path: hoovda
       - name: Verify pinned HooVDA source
-        run: test "$(git -C hoovda rev-parse HEAD)" = "a18f7fc14dc25c13e013da5c42ee769f6e6e959f"
+        run: test "$(git -C hoovda rev-parse HEAD)" = "a38ffc6522091e967e439544346778e5878f1265"
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version: '1.27.0'

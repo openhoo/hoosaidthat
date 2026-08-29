@@ -767,7 +767,8 @@ async function prepareAction(
     await screenReader.act("nextList");
     await screenReader.act("nextListItem");
   } else if (action === "exitEmbeddedObject") {
-    await screenReader.observe(
+    const beforeFocus = await screenReader.checkpoint();
+    const focus = await screenReader.observe(
       "Focus control inside embedded frame",
       async () => {
         await page
@@ -776,6 +777,28 @@ async function prepareAction(
           .focus();
       },
     );
+    let focusEvents = focus.events;
+    let focused = focusEvents.some(
+      (event) => event.kind === "focus" && event.text === "Frame action",
+    );
+    if (!focused) {
+      const afterFocus = focusEvents.at(-1)?.sequence ?? beforeFocus;
+      focusEvents = (
+        await screenReader.readFrom(
+          afterFocus,
+          "Wait for embedded-frame control native focus",
+        )
+      ).events;
+      focused = focusEvents.some(
+        (event) => event.kind === "focus" && event.text === "Frame action",
+      );
+    }
+    // Chromium can expose the child document before its focused control. Do
+    // not let that delayed native focus event cross the next command boundary.
+    expect(
+      focused,
+      "embedded-frame control reached native screen-reader focus",
+    ).toBe(true);
   } else if (
     action === "nextVerticalParagraph" ||
     action === "previousVerticalParagraph"
