@@ -436,6 +436,10 @@ export interface ScreenReaderState {
   cursorMode?: string;
   virtualBufferActive?: boolean;
   focus: {
+    /** Opaque, session-local identity when the adapter exposes it. */
+    id?: string | null;
+    /** SHA-256 of the focused accessible document URL, when available. */
+    documentUrlSha256?: string;
     browserWindowActive: boolean;
     webContentFocused: boolean;
     role: string | null;
@@ -459,6 +463,8 @@ export interface ScreenReaderState {
 export interface ScreenReaderRuntimeObject {
   /** Opaque, session-local identity for repeat detection. */
   id?: string;
+  /** SHA-256 of a document URL; raw URL remains undisclosed. */
+  documentUrlSha256?: string;
   role: string | null;
   name: string | null;
   /** Link visitation state when this object is a link. */

@@ -59,11 +59,14 @@ bounded quiet interval.
 State also exposes HooVDA browse/focus mode and `cursorInDocument`. The optional
 `browse` object identifies the current virtual-buffer object and includes exact
 `quickNavigationTargets` matched by HooVDA. Link objects include `visited`.
-Protected object names are withheld and marked `redacted`. These fields let page
-element export include an element already selected by `documentStart`, without
-guessing from localized speech. Page-focus verification requires a runtime-native
-web-content focus signal; a Chromium tab wrapper or an active CDP document alone
-is insufficient.
+Protected object names are withheld and marked `redacted`. Document objects can
+include `documentUrlSha256`, the lowercase SHA-256 digest of the exact URL
+reported by AT-SPI; the raw URL is never returned. These fields let page element
+export include an element already selected by `documentStart`, without guessing
+from localized speech. Page-focus verification requires a runtime-native
+web-content focus signal. HooSaidThat additionally matches `documentUrlSha256`
+against the active Playwright page when available; a Chromium tab wrapper or an
+active CDP document alone is insufficient.
 
 Finish closes the test recording and returns SHA-256-bound artifacts:
 

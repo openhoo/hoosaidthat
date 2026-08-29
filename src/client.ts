@@ -186,6 +186,10 @@ export class HttpScreenReaderClient {
         cursorMode: value.cursor.mode,
         virtualBufferActive: value.cursorInDocument,
         focus: {
+          id: focus?.id ?? null,
+          ...(focus?.documentUrlSha256
+            ? { documentUrlSha256: focus.documentUrlSha256 }
+            : {}),
           browserWindowActive: value.browserWindowActive,
           webContentFocused: value.webContentFocused,
           role: focus?.role ?? null,
@@ -1081,6 +1085,9 @@ function runtimeObject(value: unknown): ScreenReaderRuntimeObject | null {
   const location = value.location;
   return {
     ...(typeof value.id === 'string' ? { id: value.id } : {}),
+    ...(typeof value.documentUrlSha256 === 'string'
+      ? { documentUrlSha256: value.documentUrlSha256 }
+      : {}),
     role: typeof value.role === 'string' ? value.role : null,
     name: typeof value.name === 'string' ? value.name : null,
     ...(typeof value.visited === 'boolean' ? { visited: value.visited } : {}),
@@ -1128,6 +1135,7 @@ function isRuntimeObjectWire(value: unknown): boolean {
     keys.some(
       (key) =>
         key !== 'id' &&
+        key !== 'documentUrlSha256' &&
         key !== 'role' &&
         key !== 'name' &&
         key !== 'location' &&
@@ -1141,6 +1149,13 @@ function isRuntimeObjectWire(value: unknown): boolean {
   if (
     value.id !== undefined &&
     (typeof value.id !== 'string' || value.id.length < 1 || value.id.length > 200)
+  ) {
+    return false;
+  }
+  if (
+    value.documentUrlSha256 !== undefined &&
+    (typeof value.documentUrlSha256 !== 'string' ||
+      !/^[0-9a-f]{64}$/.test(value.documentUrlSha256))
   ) {
     return false;
   }

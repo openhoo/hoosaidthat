@@ -97,7 +97,13 @@ test('client drives HooVDA v2 session and verifies artifacts', async (t) => {
         webContentFocused: true,
         cursorInDocument: true,
         cursor: { mode: 'browse' },
-        focus: { bus: ':1.5', path: '/focus' },
+        focus: {
+          id: 'focus-document',
+          role: 'document web',
+          name: 'Checkout',
+          documentUrlSha256: '0'.repeat(64),
+          location: null,
+        },
         browse: {
           id: 'browse-link',
           role: 'link',
@@ -206,6 +212,8 @@ test('client drives HooVDA v2 session and verifies artifacts', async (t) => {
   assert.equal((await client.capabilities()).actions[0]?.action, 'nextHeading');
   const state = await client.state();
   assert.equal(state.lastSequence, 2);
+  assert.equal(state.focus.id, 'focus-document');
+  assert.equal(state.focus.documentUrlSha256, '0'.repeat(64));
   assert.equal(state.browse?.name, 'Skip to checkout');
   assert.equal(state.browse?.visited, false);
   assert.deepEqual(state.browse?.quickNavigationTargets, ['link', 'unvisitedLink']);

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { basename, dirname } from 'node:path';
 import { test as playwrightTest, type Locator, type Page, type TestInfo } from '@playwright/test';
@@ -36,6 +37,7 @@ export class ScreenReaderSession {
   private readonly supportedActions: ReadonlySet<ScreenReaderAction>;
   private screenshotIndex = 0;
   private pageAriaSnapshotCaptured = false;
+  private verifiedPageDocumentFocusId: string | null = null;
 
   private constructor(
     page: Page,
@@ -683,8 +685,24 @@ export class ScreenReaderSession {
       const state = await this.client.state();
       if (!state.focus.webContentFocused) return false;
       if (state.focus.role !== 'document web' && state.focus.role !== 'document frame') return true;
+      if (state.focus.documentUrlSha256 !== undefined) {
+        const pageURLSHA256 = createHash('sha256').update(this.page.url()).digest('hex');
+        if (state.focus.documentUrlSha256 !== pageURLSHA256) return false;
+        this.verifiedPageDocumentFocusId = state.focus.id ?? null;
+        return true;
+      }
       const title = (await this.page.title()).trim();
-      return title.length === 0 || state.focus.name === title;
+      if (title.length === 0) return true;
+      if (state.focus.name === title) {
+        this.verifiedPageDocumentFocusId = state.focus.id ?? null;
+        return true;
+      }
+      return (
+        state.focus.name === null &&
+        state.focus.id !== undefined &&
+        state.focus.id !== null &&
+        state.focus.id === this.verifiedPageDocumentFocusId
+      );
     };
     if (await pageContextReady()) return;
     for (let attempt = 0; attempt < maxGestures; attempt += 1) {
