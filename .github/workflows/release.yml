@@ -23,6 +23,10 @@ permissions:
   id-token: write
   attestations: write
 
+concurrency:
+  group: release-${{ inputs.version }}
+  cancel-in-progress: false
+
 jobs:
   release:
     if: inputs.confirm_release
@@ -70,6 +74,57 @@ jobs:
           test "$(git -C hoovda rev-parse HEAD)" = "$HOOVDA_REF"
       - name: Verify npm publishing identity
         run: npm whoami
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Require unused npm version
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/release-absence-guards.sh" <<'GUARDS'
+          require_unused_npm_version() {
+            local package_name public_result stage_result
+            package_name=$(node -p 'require("./package.json").name')
+            public_result=$(mktemp)
+            if npm view "${package_name}@${RELEASE_VERSION}" version --json \
+              --registry=https://registry.npmjs.org > "$public_result" 2> "${public_result}.stderr"; then
+              echo "npm version already exists; release refused" >&2
+              return 1
+            fi
+            if ! jq -e 'type == "object" and .error.code == "E404"' "$public_result" > /dev/null; then
+              echo "Cannot prove npm version is absent; release refused" >&2
+              return 1
+            fi
+            stage_result=$(mktemp)
+            if npm stage list "$package_name" --json --registry=https://registry.npmjs.org \
+              > "$stage_result" 2> "${stage_result}.stderr"; then
+              if ! jq -e --arg package "$package_name" --arg version "$RELEASE_VERSION" \
+                'type == "array" and all(.[]; type == "object" and .packageName == $package and (.version | type == "string")) and all(.[]; .version != $version)' \
+                "$stage_result" > /dev/null; then
+                echo "npm staged version exists or stage listing is invalid; release refused" >&2
+                return 1
+              fi
+            elif ! jq -e 'type == "object" and .error.code == "E404"' "$stage_result" > /dev/null; then
+              echo "Cannot prove npm staged version is absent; release refused" >&2
+              return 1
+            fi
+          }
+          require_unused_image_tag() {
+            local reference=$1 result error
+            result=$(mktemp)
+            if docker buildx imagetools inspect "$reference" > "$result" 2>&1; then
+              echo "Image version tag already exists: $reference; release refused" >&2
+              return 1
+            fi
+            error=$(cat "$result")
+            error=${error#ERROR: }
+            case "$error" in
+              "$reference: not found"|"$reference: manifest unknown"|"$reference: manifest unknown: manifest unknown"|"manifest unknown") ;;
+              *) echo "Cannot prove image version tag is absent: $reference; release refused" >&2; return 1 ;;
+            esac
+          }
+          GUARDS
+          source "$RUNNER_TEMP/release-absence-guards.sh"
+          require_unused_npm_version
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
       - name: Verify HooVDA release gate
@@ -127,6 +182,31 @@ jobs:
             printf 'HOOVDA_CANDIDATE=%s@%s\n' "$HOOVDA_IMAGE" "$hoovda_digest"
             printf 'ORCA_CANDIDATE=%s@%s\n' "$ORCA_IMAGE" "$orca_digest"
           } >> "$GITHUB_ENV"
+          mkdir -p test-results
+          jq -n --arg repository "$GITHUB_REPOSITORY" --arg sourceRef "$GITHUB_REF" \
+            --arg sourceCommit "$GITHUB_SHA" --arg companionCommit "$hoovda_commit" \
+            --arg version "$RELEASE_VERSION" --arg runId "$GITHUB_RUN_ID" \
+            --arg runAttempt "$GITHUB_RUN_ATTEMPT" \
+            --arg runUrl "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
+            --arg candidateTag "$candidate_tag" \
+            --arg engineImage "$ENGINE_IMAGE" --arg engineDigest "$engine_digest" \
+            --arg hoovdaImage "$HOOVDA_IMAGE" --arg hoovdaDigest "$hoovda_digest" \
+            --arg orcaImage "$ORCA_IMAGE" --arg orcaDigest "$orca_digest" \
+            '{schemaVersion: 1, repository: $repository, sourceRef: $sourceRef,
+              sourceCommit: $sourceCommit, companionRepository: "openhoo/hoovda",
+              companionCommit: $companionCommit, version: $version,
+              run: {id: $runId, attempt: $runAttempt, url: $runUrl},
+              images: [
+                {name: "engine", candidateTag: ($engineImage + ":" + $candidateTag),
+                  reference: ($engineImage + "@" + $engineDigest), digest: $engineDigest,
+                  versionTag: ($engineImage + ":" + $version)},
+                {name: "hoovda", candidateTag: ($hoovdaImage + ":" + $candidateTag),
+                  reference: ($hoovdaImage + "@" + $hoovdaDigest), digest: $hoovdaDigest,
+                  versionTag: ($hoovdaImage + ":" + $version)},
+                {name: "orca", candidateTag: ($orcaImage + ":" + $candidateTag),
+                  reference: ($orcaImage + "@" + $orcaDigest), digest: $orcaDigest,
+                  versionTag: ($orcaImage + ":" + $version)}]}' \
+            > test-results/release-candidates.json
       - name: Qualify release candidates
         env:
           CONTAINER_ENGINE: docker
@@ -168,13 +248,17 @@ jobs:
             test -f "$report"
             node scripts/verify-web-report.mjs "$report" test-results/report-viewer
           done
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        if: always()
-        with:
-          name: release-qualification-evidence
-          path: test-results
-          if-no-files-found: ignore
-          retention-days: 30
+      - name: Require unused publication destinations
+        shell: bash
+        run: |
+          set -euo pipefail
+          source "$RUNNER_TEMP/release-absence-guards.sh"
+          require_unused_npm_version
+          require_unused_image_tag "${ENGINE_IMAGE}:${RELEASE_VERSION}"
+          require_unused_image_tag "${HOOVDA_IMAGE}:${RELEASE_VERSION}"
+          require_unused_image_tag "${ORCA_IMAGE}:${RELEASE_VERSION}"
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
       - name: Promote qualified image manifests
         shell: bash
         run: |
@@ -191,6 +275,67 @@ jobs:
           promote "$HOOVDA_CANDIDATE" "${HOOVDA_IMAGE}:${RELEASE_VERSION}"
           promote "$ORCA_CANDIDATE" "${ORCA_IMAGE}:${RELEASE_VERSION}"
       - name: Stage npm package with provenance
-        run: npm stage publish --access public --provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm_tag=latest
+          if [[ "$RELEASE_VERSION" == *-* ]]; then
+            npm_tag=next
+          fi
+          npm stage publish --access public --provenance --tag "$npm_tag" --json \
+            > "$RUNNER_TEMP/npm-stage-raw.json"
+          export NPM_RELEASE_TAG="$npm_tag"
+          node --input-type=module <<'NODE'
+          import { readFileSync, writeFileSync } from 'node:fs';
+          const { name } = JSON.parse(readFileSync('package.json', 'utf8'));
+          const raw = JSON.parse(readFileSync(`${process.env.RUNNER_TEMP}/npm-stage-raw.json`, 'utf8'));
+          const item = raw[name];
+          if (!item || item.name !== name || item.version !== process.env.RELEASE_VERSION ||
+              item.id !== `${name}@${process.env.RELEASE_VERSION}` ||
+              typeof item.stageId !== 'string' ||
+              !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(item.stageId) ||
+              typeof item.shasum !== 'string' || !/^[0-9a-f]{40}$/.test(item.shasum) ||
+              typeof item.integrity !== 'string' || !/^sha512-[A-Za-z0-9+/]+={0,2}$/.test(item.integrity)) {
+            throw new Error('npm stage receipt does not match the release identity');
+          }
+          const receipt = {
+            schemaVersion: 1,
+            repository: process.env.GITHUB_REPOSITORY,
+            sourceRef: process.env.GITHUB_REF,
+            sourceCommit: process.env.GITHUB_SHA,
+            companionCommit: process.env.HOOVDA_REF,
+            run: { id: process.env.GITHUB_RUN_ID, attempt: process.env.GITHUB_RUN_ATTEMPT },
+            provenanceRequested: true,
+            package: { id: item.id, name: item.name, version: item.version,
+              stageId: item.stageId, tag: process.env.NPM_RELEASE_TAG,
+              shasum: item.shasum, integrity: item.integrity },
+          };
+          for (const key of ['size', 'unpackedSize', 'entryCount']) {
+            if (!Number.isSafeInteger(item[key]) || item[key] < 0) {
+              throw new Error(`npm stage receipt has invalid ${key}`);
+            }
+            receipt.package[key] = item[key];
+          }
+          writeFileSync('test-results/npm-stage-receipt.json', `${JSON.stringify(receipt, null, 2)}\n`);
+          NODE
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Preserve release qualification and publication receipts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        if: always()
+        with:
+          name: release-qualification-evidence
+          path: test-results
+          if-no-files-found: ignore
+          retention-days: 30
+      - name: Preserve Buildx attestation metadata
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        if: always()
+        with:
+          name: release-buildx-metadata
+          path: |
+            ${{ runner.temp }}/hoovda-engine-metadata.json
+            ${{ runner.temp }}/hoovda-metadata.json
+            ${{ runner.temp }}/orca-metadata.json
+          if-no-files-found: ignore
+          retention-days: 30
