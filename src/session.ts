@@ -690,7 +690,7 @@ export class ScreenReaderSession {
     if (!Number.isInteger(maxGestures) || maxGestures < 1 || maxGestures > 20) {
       throw new Error('returnToPage maxGestures must be an integer between 1 and 20');
     }
-    // HooVDA can retain the previous tab's native focus while Playwright brings
+    // Native focus can retain the previous tab while Playwright brings
     // another CDP Page forward. Conversely, sending F6 while this Page already
     // owns native focus moves focus into browser chrome. Chromium reports
     // document.hasFocus() even while its address bar and tab strip are focused,
@@ -700,18 +700,24 @@ export class ScreenReaderSession {
     await this.page.waitForTimeout(this.options.quietMs);
     const pageContextReady = async (): Promise<boolean> => {
       const state = await this.client.state();
-      if (!state.focus.webContentFocused) return false;
+      if (!state.focus.browserWindowActive || !state.focus.webContentFocused) return false;
+      const role = state.focus.role?.trim().toLowerCase().replace(/\s+/g, ' ');
+      if (!role || role === 'unknown' || role === 'invalid' || role === 'invalid role') return false;
+      // NVDA exposes a stable enum role ("document"); legacy adapters can
+      // expose localized labels. Both must verify the active page identity.
+      const documentFocused = role === 'document' || role === 'dokument' ||
+        role === 'document web' || role === 'document frame';
       const pageURL = this.page.url();
       if (state.focus.documentUrlSha256 !== undefined) {
         const pageURLSHA256 = createHash('sha256').update(pageURL).digest('hex');
         if (state.focus.documentUrlSha256 !== pageURLSHA256) return false;
-        if (state.focus.role === 'document web' || state.focus.role === 'document frame') {
+        if (documentFocused) {
           this.verifiedPageDocumentFocusId = state.focus.id ?? null;
           this.verifiedPageDocumentURL = pageURL;
         }
         return true;
       }
-      if (state.focus.role !== 'document web' && state.focus.role !== 'document frame') return true;
+      if (!documentFocused) return true;
       const title = (await this.page.title()).trim();
       if (title.length === 0) return true;
       if (state.focus.name === title) {
