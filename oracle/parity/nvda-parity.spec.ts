@@ -259,6 +259,17 @@ actionsTest(
         `${action} completed evidence`,
       ).toBe(true);
       assertSemanticOutput(action, observation.speech, observation.braille);
+      if (action === "previousFocusable") {
+        await expect(
+          page.getByRole("button", { name: "Details action" }),
+        ).toBeFocused();
+        const state = await screenReader.state();
+        expect(state.focus.browserWindowActive).toBe(true);
+        expect(state.focus.webContentFocused).toBe(true);
+        expect(state.focus.name, "native backward focus target").toBe(
+          "Details action",
+        );
+      }
       if (
         action === "stopSpeech" ||
         action === "pauseSpeech" ||
@@ -372,9 +383,16 @@ settingsTest(
         /Checkout parity.*(?:heading|Überschrift)/iu,
       );
 
-      const password = await screenReader.focus(
-        page.getByLabel("Parity password"),
+      const passwordTarget = page.getByLabel("Parity password");
+      const password = await screenReader.focus(passwordTarget);
+      await expect(passwordTarget).toBeFocused();
+      const protectedState = await screenReader.state();
+      expect(protectedState.focus.browserWindowActive).toBe(true);
+      expect(protectedState.focus.webContentFocused).toBe(true);
+      expect(protectedState.focus.role, "native protected entry role").toMatch(
+        /^(?:editable\s*text|entry|password\s*(?:text|edit)|edit)$/iu,
       );
+      expect(protectedState.focus.name, "native protected name withheld").toBeNull();
       expect(JSON.stringify(password.events)).not.toContain(
         "DO_NOT_LEAK_PARITY_SECRET",
       );
@@ -717,12 +735,14 @@ async function prepareAction(
     }
     if (action === "previousReviewMode")
       await screenReader.act("nextReviewMode");
-  } else if (action === "activate") {
+  } else if (action === "activate" || action === "previousFocusable") {
+    // Backward navigation must target a named nonprotected control. Password
+    // focus is separately qualified through native redaction in settings.
     await focusFixture(
       screenReader,
       page.getByRole("button", { name: "Activate action" }),
     );
-  } else if (action === "previousFocusable" || action === "activateWithSpace") {
+  } else if (action === "activateWithSpace") {
     await focusFixture(
       screenReader,
       page.getByRole("checkbox", { name: "Parity check" }),
@@ -952,7 +972,7 @@ function expectLiveRegion(
 
 const semanticExpectations = new Map<ScreenReaderAction, RegExp>([
   ["nextFocusable", /Activate action/iu],
-  ["previousFocusable", /Parity password/iu],
+  ["previousFocusable", /Details action/iu],
   ["activate", /Parity activated/iu],
   ["activateWithSpace", /checked|aktiviert|ausgewählt/iu],
   ["escape", /NVDA parity fixture|Parity visited link/iu],
