@@ -128,6 +128,19 @@ other event remain observable.
 The NVDA oracle likewise makes successful finish calls idempotent and retains
 the eight most recent event artifacts.
 
+Native focus and browser readiness remain required observations. Navigator,
+review, and mouse objects can become disconnected after navigation; an
+unreadable optional object is reported as `null`, and unavailable mouse
+coordinates omit the mouse diagnostic. Focus roles use NVDA's stable enum names
+rather than localized labels. Document focus must match the active page's title
+or available URL identity. A command emits one settlement after its required
+state and event-history reads succeed, or one failure settlement if they fail.
+
+Protected speech, focus, live-region, and braille text is replaced with
+`[redacted]` before entering event history or exported artifacts. Protected
+braille cells are removed. Missing or failed native protection observations
+also withhold content; an unavailable protection flag never permits a name read.
+
 Locale is a process boundary. The SSH controller atomically selects `en-US` or
 `de-DE`, restarts the owned runtime, and starts NVDA with its official `--lang`
 override. Runtime status attests that locale. Session creation fails closed when

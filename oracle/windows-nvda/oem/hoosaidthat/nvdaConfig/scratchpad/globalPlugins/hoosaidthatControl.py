@@ -608,6 +608,13 @@ class OracleState:
         self.speech_paused = False
 
     def append(self, kind, text="", **fields):
+        # Withhold protected content before it reaches history, HTTP responses,
+        # or finished artifacts. A redacted flag alone does not remove data.
+        if fields.get("redacted", False):
+            text = "[redacted]"
+            if kind == "braille":
+                fields["brailleCells"] = ""
+                fields["brailleCursor"] = 0
         with self.condition:
             self.sequence += 1
             event = {
@@ -751,11 +758,19 @@ def configure_session(locale, keyboard_layout):
         STATE.keyboard_layout = keyboard_layout
 
 
+def object_is_protected(obj):
+    """Text is observable only after native protection is explicitly false."""
+    try:
+        return getattr(obj, "isProtected", None) is not False
+    except Exception:
+        return True
+
+
 def current_focus_is_protected():
     try:
-        return bool(getattr(api.getFocusObject(), "isProtected", False))
+        return object_is_protected(api.getFocusObject())
     except Exception:
-        return False
+        return True
 
 
 def read_presentation_settings():
@@ -855,19 +870,24 @@ def apply_presentation_settings(settings):
 def current_state():
     def inspect():
         focus = api.getFocusObject()
-        navigator = api.getNavigatorObject()
-        review_position = api.getReviewPosition()
-        review_object = getattr(review_position, "obj", None)
-        mouse_x, mouse_y = winUser.getCursorPos()
+
+        def role_name(role):
+            # Enum names are stable across NVDA's process languages. In
+            # particular, DOCUMENT must remain recognizable to the host's
+            # native document/title readiness check in both en-US and de-DE.
+            native_name = getattr(role, "name", None)
+            if native_name:
+                return str(native_name).lower().replace("_", " ")
+            return getattr(role, "displayString", None)
 
         def object_state(obj):
             if obj is None:
                 return None
-            protected = bool(getattr(obj, "isProtected", False))
+            # A native error here invalidates this optional object snapshot;
+            # it must never be interpreted as permission to read its name.
+            protected = getattr(obj, "isProtected", None) is not False
             role = getattr(obj, "role", None)
-            role_name = getattr(role, "displayString", None) or getattr(
-                role, "name", None
-            )
+            object_role_name = role_name(role)
             try:
                 left, top, width, height = obj.location
                 location = {
@@ -886,49 +906,65 @@ def current_state():
                     getattr(getattr(obj, "appModule", None), "appName", ""),
                     getattr(obj, "windowHandle", ""),
                     getattr(obj, "IAccessibleChildID", ""),
-                    role_name,
+                    object_role_name,
                     object_name,
                     location,
                 )
             )
             return {
                 "id": hashlib.sha256(identity.encode("utf-8")).hexdigest()[:32],
-                "role": str(role_name) if role_name else None,
+                "role": str(object_role_name) if object_role_name else None,
                 "name": object_name or None,
                 "location": location,
                 **({"redacted": True} if protected else {}),
             }
 
+        def optional_object_state(get_object):
+            # UIA objects cached by NVDA can become disconnected after page
+            # navigation. Keep these diagnostics independent from required
+            # native focus/window readiness, including lazy review creation.
+            try:
+                return object_state(get_object())
+            except Exception:
+                return None
+
         app_name = getattr(getattr(focus, "appModule", None), "appName", "") or ""
         interceptor = getattr(focus, "treeInterceptor", None)
         role = getattr(focus, "role", None)
-        role_name = getattr(role, "displayString", None) or getattr(role, "name", None)
-        focus_protected = bool(getattr(focus, "isProtected", False))
+        focus_role_name = role_name(role)
+        focus_protected = object_is_protected(focus)
         mode = (
             "focus"
             if interceptor is not None
             and bool(getattr(interceptor, "passThrough", False))
             else "browse"
         )
+        try:
+            mouse_x, mouse_y = winUser.getCursorPos()
+            mouse_state = {
+                "x": int(mouse_x),
+                "y": int(mouse_y),
+                "object": optional_object_state(api.getMouseObject),
+            }
+        except Exception:
+            mouse_state = None
         return {
             "browserWindowActive": app_name.lower() in ("chrome", "msedge"),
             "webContentFocused": interceptor is not None,
             "cursorInDocument": interceptor is not None,
             "cursor": {"mode": mode},
             "focus": {
-                "role": str(role_name) if role_name else None,
+                "role": str(focus_role_name) if focus_role_name else None,
                 "name": None
                 if focus_protected
                 else str(getattr(focus, "name", "") or "") or None,
                 **({"redacted": True} if focus_protected else {}),
             },
-            "navigator": object_state(navigator),
-            "review": object_state(review_object),
-            "mouse": {
-                "x": int(mouse_x),
-                "y": int(mouse_y),
-                "object": object_state(api.getMouseObject()),
-            },
+            "navigator": optional_object_state(api.getNavigatorObject),
+            "review": optional_object_state(
+                lambda: getattr(api.getReviewPosition(), "obj", None)
+            ),
+            **({"mouse": mouse_state} if mouse_state is not None else {}),
             "speechMode": speech.getState().speechMode.name,
             "speechPaused": STATE.speech_paused,
         }
@@ -995,14 +1031,21 @@ def execute_action(command, argument):
                 STATE.condition.wait(remaining)
         if time.monotonic() >= hard_deadline and time.monotonic() < quiet_deadline:
             timed_out = True
-        STATE.append("commandSettled", reason="timeout" if timed_out else "completed")
+        # Taking the mandatory snapshot can fail even after gesture delivery.
+        # Do not commit a successful settlement before all required reads and
+        # retained-history checks have succeeded.
+        state = current_state()
         with STATE.lock:
-            cursor = STATE.sequence
             events = [
                 event
                 for event in STATE.since(before)
                 if event.get("causalCommand") == command
             ]
+            events.append(
+                STATE.append("commandSettled", reason="timeout" if timed_out else "completed")
+            )
+            cursor = STATE.sequence
+            state["lastSequence"] = cursor
         return {
             "command": command,
             "gesture": gesture,
@@ -1011,7 +1054,7 @@ def execute_action(command, argument):
             "cursor": cursor,
             "timedOut": timed_out,
             "events": events,
-            "state": current_state(),
+            "state": state,
         }
     except BaseException as error:
         STATE.append("commandSettled", reason="failed", error=type(error).__name__)
@@ -1508,6 +1551,10 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
         ]
         if text or command_types:
             redacted = current_focus_is_protected()
+            with STATE.lock:
+                live_region = STATE.live_region_context
+                if live_region is not None:
+                    redacted = redacted or live_region["protected"]
             STATE.append(
                 "speech",
                 text,
@@ -1515,7 +1562,6 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
                 **({"redacted": True} if redacted else {}),
             )
             with STATE.lock:
-                live_region = STATE.live_region_context
                 if live_region is not None:
                     live_region["emitted"] = True
             if live_region is not None:
@@ -1531,6 +1577,10 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
         text = str(rawText or "").strip()
         if text or values:
             redacted = current_focus_is_protected()
+            with STATE.lock:
+                live_region = STATE.live_region_context
+                if live_region is not None:
+                    redacted = redacted or live_region["protected"]
             # pre_writeCells receives the display frame after NVDA applies its
             # blinking cursor shape. Preserve stable translated cells and
             # expose the cursor independently, matching the protocol model.
@@ -1548,6 +1598,12 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
             encoded_cells = base64.b64encode(
                 bytes(value & 0xFF for value in stable_cells)
             ).decode("ascii")
+            if redacted:
+                # Compare the same withheld representation that append stores,
+                # so protected idle refreshes cannot prevent quiet settlement.
+                text = "[redacted]"
+                encoded_cells = ""
+                cursor_position = 0
             with STATE.lock:
                 previous = STATE.events[-1] if STATE.events else None
                 duplicate_idle_refresh = (
@@ -1578,13 +1634,14 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
             role_name = getattr(role, "displayString", None) or getattr(
                 role, "name", ""
             )
-            name = str(getattr(obj, "name", "") or "")
+            protected = object_is_protected(obj)
+            name = "" if protected else str(getattr(obj, "name", "") or "")
             STATE.append(
                 "focus",
                 " ".join(part for part in (name, str(role_name or "")) if part),
                 **(
                     {"redacted": True}
-                    if bool(getattr(obj, "isProtected", False))
+                    if protected
                     else {}
                 ),
             )
@@ -1602,7 +1659,11 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
         self.capture_live_region(obj, nextHandler, "assertive")
 
     def capture_live_region(self, obj, nextHandler, priority):
-        context = {"priority": priority, "emitted": False}
+        context = {
+            "priority": priority,
+            "emitted": False,
+            "protected": object_is_protected(obj),
+        }
         with STATE.lock:
             previous_context = STATE.live_region_context
             STATE.live_region_context = context
@@ -1616,7 +1677,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
                 STATE.live_region_context = previous_context
         if not context["emitted"]:
             try:
-                protected = bool(getattr(obj, "isProtected", False))
+                protected = context["protected"] or object_is_protected(obj)
                 text = (
                     "[redacted]"
                     if protected
@@ -1636,6 +1697,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
                                 and event.get("text")
                             ):
                                 text = event["text"]
+                                protected = protected or event.get("redacted", False)
                                 break
                 STATE.append(
                     "liveRegion",

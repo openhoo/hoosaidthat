@@ -18,12 +18,14 @@ interface ReturnToPageHarness {
 
 function returnToPageHarness(initial: {
   webContentFocused: boolean;
-  role: string;
+  browserWindowActive?: boolean;
+  role: string | null;
   name: string | null;
   id?: string;
   documentUrlSha256?: string;
 }): ReturnToPageHarness {
   let webContentFocused = initial.webContentFocused;
+  let browserWindowActive = initial.browserWindowActive ?? true;
   let role = initial.role;
   let name = initial.name;
   let id = initial.id;
@@ -43,7 +45,7 @@ function returnToPageHarness(initial: {
     client: {
       value: {
         state: async () => ({
-          focus: { id, documentUrlSha256, webContentFocused, role, name },
+          focus: { id, documentUrlSha256, browserWindowActive, webContentFocused, role, name },
         }),
       },
     },
@@ -52,6 +54,7 @@ function returnToPageHarness(initial: {
       value: async () => {
         gestures += 1;
         webContentFocused = true;
+        browserWindowActive = true;
         role = 'document web';
         name = 'Exact focus fixture';
         id = 'target-document';
@@ -107,6 +110,52 @@ test('returnToPage preserves native web-element focus', async () => {
 
   await harness.session.returnToPage();
 
+  assert.equal(harness.gestures(), 0);
+});
+
+for (const role of ['document', 'Dokument', ' DOCUMENT ', 'Document Frame']) {
+  test(`returnToPage verifies the active page title for native document role ${role}`, async () => {
+    const harness = returnToPageHarness({
+      webContentFocused: true, role, name: 'Previous page',
+    });
+    await harness.session.returnToPage();
+    assert.equal(harness.gestures(), 1);
+  });
+
+  test(`returnToPage preserves matching native document role ${role}`, async () => {
+    const harness = returnToPageHarness({
+      webContentFocused: true, role, name: 'Exact focus fixture',
+    });
+    await harness.session.returnToPage();
+    assert.equal(harness.gestures(), 0);
+  });
+}
+
+for (const role of [null, '', '   ', 'unknown', ' UNKNOWN ', 'invalid']) {
+  test(`returnToPage rejects unavailable native focus role ${JSON.stringify(role)}`, async () => {
+    const harness = returnToPageHarness({
+      webContentFocused: true, role, name: 'Exact focus fixture',
+      documentUrlSha256: '4fa72d735a519ee13d4174f6b71c7ea92a1faa30cb445faf2dcacdf1ac343354',
+    });
+    await harness.session.returnToPage();
+    assert.equal(harness.gestures(), 1);
+  });
+}
+
+test('returnToPage rejects a nonbrowser interceptor reporting web focus', async () => {
+  const harness = returnToPageHarness({
+    webContentFocused: true, browserWindowActive: false,
+    role: 'push button', name: 'Target button',
+  });
+  await harness.session.returnToPage();
+  assert.equal(harness.gestures(), 1);
+});
+
+test('returnToPage preserves stable NVDA web-element role names', async () => {
+  const harness = returnToPageHarness({
+    webContentFocused: true, role: 'BUTTON', name: 'Target button',
+  });
+  await harness.session.returnToPage();
   assert.equal(harness.gestures(), 0);
 });
 
