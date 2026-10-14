@@ -83,6 +83,7 @@ coreTest(
     const liveButton = page.getByRole("button", { name: "Update live region" });
     await focusFixture(screenReader, liveButton, "Focus live-region fixture");
     const live = await screenReader.activate();
+    await expect(page.locator("#live")).toHaveText("Parity live update");
     expect(live.speech).toContain("Parity live update");
     expect(live.braille).toContain("Parity live update");
     expect(
@@ -93,6 +94,28 @@ coreTest(
       ),
       "semantic live-region event",
     ).toBe(true);
+
+    // NVDA can move its browse caret while retaining DOM focus on a button.
+    // Refocusing that already-active button must restore native activation.
+    const activateButton = page.getByRole("button", { name: "Activate action" });
+    await focusFixture(screenReader, activateButton, "Focus activation fixture");
+    await expect(activateButton).toBeFocused();
+    const documentEnd = await screenReader.documentEnd();
+    await expect(activateButton).toBeFocused();
+    expect(documentEnd.speech).toMatch(semanticExpectations.get("documentEnd")!);
+    expect(documentEnd.speech).not.toContain("Activate action");
+
+    const refocused = await focusFixture(
+      screenReader,
+      activateButton,
+      "Restore activation fixture browse caret",
+    );
+    expect(refocused.speech).toContain("Activate action");
+    const activation = await screenReader.activate();
+    await expect(page.locator("#live")).toHaveText("Parity activated");
+    expect(activation.speech).toContain("Parity activated");
+    expect(activation.braille).toContain("Parity activated");
+    expectLiveRegion(activation, "Parity activated", "assertive");
   },
 );
 
@@ -499,11 +522,7 @@ async function focusFixture(
   locator: Parameters<ScreenReaderSession["focus"]>[0],
   label = "Focus parity fixture",
 ) {
-  return await screenReader.observe(
-    label,
-    async () => locator.focus(),
-    "focus",
-  );
+  return await screenReader.focus(locator, label);
 }
 
 async function verifiedReturnToPage(

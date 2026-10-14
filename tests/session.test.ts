@@ -4,10 +4,174 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
+import { runInNewContext } from 'node:vm';
 import { ScreenReaderSession } from '../src/session.js';
 import { ScreenReaderProtocolError } from '../src/client.js';
-import type { ScreenReaderObservation } from '../src/types.js';
+import type { ScreenReaderAction, ScreenReaderObservation } from '../src/types.js';
 import type { ReportSnapshot } from '../src/report.js';
+
+interface NativeFocusPosition {
+  targetActive: boolean;
+  browserWindowActive: boolean | undefined;
+  webContentFocused: boolean | undefined;
+  caret: 'target' | 'elsewhere';
+}
+
+function focusHarness(options: {
+  reader?: 'nvda' | 'orca' | 'hoovda';
+  initiallyActive?: boolean;
+  initialCaret?: NativeFocusPosition['caret'];
+  previous: NativeFocusPosition;
+  forward: NativeFocusPosition[];
+}) {
+  class TestElement {
+    tabIndex = 0;
+    shadowRoot = null;
+  }
+  const target = new TestElement();
+  const other = new TestElement();
+  const document = { activeElement: options.initiallyActive === false ? other : target };
+  let native: NativeFocusPosition = {
+    targetActive: options.initiallyActive !== false,
+    browserWindowActive: true, webContentFocused: true, caret: options.initialCaret ?? 'elsewhere',
+  };
+  let forwardIndex = 0;
+  let activations = 0;
+  const actions: ScreenReaderAction[] = [];
+  const entries: Array<{ index: number; observation: ScreenReaderObservation }> = [];
+  const setPosition = (position: NativeFocusPosition) => {
+    native = position;
+    document.activeElement = position.targetActive ? target : other;
+  };
+  const session = Object.create(ScreenReaderSession.prototype) as ScreenReaderSession;
+  Object.defineProperties(session, {
+    page: { value: {
+      bringToFront: async () => undefined,
+      waitForTimeout: async () => undefined,
+      url: () => 'about:blank',
+    } },
+    client: { value: { state: async () => ({ focus: {
+      browserWindowActive: native.browserWindowActive,
+      webContentFocused: native.webContentFocused,
+      role: 'button', name: native.targetActive ? 'Target button' : 'Other object',
+    } }) } },
+    options: { value: { screenReader: options.reader ?? 'nvda', quietMs: 0 } },
+    entries: { value: entries },
+    reportSnapshots: { value: [] },
+    show: { value: async () => undefined },
+    act: { value: async (action: ScreenReaderAction) => {
+      actions.push(action);
+      if (action === 'previousFocusable') setPosition(options.previous);
+      if (action === 'nextFocusable') {
+        setPosition(options.forward[Math.min(forwardIndex, options.forward.length - 1)]!);
+        forwardIndex += 1;
+      }
+      if (action === 'documentEnd') setPosition({ ...native, caret: 'elsewhere' });
+      // NVDA and HooVDA activate at the browse cursor independently of DOM
+      // focus. HooVDA's readCurrent also reports that cursor without moving it.
+      if (action === 'activate' && native.browserWindowActive === true &&
+          native.webContentFocused === true &&
+          (options.reader === 'orca' ? native.targetActive : native.caret === 'target')) {
+        activations += 1;
+      }
+      const observation: ScreenReaderObservation = {
+        action, label: action, events: [], speechEvents: [], brailleEvents: [],
+        speech: native.targetActive && native.webContentFocused === true &&
+          !(options.reader === 'hoovda' && action === 'readCurrent' && native.caret !== 'target')
+          ? 'Target button' : 'Other object',
+        braille: '', timedOut: false,
+      };
+      entries.push({ index: entries.length + 1, observation });
+      return observation;
+    } },
+  });
+  const locator = {
+    scrollIntoViewIfNeeded: async () => undefined,
+    isVisible: async () => true,
+    // Execute the real DOM predicate with separate mutable DOM/native state.
+    evaluate: async (predicate: (element: Element) => unknown) => runInNewContext(
+      `(${predicate.toString()})(target)`, { HTMLElement: TestElement, document, target },
+    ),
+  } as unknown as Parameters<ScreenReaderSession['focus']>[0];
+  return { session, locator, actions, activations: () => activations };
+}
+
+const targetFocus: NativeFocusPosition = {
+  targetActive: true, browserWindowActive: true, webContentFocused: true, caret: 'target',
+};
+const otherFocus: NativeFocusPosition = { ...targetFocus, targetActive: false, caret: 'elsewhere' };
+
+for (const reader of ['nvda', 'hoovda'] as const) {
+  test(`focus repairs an already-active ${reader} target after public documentEnd`, async () => {
+    const harness = focusHarness({ reader, initialCaret: 'target', previous: otherFocus, forward: [targetFocus] });
+    await harness.session.documentEnd();
+    const observation = await harness.session.focus(harness.locator, 'Focus target');
+    await harness.session.activate();
+    assert.equal(harness.activations(), 1);
+    assert.equal(observation.speech, 'Target button');
+    assert.equal(observation.action, 'focus');
+    assert.equal(observation.label, 'Focus target');
+  });
+}
+
+for (const reader of ['nvda', 'hoovda'] as const) {
+  test(`focus re-enters a single ${reader} target after browser chrome retains DOM focus`, async () => {
+    const toolbar = { ...targetFocus, webContentFocused: false, caret: 'elsewhere' as const };
+    const harness = focusHarness({ reader, previous: toolbar, forward: [toolbar, targetFocus] });
+    const observation = await harness.session.focus(harness.locator);
+    await harness.session.activate();
+    assert.equal(harness.activations(), 1);
+    assert.equal(observation.speech, 'Target button');
+  });
+}
+
+test('focus accepts an observed inactive-browser departure before native re-entry', async () => {
+  const harness = focusHarness({
+    previous: { ...targetFocus, browserWindowActive: false, caret: 'elsewhere' },
+    forward: [otherFocus, targetFocus],
+  });
+  await harness.session.focus(harness.locator);
+  await harness.session.activate();
+  assert.equal(harness.activations(), 1);
+});
+
+for (const flag of ['browserWindowActive', 'webContentFocused'] as const) {
+  test(`focus rejects an NVDA target with unknown native ${flag}`, async () => {
+    const harness = focusHarness({
+      previous: otherFocus, forward: [{ ...targetFocus, [flag]: undefined }],
+    });
+    await assert.rejects(harness.session.focus(harness.locator), /not reached after 100/);
+    assert.equal(harness.actions.filter(action => action === 'nextFocusable').length, 100);
+    assert.equal(harness.activations(), 0);
+  });
+}
+
+test('focus requires observed NVDA departure when DOM focus never changes', async () => {
+  const harness = focusHarness({
+    previous: { ...targetFocus, browserWindowActive: undefined, webContentFocused: undefined },
+    forward: [{ ...targetFocus, caret: 'elsewhere' }],
+  });
+  await assert.rejects(harness.session.focus(harness.locator), /not reached after 100/);
+  assert.equal(harness.actions.filter(action => action === 'nextFocusable').length, 100);
+});
+
+for (const reader of ['nvda', 'orca', 'hoovda'] as const) {
+  test(`focus verifies native web focus while traversing to an initially inactive ${reader} target`, async () => {
+    const toolbar = { ...targetFocus, webContentFocused: false, caret: 'elsewhere' as const };
+    const harness = focusHarness({ reader, initiallyActive: false, previous: otherFocus, forward: [toolbar, targetFocus] });
+    await harness.session.focus(harness.locator);
+    await harness.session.activate();
+    assert.equal(harness.activations(), 1);
+  });
+}
+
+test('focus preserves the already-active orca target without native traversal', async () => {
+  const harness = focusHarness({ reader: 'orca', previous: otherFocus, forward: [targetFocus] });
+  await harness.session.focus(harness.locator);
+  await harness.session.activate();
+  assert.equal(harness.activations(), 1);
+  assert.deepEqual(harness.actions, ['readCurrent', 'activate']);
+});
 
 interface ReturnToPageHarness {
   session: ScreenReaderSession;

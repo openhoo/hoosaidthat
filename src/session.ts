@@ -180,13 +180,37 @@ export class ScreenReaderSession {
       );
     }
     await this.returnToPage();
-    if (await locator.evaluate(isDeepActiveElement)) {
+    const initiallyActive = await locator.evaluate(isDeepActiveElement);
+    if (initiallyActive && this.options.screenReader === 'orca') {
       const observation = await this.act('readCurrent');
       return await this.relabelLastObservation(observation, 'focus', label, locator);
     }
+    // NVDA and HooVDA retain native focus when their browse cursor moves
+    // elsewhere. Activation acts at that cursor, so an already-active target
+    // needs an observed native departure and Tab re-entry to synchronize it.
+    let departed = !initiallyActive;
+    if (initiallyActive) {
+      await this.act('previousFocusable');
+      departed = !(await locator.evaluate(isDeepActiveElement));
+      if (!departed) {
+        const { focus } = await this.client.state();
+        // Browser chrome can retain the page's document.activeElement even
+        // when a single focusable element has lost native web-content focus.
+        departed = focus.browserWindowActive === false || focus.webContentFocused === false;
+      }
+    }
     for (let attempt = 0; attempt < 100; attempt += 1) {
       const observation = await this.act('nextFocusable');
-      if (await locator.evaluate(isDeepActiveElement)) {
+      if (!(await locator.evaluate(isDeepActiveElement))) {
+        departed = true;
+        continue;
+      }
+      const { focus } = await this.client.state();
+      if (focus.browserWindowActive === false || focus.webContentFocused === false) {
+        departed = true;
+        continue;
+      }
+      if (departed && focus.browserWindowActive === true && focus.webContentFocused === true) {
         return await this.relabelLastObservation(observation, 'focus', label, locator);
       }
     }
