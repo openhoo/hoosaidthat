@@ -136,10 +136,25 @@ rather than localized labels. Document focus must match the active page's title
 or available URL identity. A command emits one settlement after its required
 state and event-history reads succeed, or one failure settlement if they fail.
 
-Protected speech, focus, live-region, and braille text is replaced with
-`[redacted]` before entering event history or exported artifacts. Protected
-braille cells are removed. Missing or failed native protection observations
-also withhold content; an unavailable protection flag never permits a name read.
+Speech, focus, live-region, and braille text identified as protected by native
+focus or known source context is replaced with `[redacted]` before entering event
+history or exported artifacts. Protected braille cells are removed. Missing or
+failed native protection observations also withhold content; an unavailable
+protection flag never permits a name read.
+
+NVDA live-region capture observes both object handlers and the queued
+presentation calls made directly by NVDAHelper's native IA2 live-region report
+callback. The native callback supplies text and politeness; its processed speech
+produces the semantic event at the speech queue boundary. Unrelated preceding
+speech is never used to fill an object event. Command and known protection
+context are preserved across the deferred queue, and focus protection is checked
+again when presentation runs. This callback supplies no source object, geometry,
+atomicity, relevance, or busy-state metadata. The capture attests the reported
+politeness and processed output, with the protection observed for focus and any
+known object-handler context; it does not attest arbitrary source protection.
+Protected braille messages retain their protection across cursor and scrolling
+redraws of the same message buffer. A new message receives its own protection
+context, and the restored main buffer does not inherit the old message's flag.
 
 Locale is a process boundary. The SSH controller atomically selects `en-US` or
 `de-DE`, restarts the owned runtime, and starts NVDA with its official `--lang`

@@ -14,6 +14,7 @@ import os
 import re
 import select
 import socket
+import sys
 import threading
 import time
 import uuid
@@ -29,6 +30,7 @@ import globalPluginHandler
 import globalCommands
 import inputCore
 import languageHandler
+import NVDAHelper
 import queueHandler
 import speech
 import speech.extensions
@@ -605,6 +607,7 @@ class OracleState:
         self.locale = "en-US"
         self.keyboard_layout = "desktop"
         self.live_region_context = None
+        self.braille_message_protected = False
         self.speech_paused = False
 
     def append(self, kind, text="", **fields):
@@ -1499,6 +1502,9 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
         self.cdp_proxy = None
         self.cdp_proxy_thread = None
         self.registered = []
+        self._native_live_capture_enabled = False
+        self._native_queue_hook = None
+        self._original_queue_function = None
         try:
             with open(TOKEN_PATH, "r", encoding="utf-8") as token_file:
                 token = token_file.read().strip()
@@ -1512,10 +1518,15 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
             self.registered.append((speech.extensions.pre_speechQueued, self.on_speech))
             braille.pre_writeCells.register(self.on_braille)
             self.registered.append((braille.pre_writeCells, self.on_braille))
+            braille._pre_showBrailleMessage.register(self.on_braille_message)
+            self.registered.append(
+                (braille._pre_showBrailleMessage, self.on_braille_message)
+            )
             braille.filter_displayDimensions.register(self.display_dimensions)
             self.registered.append(
                 (braille.filter_displayDimensions, self.display_dimensions)
             )
+            self.install_native_live_region_capture()
             core.postNvdaStartup.register(self.on_startup)
             self.registered.append((core.postNvdaStartup, self.on_startup))
             self.server = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
@@ -1542,6 +1553,91 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
         with STATE.lock:
             STATE.ready = True
 
+    def install_native_live_region_capture(self):
+        if getattr(self, "_native_live_capture_enabled", False):
+            return
+        self._original_queue_function = queueHandler.queueFunction
+        self._native_queue_hook = self.queue_native_live_region
+        self._native_live_capture_enabled = True
+        queueHandler.queueFunction = self._native_queue_hook
+
+    def remove_native_live_region_capture(self):
+        self._native_live_capture_enabled = False
+        if (
+            self._native_queue_hook is not None
+            and queueHandler.queueFunction is self._native_queue_hook
+        ):
+            queueHandler.queueFunction = self._original_queue_function
+
+    def queue_native_live_region(self, queue, function, *args, **kwargs):
+        context = None
+        if self._native_live_capture_enabled:
+            caller = sys._getframe(1)
+            try:
+                # NVDA's IA2 helper queues presentation directly from this
+                # callback. An object event can arrive after both outputs;
+                # its timing or text cannot establish their causal relation.
+                if (
+                    caller.f_globals is NVDAHelper.__dict__
+                    and caller.f_code.co_name
+                    == "nvdaControllerInternal_reportLiveRegion"
+                    and queue is queueHandler.eventQueue
+                    and (
+                        function is speech.speakText
+                        or (
+                            getattr(function, "__self__", None) is braille.handler
+                            and getattr(function, "__func__", None)
+                            is getattr(braille.handler.message, "__func__", None)
+                        )
+                    )
+                ):
+                    priority = getattr(
+                        caller.f_locals.get("politenessValue"), "value", None
+                    )
+                    if priority in ("polite", "assertive"):
+                        protected = current_focus_is_protected()
+                        with STATE.lock:
+                            source_context = STATE.live_region_context
+                            context = {
+                                "priority": priority,
+                                "emitted": False,
+                                "protected": protected
+                                or bool(source_context and source_context["protected"]),
+                                "causalCommand": STATE.command,
+                            }
+            except Exception:
+                log.debugWarning(
+                    "HooSaidThat native live-region queue capture failed", exc_info=True
+                )
+            finally:
+                del caller
+        if context is not None:
+            return self._original_queue_function(
+                queue, self.present_native_live_region, function, context, *args, **kwargs
+            )
+        return self._original_queue_function(queue, function, *args, **kwargs)
+
+    def present_native_live_region(self, function, context, *args, **kwargs):
+        # A queued native presentation can run while teardown is still closing
+        # the servers. Keep its frozen privacy guard until capture extensions
+        # are unregistered, even after semantic capture has been disabled.
+        protected = current_focus_is_protected()
+        with STATE.lock:
+            previous_context = STATE.live_region_context
+            context = dict(context)
+            context["emitSemantic"] = self._native_live_capture_enabled
+            context["protected"] = (
+                context["protected"]
+                or protected
+                or bool(previous_context and previous_context["protected"])
+            )
+            STATE.live_region_context = context
+        try:
+            return function(*args, **kwargs)
+        finally:
+            with STATE.lock:
+                STATE.live_region_context = previous_context
+
     def on_speech(self, speechSequence=None, priority=None, **kwargs):
         if not speechSequence:
             return
@@ -1555,22 +1651,40 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
                 live_region = STATE.live_region_context
                 if live_region is not None:
                     redacted = redacted or live_region["protected"]
+            causal_fields = (
+                {"causalCommand": live_region["causalCommand"]}
+                if live_region is not None and "causalCommand" in live_region
+                else {}
+            )
             STATE.append(
                 "speech",
                 text,
                 speechCommands=[{"kind": item} for item in command_types],
+                **causal_fields,
                 **({"redacted": True} if redacted else {}),
             )
+            emit_live_region = live_region is not None and live_region.get(
+                "emitSemantic", True
+            )
             with STATE.lock:
-                if live_region is not None:
+                if emit_live_region:
                     live_region["emitted"] = True
-            if live_region is not None:
+            if emit_live_region:
                 STATE.append(
                     "liveRegion",
                     text,
                     priority=live_region["priority"],
+                    **causal_fields,
                     **({"redacted": True} if redacted else {}),
                 )
+
+    def on_braille_message(self):
+        protected = current_focus_is_protected()
+        with STATE.lock:
+            live_region = STATE.live_region_context
+            STATE.braille_message_protected = protected or bool(
+                live_region and live_region["protected"]
+            )
 
     def on_braille(self, cells=None, rawText="", currentCellCount=None, **kwargs):
         values = list(cells or [])
@@ -1581,6 +1695,19 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
                 live_region = STATE.live_region_context
                 if live_region is not None:
                     redacted = redacted or live_region["protected"]
+                message_buffer = getattr(braille.handler, "messageBuffer", None)
+                if (
+                    message_buffer is not None
+                    and getattr(braille.handler, "buffer", None) is message_buffer
+                ):
+                    # Cursor blinks and scrolling redraw the retained message
+                    # after its originating handler or queued callback returns.
+                    redacted = redacted or STATE.braille_message_protected
+            causal_fields = (
+                {"causalCommand": live_region["causalCommand"]}
+                if live_region is not None and "causalCommand" in live_region
+                else {}
+            )
             # pre_writeCells receives the display frame after NVDA applies its
             # blinking cursor shape. Preserve stable translated cells and
             # expose the cursor independently, matching the protocol model.
@@ -1621,6 +1748,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
                     text,
                     brailleCells=encoded_cells,
                     brailleCursor=cursor_position,
+                    **causal_fields,
                     **({"redacted": True} if redacted else {}),
                 )
 
@@ -1718,6 +1846,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
     def terminate(self):
         with STATE.lock:
             STATE.ready = False
+        self.remove_native_live_region_capture()
         if self.server is not None:
             try:
                 self.server.shutdown()

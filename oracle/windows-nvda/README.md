@@ -121,6 +121,13 @@ is real NVDA presentation evidence, not acoustic output or lived-experience
 proof. Gesture delivery uses NVDA's official system-test emulation path and is
 reported as `emulated`, never mislabeled as a physical keyboard event.
 
+Live-region semantics use the object handler or the exact native IA2 report
+callback's queued presentation call. The latter retains reported politeness and
+processed speech across queue delay, without matching unrelated earlier speech.
+It carries no source object, geometry, atomicity, relevance, or busy-state
+metadata. Protection comes from the observed focus and any known object-handler
+context; retained protected braille messages stay scrubbed on later redraws.
+
 For a focused developer probe, first select the matching process locale, then
 limit the semantic action loop. The release-grade matrix always clears this
 subset variable:
