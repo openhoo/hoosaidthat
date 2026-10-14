@@ -5,25 +5,84 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Checkout example</title>
     <style>
-      body { max-width: 42rem; margin: 4rem auto; font: 18px/1.5 system-ui; }
-      label, input, button, select { display: block; margin-block: 1rem; }
-      input, button, select { padding: 0.7rem; font: inherit; }
-      table { border-collapse: collapse; margin-block: 1rem; }
-      th, td { border: 1px solid #777; padding: 0.5rem; text-align: left; }
-      img { width: 5rem; height: 5rem; }
-      iframe, object { width: 100%; min-height: 5rem; border: 1px solid #777; }
+      :root { color-scheme: light; --ink: #29392f; --muted: #667268; --line: #dce2d8; --paper: #fafbf7; --green: #344f3e; }
+      * { box-sizing: border-box; }
+      body { margin: 0; background: var(--paper); color: var(--ink); font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      header { max-width: 1040px; margin: auto; padding: 30px 44px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--line); }
+      .brand { font-size: 18px; font-weight: 600; letter-spacing: -.6px; }
+      .brand span { color: var(--muted); font-weight: 400; }
+      header a { color: var(--muted); font-size: 12px; text-underline-offset: 4px; }
+      main { max-width: 1040px; padding: 54px 44px 60px; margin: auto; display: grid; grid-template-columns: minmax(0, 1fr) 320px; column-gap: 84px; align-items: start; }
+      .intro { grid-column: 1 / -1; margin-bottom: 35px; }
+      .eyebrow { color: var(--muted); font-size: 11px; letter-spacing: 2px; text-transform: uppercase; margin: 0 0 9px; }
+      h1 { font-family: Georgia, serif; font-size: 48px; line-height: 1.15; font-weight: 400; letter-spacing: -1.5px; margin: 0; }
+      .intro-subtitle { margin: 12px 0 0; color: var(--muted); }
+      .contact { grid-column: 1; grid-row: 2; }
+      label { display: block; font-size: 13px; font-weight: 500; margin-bottom: 8px; }
+      input:not([type=checkbox]):not([type=radio]), select { display: block; width: 100%; height: 48px; border: 1px solid #cbd4c7; border-radius: 7px; padding: 10px 13px; background: #fff; color: var(--ink); font: inherit; }
+      input::placeholder { color: #899386; }
+      button { font: inherit; cursor: pointer; border: 0; border-radius: 7px; padding: 13px 20px; background: var(--green); color: white; }
+      .contact button { width: 100%; margin-top: 20px; font-weight: 500; }
+      button:hover { background: #253f30; }
+      :focus-visible { outline: 3px solid #6b8467; outline-offset: 4px; }
+      #continue-help { margin: 12px 0 0; text-align: center; font-size: 12px; color: var(--muted); }
+      #continue-details { font-size: 12px; color: var(--muted); margin: 8px 0 0; text-align: center; }
+      .summary { grid-column: 2; grid-row: 2 / span 3; padding: 27px; background: #eef1e8; border-radius: 10px; }
+      h2 { font-size: 16px; font-weight: 600; margin: 0 0 23px; letter-spacing: -.2px; }
+      .summary ul { list-style: none; margin: 0; padding: 0; }
+      .summary li { padding: 12px 0 12px 25px; position: relative; border-top: 1px solid #d7dfd0; font-size: 13px; }
+      .summary li::before { content: "✓"; position: absolute; left: 0; color: #5c7458; }
+      table { width: 100%; border-collapse: collapse; margin-top: 28px; font-size: 13px; }
+      caption { text-align: left; font-size: 11px; color: var(--muted); padding-bottom: 10px; }
+      th, td { padding: 8px 0; text-align: left; font-weight: 400; }
+      thead { border-bottom: 1px solid #d2dbcc; color: var(--muted); }
+      td, th:last-child { text-align: right; }
+      tbody td { font-size: 19px; }
+      .summary img { width: 40px; height: 40px; margin-top: 30px; opacity: .85; }
+      .receipt-state { grid-column: 1; grid-row: 3; }
+      #ordinary-update { font-size: 11px; color: var(--muted); margin: 20px 0 0; }
+      #status { margin: 8px 0 0; font-size: 14px; color: #345a3a; }
+      #status:not(:empty) { background: #e9f0e2; border-left: 2px solid #63835b; padding: 12px 16px; border-radius: 0 5px 5px 0; }
+      form { grid-column: 1; grid-row: 4; margin-top: 30px; padding-top: 23px; border-top: 1px solid var(--line); display: grid; grid-template-columns: 1fr 1fr; gap: 16px 22px; }
+      form > label:nth-child(-n+2) { grid-column: 1 / -1; margin: 0; display: flex; align-items: center; gap: 9px; font-weight: 400; }
+      input[type=checkbox], input[type=radio] { width: 16px; height: 16px; margin: 0; accent-color: var(--green); }
+      .form-field label { margin-bottom: 6px; }
+      .supplement { grid-column: 1 / -1; margin-top: 65px; padding-top: 25px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; display: grid; grid-template-columns: 1fr 1fr; gap: 14px 28px; }
+      .supplement p { margin: 0; }
+      .supplement hr { grid-column: 1 / -1; width: 100%; border: 0; border-top: 1px solid var(--line); margin: 0; }
+      blockquote { grid-column: 1 / -1; margin: 0 0 12px; font-family: Georgia, serif; font-style: italic; font-size: 20px; color: #56664f; }
+      iframe, object { width: 100%; height: 75px; min-width: 0; border: 1px solid var(--line); background: #fff; border-radius: 6px; }
+      dialog { max-width: 420px; width: calc(100% - 40px); border: 1px solid var(--line); border-radius: 12px; padding: 32px; background: var(--paper); color: var(--ink); box-shadow: 0 20px 80px #18271925; }
+      dialog::backdrop { background: #24302645; backdrop-filter: blur(3px); }
+      dialog h2 { font: 30px Georgia, serif; margin-bottom: 16px; }
+      dialog p { color: var(--muted); }
+      dialog button { margin-top: 15px; width: 100%; }
+      @media (max-width: 720px) {
+        header { padding: 22px 24px; } main { padding: 34px 24px; grid-template-columns: 1fr; gap: 0; }
+        h1 { font-size: 40px; } .intro { margin-bottom: 28px; }
+        .contact, .receipt-state, form, .summary { grid-column: 1; grid-row: auto; }
+        .summary { margin-top: 30px; } form { margin-top: 25px; } .supplement { margin-top: 36px; grid-template-columns: 1fr; }
+        blockquote { grid-column: 1; font-size: 18px; }
+      }
+      @media (prefers-reduced-motion: no-preference) { button { transition: background .15s; } }
     </style>
   </head>
   <body>
-    <header><a href="#main">Skip to checkout</a></header>
+    <header><div class="brand" aria-hidden="true">OpenHoo <span>/ essentials</span></div><a href="#main">Skip to checkout</a></header>
     <main id="main">
-      <h1>Checkout</h1>
+      <div class="intro">
+        <p class="eyebrow" aria-hidden="true">A little less friction</p>
+        <h1>Checkout</h1>
+        <p class="intro-subtitle" aria-hidden="true">Good tools. Ready when you are.</p>
+      </div>
+      <div class="contact">
       <label for="email">Email</label>
       <input id="email" name="email" type="email" autocomplete="email" />
       <button type="button" aria-describedby="continue-help" aria-details="continue-details">Continue</button>
       <p id="continue-help">Review order before payment</p>
       <p id="continue-details" role="note">Payment continues only after order review.</p>
-      <section aria-labelledby="summary-heading">
+      </div>
+      <section class="summary" aria-labelledby="summary-heading">
         <h2 id="summary-heading">Order summary</h2>
         <ul>
           <li>Accessibility toolkit</li>
@@ -36,19 +95,26 @@
         </table>
         <img
           alt="OpenHoo parcel mark"
-          src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='16' fill='%232f6fed'/%3E%3Cpath d='M25 32h50v40H25z' fill='white'/%3E%3Cpath d='M25 32l25 18 25-18' fill='none' stroke='%232f6fed' stroke-width='6'/%3E%3C/svg%3E"
+          src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='16' fill='%23dce5d2'/%3E%3Cpath d='M25 32h50v40H25z' fill='%23546c4b'/%3E%3Cpath d='M25 32l25 18 25-18' fill='none' stroke='%23dce5d2' stroke-width='6'/%3E%3C/svg%3E"
         />
       </section>
+      <div class="receipt-state">
       <p id="ordinary-update">Receipt pending</p>
       <p id="status" role="status" aria-live="polite"></p>
+      </div>
       <form aria-label="Delivery preferences">
         <label><input type="checkbox" /> Email receipt</label>
         <label><input type="radio" name="delivery" /> Standard delivery</label>
+        <div class="form-field">
         <label for="country">Country</label>
         <select id="country"><option>Germany</option></select>
+        </div>
+        <div class="form-field">
         <label for="reference">Order reference</label>
         <input id="reference" value="receipt" />
+        </div>
       </form>
+      <div class="supplement">
       <p>Big <span aria-invalid="spelling">caat</span> meos</p>
       <hr />
       <blockquote>Accessibility belongs in every delivery flow.</blockquote>
@@ -62,6 +128,7 @@
         title="Shipping help"
         srcdoc="<!doctype html><html lang='en'><body><p>Shipping help frame.</p></body></html>"
       ></iframe>
+      </div>
     </main>
     <script>
       document.querySelector('button').addEventListener('click', () => {

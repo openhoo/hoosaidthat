@@ -15,6 +15,16 @@ SPEC.loader.exec_module(MODULE)
 
 
 class ControlProtocolTests(unittest.TestCase):
+    def test_non_ascii_authorization_is_rejected_without_crashing(self) -> None:
+        handler = object.__new__(MODULE.Handler)
+        handler.headers = {"authorization": "Bearer café"}
+        handler.send_json = mock.Mock()
+        with mock.patch.object(MODULE, "TOKEN", "test-token"):
+            self.assertFalse(handler.authorized())
+        handler.send_json.assert_called_once_with(
+            MODULE.HTTPStatus.UNAUTHORIZED, {"error": "unauthorized"}
+        )
+
     def test_action_catalog_contains_physical_orca_navigation(self) -> None:
         self.assertEqual(MODULE.ACTIONS["nextHeading"][1], "h")
         self.assertEqual(MODULE.ACTIONS["previousHeading"][1], "shift+h")

@@ -54,6 +54,24 @@ class NormalizeSpeechTests(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, "log exceeded safety bound"):
                     capture.emit("speech", text="Ready", command="SPEAK")
 
+    def test_multiline_input_fails_closed_at_size_bound(self) -> None:
+        with mock.patch.object(MODULE, "MAX_EVENT_BYTES", 128):
+            with self.assertRaisesRegex(RuntimeError, "request exceeded safety bound"):
+                MODULE.CaptureModule.read_multiline(io.StringIO("x" * 1000 + "\n.\n"))
+
+    def test_multiline_bound_counts_unicode_bytes_across_lines(self) -> None:
+        with mock.patch.object(MODULE, "MAX_EVENT_BYTES", 16):
+            with self.assertRaisesRegex(RuntimeError, "request exceeded safety bound"):
+                MODULE.CaptureModule.read_multiline(io.StringIO("é" * 4 + "\n" + "é" * 4 + "\n.\n"))
+
+    def test_restart_rejects_existing_oversized_log(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "events.jsonl"
+            path.write_text(" " * 129, encoding="utf-8")
+            with mock.patch.object(MODULE, "MAX_LOG_BYTES", 128):
+                with self.assertRaisesRegex(RuntimeError, "log exceeded safety bound"):
+                    MODULE.CaptureModule(path)
+
     def test_uses_exact_settings_audio_and_loglevel_replies(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             capture = MODULE.CaptureModule(Path(directory) / "events.jsonl")

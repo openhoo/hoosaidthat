@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -10,6 +10,12 @@ const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const invocationRoot = process.cwd();
 const require = createRequire(import.meta.url);
 const playwrightCLI = require.resolve('@playwright/test/cli');
+const parityConfig = join(
+  projectRoot,
+  existsSync(join(projectRoot, 'tsconfig.build.json'))
+    ? 'oracle/parity/playwright.config.ts'
+    : 'dist/oracle/parity/playwright.config.js',
+);
 
 const locale = process.argv[2] ?? 'en-US';
 const keyboardLayout = process.argv[3] ?? 'desktop';
@@ -77,7 +83,7 @@ function run(label, specializedEnvironment) {
       playwrightCLI,
       'test',
       '--config',
-      join(projectRoot, 'oracle', 'parity', 'playwright.config.ts'),
+      parityConfig,
       '--output',
       output,
     ],

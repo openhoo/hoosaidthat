@@ -144,3 +144,10 @@ test('rejects invalid runtime options received from JavaScript', () => {
     /controlToken/,
   );
 });
+
+test('screen-reader config forces native viewport in every project', () => {
+  const config = defineConfig({
+    projects: [{ name: 'emulated', use: { viewport: { width: 800, height: 600 } } }],
+  });
+  assert.equal(config.projects?.[0]?.use?.viewport, null);
+});

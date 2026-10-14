@@ -263,6 +263,8 @@ export interface ScreenReaderOptions {
   overlay?: boolean;
   recording?: RecordingMode;
   actionScreenshots?: ActionScreenshotMode;
+  /** Export a portable annotated HTML report with snapshots after each action. */
+  webReport?: RecordingMode;
   keepContainer?: boolean;
   containerEngineArgs?: readonly string[];
   viewport?: { width: number; height: number };
@@ -326,6 +328,7 @@ export interface ResolvedScreenReaderOptions {
   overlay: boolean;
   recording: RecordingMode;
   actionScreenshots: ActionScreenshotMode;
+  webReport: RecordingMode;
   keepContainer: boolean;
   containerEngineArgs: readonly string[];
   viewport: { width: number; height: number };
@@ -577,6 +580,7 @@ export function resolveOptions(options: ScreenReaderOptions = {}): ResolvedScree
     overlay: options.overlay ?? true,
     recording: options.recording ?? 'on',
     actionScreenshots: options.actionScreenshots ?? 'off',
+    webReport: options.webReport ?? 'off',
     keepContainer: options.keepContainer ?? false,
     containerEngineArgs: options.containerEngineArgs ?? [],
     viewport,
@@ -609,6 +613,9 @@ export function resolveOptions(options: ScreenReaderOptions = {}): ResolvedScree
   }
   if (resolved.actionScreenshots !== 'off' && resolved.actionScreenshots !== 'on') {
     throw new Error('screenReaderOptions.actionScreenshots must be "off" or "on"');
+  }
+  if (resolved.webReport !== 'off' && resolved.webReport !== 'on') {
+    throw new Error('screenReaderOptions.webReport must be "off" or "on"');
   }
   if (typeof resolved.keepContainer !== 'boolean') {
     throw new Error('screenReaderOptions.keepContainer must be a boolean');

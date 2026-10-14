@@ -49,6 +49,8 @@ class CaptureModule:
         last = 0
         with self.event_log.open(encoding="utf-8") as handle:
             fcntl.flock(handle, fcntl.LOCK_SH)
+            if os.fstat(handle.fileno()).st_size > MAX_LOG_BYTES:
+                raise RuntimeError("speech event log exceeded safety bound")
             for raw_line in handle:
                 line = raw_line.strip()
                 if not line:
@@ -97,10 +99,17 @@ class CaptureModule:
     @staticmethod
     def read_multiline(input_stream: TextIO) -> list[str]:
         lines: list[str] = []
+        total_bytes = 0
         while True:
-            line = input_stream.readline()
+            # Bound each read as well as the complete request. Checking only
+            # the emitted event lets a single unterminated line exhaust RAM
+            # before normalization or event-log limits run.
+            line = input_stream.readline(MAX_EVENT_BYTES + 1)
             if line == "":
                 raise RuntimeError("unexpected EOF in multiline Speech Dispatcher request")
+            total_bytes += len(line.encode("utf-8"))
+            if total_bytes > MAX_EVENT_BYTES:
+                raise RuntimeError("Speech Dispatcher request exceeded safety bound")
             stripped = line.rstrip("\r\n")
             if stripped == ".":
                 return lines

@@ -12,6 +12,7 @@ export class ScreenReaderRuntime {
 
   private readonly keepContainer: boolean;
   private stopped = false;
+  private stopping: Promise<void> | undefined;
 
   private constructor(
     endpoints: RuntimeEndpoints,
@@ -64,12 +65,6 @@ export class ScreenReaderRuntime {
       controlPort,
       cdpPort,
     });
-    const launch = await runCommand(engine, args, 30_000);
-    if (launch.code !== 0) {
-      throw new Error(
-        `failed to start ${options.screenReader} container with ${engine}: ${launch.stderr || launch.stdout}`,
-      );
-    }
     const runtime = new ScreenReaderRuntime(
       endpoints,
       engine,
@@ -77,10 +72,17 @@ export class ScreenReaderRuntime {
       options.keepContainer,
     );
     try {
+      const launch = await runCommand(engine, args, 30_000);
+      if (launch.code !== 0) {
+        throw new Error(
+          `failed to start ${options.screenReader} container with ${engine}: ${launch.stderr || launch.stdout}`,
+        );
+      }
       await waitUntilReady(endpoints, options.startupTimeoutMs, options.screenReader);
       return runtime;
     } catch (error) {
-      const logs = await runCommand(engine, ['logs', '--tail', '100', containerName], 5_000);
+      const logs = await runCommand(engine, ['logs', '--tail', '100', containerName], 5_000)
+        .catch((logError: unknown) => ({ stdout: '', stderr: errorMessage(logError) }));
       let cleanupFailure = '';
       try {
         await runtime.stop();
@@ -90,25 +92,38 @@ export class ScreenReaderRuntime {
         }`;
       }
       const detail = (logs.stdout || logs.stderr).trim();
-      throw new Error(
+      throw new Error(redactSecret(
         `${error instanceof Error ? error.message : String(error)}${
           detail ? `\nContainer log tail:\n${detail}` : ''
-        }${cleanupFailure}`,
-      );
+        }${cleanupFailure}`, token,
+      ));
     }
   }
 
   async stop(): Promise<void> {
+    if (this.stopping) return await this.stopping;
     if (this.stopped || this.engine === 'external' || !this.containerName) {
       this.stopped = true;
       return;
     }
-    this.stopped = true;
+    this.stopping = this.stopManagedContainer();
+    try {
+      await this.stopping;
+      this.stopped = true;
+    } finally {
+      this.stopping = undefined;
+    }
+  }
+
+  private async stopManagedContainer(): Promise<void> {
+    const engine = this.engine;
+    const containerName = this.containerName;
+    if (engine === 'external' || !containerName) return;
     let stopFailure = '';
     try {
       const stop = await runCommand(
-        this.engine,
-        ['stop', '--time', '5', this.containerName],
+        engine,
+        ['stop', '--time', '5', containerName],
         10_000,
       );
       if (stop.code !== 0) stopFailure = stop.stderr || stop.stdout;
@@ -116,18 +131,18 @@ export class ScreenReaderRuntime {
       stopFailure = error instanceof Error ? error.message : String(error);
     }
     if (!this.keepContainer) {
-      const remove = await runCommand(this.engine, ['rm', '--force', this.containerName], 5_000);
+      const remove = await runCommand(engine, ['rm', '--force', containerName], 5_000);
       if (remove.code !== 0) {
-        throw new Error(
-          `failed to remove screen-reader container ${this.containerName}: ${
+        throw new Error(redactSecret(
+          `failed to remove screen-reader container ${containerName}: ${
             remove.stderr || remove.stdout
-          }${stopFailure ? `\nContainer stop also failed: ${stopFailure}` : ''}`,
-        );
+          }${stopFailure ? `\nContainer stop also failed: ${stopFailure}` : ''}`, this.endpoints.controlToken,
+        ));
       }
     } else if (stopFailure) {
-      throw new Error(
-        `failed to stop screen-reader container ${this.containerName}: ${stopFailure}`,
-      );
+      throw new Error(redactSecret(
+        `failed to stop screen-reader container ${containerName}: ${stopFailure}`, this.endpoints.controlToken,
+      ));
     }
   }
 }
@@ -257,7 +272,18 @@ async function waitUntilReady(
     }
     await delay(200);
   }
-  throw new Error(`screen-reader runtime did not become ready within ${timeoutMs}ms: ${lastError}`);
+  throw new Error(redactSecret(
+    `screen-reader runtime did not become ready within ${timeoutMs}ms: ${lastError}`,
+    endpoints.controlToken,
+  ));
+}
+
+function redactSecret(value: string, secret: string): string {
+  return secret ? value.replaceAll(secret, '[redacted]') : value;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function boundedBody(value: string): string {

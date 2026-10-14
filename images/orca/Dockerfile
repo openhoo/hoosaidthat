@@ -77,7 +77,7 @@ RUN curl --fail --location --retry 3 \
       -Dmathcat=false \
       -Dspiel=false \
  && meson compile -C orca/_build \
- && meson test -C orca/_build --suite unit --no-rebuild --print-errorlogs \
+ && MESON_NUM_PROCESSES=4 meson test -C orca/_build --suite unit --no-rebuild --print-errorlogs --timeout-multiplier 4 \
  && meson install -C orca/_build \
  && glib-compile-schemas /usr/local/share/glib-2.0/schemas \
  && find /usr/local -type d -name __pycache__ -prune -exec rm -rf '{}' + \
@@ -103,7 +103,7 @@ ARG MATCHBOX_VERSION=1.2.2+git20200512-1build1
 ARG PYTHON_DASBUS_VERSION=1.7-2
 ARG SPEECH_DISPATCHER_VERSION=0.12.0~rc2-2build3
 ARG XDOTOOL_VERSION=1:3.20160805.1-5build1
-ARG XVFB_VERSION=2:21.1.12-1ubuntu1.6
+ARG XVFB_VERSION=2:21.1.12-1ubuntu1.8
 ARG TINI_VERSION=0.19.0-1
 
 USER root

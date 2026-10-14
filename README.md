@@ -83,6 +83,12 @@ Windows state, generated SSH identity, pinned host key, password, and bearer
 token stay outside Git under `~/VMs/hoosaidthat-nvda`. See the
 [Windows NVDA oracle guide](oracle/windows-nvda/README.md).
 
+The npm package includes a compiled parity suite, so installed parity commands
+run without a source checkout or TypeScript compiler. From a consumer project,
+use `npx hoosaidthat-nvda-windows parity` for the managed Windows oracle or
+`node node_modules/@openhoo/hoosaidthat/scripts/hoovda-parity.mjs en-US desktop`
+for a configured HooVDA runtime image.
+
 ## Configuration
 
 ```ts
@@ -204,6 +210,20 @@ eSpeak audio synchronized to the browser display. Real NVDA uses Playwright's
 browser video with the same synchronized overlay; its capture boundary is
 structured presentation hooks, not acoustic Windows audio.
 
+## Annotated website reports
+
+Set `screenReaderOptions.webReport: 'on'` to export a portable
+`screen-reader-report.html` for each test. It shows the page snapshot after each
+action with the actual captured screenreader speech positioned at its source
+element. Click the annotation to play the original audio from that utterance.
+The file embeds its images and audio and opens directly in a browser or on a
+static website host.
+
+Exact audio playback requires the updated HooVDA engine's sample index. Other
+adapters and older images show speech and snapshots with audio explicitly
+unavailable. See the [web report guide](docs/web-reports.md) for configuration,
+export paths, and evidence boundaries.
+
 ## Element images
 
 Focused controls:
@@ -242,6 +262,7 @@ for each observed output plus a JSON manifest. Each result includes its ordered
 - `quietMs`: default `300`, maximum `5000`
 - `overlay`: default `true`
 - `actionScreenshots`: `off` or `on`
+- `webReport`: `off` or `on`; default `off`; portable annotated HTML per test
 - `keepContainer`: retain stopped container for diagnosis
 - `viewport`: Xvfb dimensions; default `1280x720`
 - `containerEngineArgs`: extra trusted Docker/Podman arguments; rejected for external NVDA

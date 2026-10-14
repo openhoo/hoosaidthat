@@ -47,7 +47,9 @@ test('real screen reader announces structure, controls, and updates', async ({
 });
 
 test('exports screen reader output images for page structures', async ({ page, screenReader }) => {
-  test.setTimeout(120_000);
+  // This scans all 35 navigation kinds and records each bounded observation.
+  // A real amd64 runtime on an arm64 host needs more than two minutes.
+  test.setTimeout(300_000);
   test.skip(
     screenReader.health.screenReader.name !== 'hoovda',
     'HooVDA page export requires documentStart and expanded quick navigation',

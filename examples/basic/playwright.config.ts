@@ -17,7 +17,10 @@ if (requestedKeyboardLayout !== 'desktop' && requestedKeyboardLayout !== 'laptop
 
 export default defineConfig({
   testDir: './tests',
+  // Speech comes from the Linux OCI runtime, including when the host is macOS.
+  snapshotPathTemplate: '{snapshotDir}/{testFilePath}-snapshots/{arg}-linux{ext}',
   workers: 1,
+  timeout: 120_000,
   webServer: {
     command: 'python3 -m http.server 4173 --bind 127.0.0.1 --directory site',
     port: 4173,
@@ -35,6 +38,7 @@ export default defineConfig({
       keyboardLayout: requestedKeyboardLayout,
       recording: 'on',
       actionScreenshots: 'on',
+      webReport: process.env.SCREEN_READER_WEB_REPORT === 'on' ? 'on' : 'off',
       keepContainer: process.env.KEEP_SCREEN_READER_CONTAINER === '1',
     },
   },

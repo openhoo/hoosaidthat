@@ -487,7 +487,7 @@ class Handler(BaseHTTPRequestHandler):
     def authorized(self) -> bool:
         supplied = self.headers.get("authorization", "")
         expected = f"Bearer {TOKEN}"
-        if TOKEN and hmac.compare_digest(supplied, expected):
+        if TOKEN and hmac.compare_digest(supplied.encode("utf-8"), expected.encode("utf-8")):
             return True
         self.send_json(HTTPStatus.UNAUTHORIZED, {"error": "unauthorized"})
         return False

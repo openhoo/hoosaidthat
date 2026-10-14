@@ -50,21 +50,25 @@
     "!oracle/**/*.pyc",
     "scripts/hoovda-parity.mjs",
     "scripts/nvda-windows.mjs",
+    "scripts/verify-web-report.mjs",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "tsc -p tsconfig.build.json && tsc -p tsconfig.parity.json && node scripts/build-parity.mjs",
     "clean": "node scripts/clean.mjs",
     "typecheck": "tsc -p tsconfig.build.json --noEmit",
     "test:unit": "tsc -p tsconfig.test.json && node --test .test-dist/tests/*.test.js",
     "test:python": "python3 -m unittest discover -s images/orca/tests -v",
+    "test:scripts": "node --test scripts/tests/*.test.mjs",
+    "test:session-browser": "tsc -p tsconfig.test.json && node --test .test-dist/tests/session-browser.smoke.js",
+    "test:report-edges": "npm run build && node scripts/verify-report-edge-cases.mjs",
     "test:e2e:orca": "npm run build && playwright test --config examples/basic/playwright.config.ts",
-    "test:e2e:hoovda": "npm run build && SCREEN_READER=hoovda SCREEN_READER_IMAGE=hoosaidthat-hoovda:dev playwright test --config examples/basic/playwright.config.ts",
-    "test:e2e:hoovda:oracle": "npm run build && SCREEN_READER=hoovda SCREEN_READER_IMAGE=hoosaidthat-hoovda:dev playwright test --config examples/basic/playwright.config.ts --grep 'oracle'",
+    "test:e2e:hoovda": "npm run build && SCREEN_READER=hoovda playwright test --config examples/basic/playwright.config.ts",
+    "test:e2e:hoovda:oracle": "npm run build && SCREEN_READER=hoovda playwright test --config examples/basic/playwright.config.ts --grep 'oracle'",
     "test:e2e:hoovda:parity": "npm run build && node scripts/hoovda-parity.mjs",
     "test:e2e": "npm run test:e2e:orca && npm run test:e2e:hoovda",
-    "test": "npm run clean && npm run build && npm run test:unit && npm run test:python",
+    "test": "npm run clean && npm run build && npm run test:unit && npm run test:python && npm run test:scripts",
     "pack:check": "npm pack --dry-run",
     "image:build:orca": "podman build --format docker --tag hoosaidthat-orca:dev --file images/orca/Dockerfile .",
     "image:smoke:orca": "bash images/orca/smoke-test.sh hoosaidthat-orca:dev orca",
@@ -81,7 +85,9 @@
     "nvda:windows:sync": "node scripts/nvda-windows.mjs sync",
     "nvda:windows:parity": "node scripts/nvda-windows.mjs parity",
     "nvda:windows:parity-cell": "node scripts/nvda-windows.mjs parity-cell",
-    "nvda:windows:down": "node scripts/nvda-windows.mjs down"
+    "nvda:windows:down": "node scripts/nvda-windows.mjs down",
+    "test:e2e:report": "npm run build && SCREEN_READER=hoovda SCREEN_READER_WEB_REPORT=on playwright test --config examples/basic/playwright.config.ts --grep \"annotated website report\"",
+    "test:report-viewer": "node scripts/verify-web-report.mjs"
   },
   "peerDependencies": {
     "@playwright/test": ">=1.62.1 <1.63.0"

@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.build.json",
+  "compilerOptions": {
+    "rootDir": "oracle/parity",
+    "outDir": "dist/oracle/parity",
+    "declaration": false,
+    "declarationMap": false,
+    "sourceMap": false,
+    "noEmitOnError": true
+  },
+  "include": ["oracle/parity/*.ts"]
+}

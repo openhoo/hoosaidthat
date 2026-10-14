@@ -15,7 +15,11 @@ The workflow refuses publication unless package version and Git tag match,
 HooVDA source resolves to the requested commit, the complete provenance-pinned
 oracle corpus matches exactly, security and test gates pass, both
 runtime images pass real screenreader smoke and Playwright E2E, and npm packing
-succeeds. It publishes version-only Linux/amd64 tags; it does not move `latest`.
+succeeds. Report qualification explicitly enables capture against the candidate
+HooVDA image and verifies the exported file's original audio, source positions,
+desktop/mobile interaction, and offline operation. Synthetic report edge cases
+and browser session regressions also run before publication. It publishes
+version-only Linux/amd64 tags; it does not move `latest`.
 
 Before tagging, run `.github/workflows/nvda-oracle.yml` for the exact candidate
 commit on a trusted self-hosted runner labeled `linux`, `x64`, `kvm`, and

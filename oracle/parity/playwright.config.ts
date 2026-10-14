@@ -20,7 +20,7 @@ const screenReaderOptions =
         runtime: 'external' as const,
         controlEndpoint: 'http://127.0.0.1:3002',
         cdpEndpoint: 'http://127.0.0.1:9224',
-        controlToken,
+        controlToken: controlToken!,
       }
     : {
         screenReader: 'hoovda' as const,
@@ -29,7 +29,7 @@ const screenReaderOptions =
 
 export default defineConfig({
   testDir: '.',
-  testMatch: 'nvda-parity.spec.ts',
+  testMatch: ['nvda-parity.spec.ts', 'nvda-parity.spec.js'],
   outputDir: `../../test-results/${requestedAdapter}-${locale.toLowerCase()}-${keyboardLayout}-parity`,
   workers: 1,
   fullyParallel: false,
