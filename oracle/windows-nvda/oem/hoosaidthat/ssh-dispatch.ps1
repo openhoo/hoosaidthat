@@ -29,18 +29,188 @@ function Write-Json($Value) {
 }
 
 function Get-ProcessSnapshot {
+    param([switch]$IncludeDetails)
     $nvda = @()
     $chrome = @()
+    $details = @()
+    $detailsTruncated = $false
     foreach ($process in @(Get-CimInstance -ClassName Win32_Process -ErrorAction SilentlyContinue)) {
         $path = [string]$process.ExecutablePath
+        $role = $null
         if ($path -and $path.Equals($NvdaExecutable, [StringComparison]::OrdinalIgnoreCase)) {
             $nvda += [int]$process.ProcessId
+            $role = 'nvda'
         }
         elseif ($path -and $path.StartsWith($ChromeRoot, [StringComparison]::OrdinalIgnoreCase)) {
             $chrome += [int]$process.ProcessId
+            if ($path.Equals(($ChromeRoot + 'chrome.exe'), [StringComparison]::OrdinalIgnoreCase)) {
+                if (-not $process.CommandLine) { $role = 'chrome-unknown' }
+                elseif ([string]$process.CommandLine -notmatch '(?:^|[\s"])--type(?:=|[\s"]|$)') { $role = 'chrome-browser' }
+            }
+        }
+        elseif ($path -and $process.Name -ieq 'powershell.exe' -and
+            [string]$process.CommandLine -match '(?i)(?:^|\s)-File\s+(?:"C:\\HooSaidThat\\start-runtime\.ps1"|C:\\HooSaidThat\\start-runtime\.ps1)(?:\s|$)') {
+            $role = 'runtime-supervisor'
+        }
+        if ($role -and $IncludeDetails) {
+            if ($details.Count -ge 64) { $detailsTruncated = $true; continue }
+            $owner = $null
+            $ownerError = $null
+            try {
+                $result = Invoke-CimMethod -InputObject $process -MethodName GetOwner -ErrorAction Stop
+                if ($result.ReturnValue -eq 0) { $owner = "$($result.Domain)\$($result.User)" }
+                else { $ownerError = [int]$result.ReturnValue }
+            }
+            catch { $ownerError = 'unavailable' }
+            $details += [ordered]@{
+                role = $role
+                pid = [int]$process.ProcessId
+                parentPid = [int]$process.ParentProcessId
+                sessionId = [int]$process.SessionId
+                executablePath = $path
+                owner = $owner
+                ownerError = $ownerError
+            }
         }
     }
-    return [ordered]@{ nvdaPids = @($nvda); chromePids = @($chrome) }
+    return [ordered]@{ nvdaPids = @($nvda); chromePids = @($chrome); details = @($details); detailsTruncated = $detailsTruncated }
+}
+
+function Get-SessionDiagnostics {
+    $observer = [ordered]@{
+        pid = $PID
+        sessionId = $null
+        inputDesktop = $null
+        inputDesktopObservation = 'not queried; SSH observer cannot attest the runtime input desktop'
+    }
+    try {
+        $observer['sessionId'] = (Get-Process -Id $PID).SessionId
+        if (-not ('HooSaidThat.WtsDiagnostics' -as [type])) {
+            # Layout and constants: Microsoft's wtsapi32.h / WTSINFOEX_LEVEL1_W.
+            # https://learn.microsoft.com/windows/win32/api/wtsapi32/ns-wtsapi32-wtsinfoex_level1_w
+            # https://github.com/microsoft/win32metadata/blob/main/generation/WinSDK/RecompiledIdlHeaders/um/WtsApi32.h
+            # Current Windows: SessionFlags 0 = locked, 1 = unlocked. Windows 7
+            # and Server 2008 R2 reversed these flags; no inference is made there.
+            $null = Add-Type -TypeDefinition @'
+using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+namespace HooSaidThat {
+    public static class WtsDiagnostics {
+        [StructLayout(LayoutKind.Sequential)]
+        private struct SessionInfo { public uint Id; public IntPtr Name; public int State; }
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        private struct Level1 {
+            public uint SessionId; public int State; public int Flags;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 33)] public string Station;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 21)] public string User;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 18)] public string Domain;
+            public long LogonTime, ConnectTime, DisconnectTime, LastInputTime, CurrentTime;
+            public uint IncomingBytes, OutgoingBytes, IncomingFrames, OutgoingFrames;
+            public uint IncomingCompressedBytes, OutgoingCompressedBytes;
+        }
+        [StructLayout(LayoutKind.Sequential)]
+        private struct InfoEx { public uint Level; public Level1 Data; }
+        public sealed class Session {
+            public uint sessionId; public string station; public int connectionStateCode;
+            public string account; public string lockState = "unknown";
+            public int? sessionFlags; public int? lockQueryError;
+            public int? protocolCode; public int? protocolQueryError;
+        }
+        [DllImport("wtsapi32.dll", EntryPoint = "WTSEnumerateSessionsW", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool Enumerate(IntPtr server, uint reserved, uint version, out IntPtr data, out uint count);
+        [DllImport("wtsapi32.dll", EntryPoint = "WTSQuerySessionInformationW", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool Query(IntPtr server, uint sessionId, int infoClass, out IntPtr data, out uint bytes);
+        [DllImport("wtsapi32.dll")] private static extern void WTSFreeMemory(IntPtr memory);
+        public static Session[] Read(bool interpretCurrentWindowsLockFlags) {
+            IntPtr data = IntPtr.Zero; uint count;
+            try {
+                if (!Enumerate(IntPtr.Zero, 0, 1, out data, out count)) {
+                    throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+                }
+                if (count > 64 || (count > 0 && data == IntPtr.Zero)) {
+                    throw new System.ComponentModel.Win32Exception(13);
+                }
+                var result = new List<Session>();
+                int size = Marshal.SizeOf(typeof(SessionInfo));
+                for (int i = 0; i < count; i++) {
+                    var native = (SessionInfo)Marshal.PtrToStructure(IntPtr.Add(data, i * size), typeof(SessionInfo));
+                    var item = new Session { sessionId = native.Id,
+                        station = Marshal.PtrToStringUni(native.Name), connectionStateCode = native.State };
+                    IntPtr info = IntPtr.Zero; uint bytes;
+                    try {
+                        if (Query(IntPtr.Zero, native.Id, 25, out info, out bytes)) {
+                            if (info != IntPtr.Zero && bytes >= Marshal.SizeOf(typeof(InfoEx))) {
+                                var extended = (InfoEx)Marshal.PtrToStructure(info, typeof(InfoEx));
+                                if (extended.Level == 1 && extended.Data.SessionId == native.Id) {
+                                    item.account = String.IsNullOrEmpty(extended.Data.User) ? null :
+                                        extended.Data.Domain + "\\" + extended.Data.User;
+                                    item.sessionFlags = extended.Data.Flags;
+                                    if (interpretCurrentWindowsLockFlags) {
+                                        if (extended.Data.Flags == 0) item.lockState = "locked";
+                                        else if (extended.Data.Flags == 1) item.lockState = "unlocked";
+                                    }
+                                } else item.lockQueryError = 13;
+                            } else item.lockQueryError = 13;
+                        } else item.lockQueryError = Marshal.GetLastWin32Error();
+                    } finally { if (info != IntPtr.Zero) WTSFreeMemory(info); }
+                    info = IntPtr.Zero;
+                    try {
+                        if (Query(IntPtr.Zero, native.Id, 16, out info, out bytes)) {
+                            if (info != IntPtr.Zero && bytes >= 2) item.protocolCode = (ushort)Marshal.ReadInt16(info);
+                            else item.protocolQueryError = 13;
+                        } else item.protocolQueryError = Marshal.GetLastWin32Error();
+                    } finally { if (info != IntPtr.Zero) WTSFreeMemory(info); }
+                    result.Add(item);
+                }
+                return result.ToArray();
+            } finally { if (data != IntPtr.Zero) WTSFreeMemory(data); }
+        }
+    }
+}
+'@ -ErrorAction Stop -WarningAction SilentlyContinue
+        }
+        $osVersion = $null
+        $osVersionError = $null
+        $interpretLockFlags = $false
+        try {
+            $version = [Version](Get-CimInstance -ClassName Win32_OperatingSystem -Property Version -ErrorAction Stop).Version
+            $osVersion = $version.ToString()
+            $interpretLockFlags = $version.Major -ge 10
+        }
+        catch { $osVersionError = 'unavailable'; }
+        $states = @('active', 'connected', 'connect-query', 'shadow', 'disconnected', 'idle', 'listen', 'reset', 'down', 'init')
+        $sessions = @([HooSaidThat.WtsDiagnostics]::Read($interpretLockFlags) | ForEach-Object {
+            [ordered]@{
+                sessionId = $_.sessionId
+                station = $_.station
+                account = $_.account
+                connectionStateCode = $_.connectionStateCode
+                connectionState = if ($_.connectionStateCode -ge 0 -and $_.connectionStateCode -lt $states.Count) { $states[$_.connectionStateCode] } else { 'unknown' }
+                lockState = $_.lockState
+                sessionFlags = $_.sessionFlags
+                lockQueryError = $_.lockQueryError
+                protocolCode = $_.protocolCode
+                protocol = switch ($_.protocolCode) { 0 { 'console' }; 2 { 'rdp' }; default { 'unknown' } }
+                protocolQueryError = $_.protocolQueryError
+            }
+        })
+        return [ordered]@{ observer = $observer; operatingSystemVersion = $osVersion; operatingSystemVersionError = $osVersionError; sessions = $sessions; error = $null }
+    }
+    catch {
+        $failure = $_.Exception
+        while ($failure.InnerException) { $failure = $failure.InnerException }
+        return [ordered]@{
+            observer = $observer
+            sessions = @()
+            error = [ordered]@{
+                type = $failure.GetType().FullName
+                nativeCode = if ($failure -is [System.ComponentModel.Win32Exception]) { $failure.NativeErrorCode } else { $null }
+            }
+        }
+    }
 }
 
 function Get-RuntimeStatus {
@@ -56,7 +226,7 @@ function Get-RuntimeStatus {
         }
         catch { $runtime = [ordered]@{ invalid = $true } }
     }
-    $processes = Get-ProcessSnapshot
+    $processes = Get-ProcessSnapshot -IncludeDetails
     $runtimeFresh = $false
     if ($runtime -and $runtime.generatedUtc) {
         try {
@@ -84,6 +254,7 @@ function Get-RuntimeStatus {
             lastTaskResult = [int64]$taskInfo.LastTaskResult
         }
         processes = $processes
+        sessionDiagnostics = Get-SessionDiagnostics
         runtime = $runtime
     }
 }

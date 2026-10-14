@@ -66,6 +66,16 @@ ssh -p 2224 \
   HstOracle@127.0.0.1 status
 ```
 
+`status` also reports the owners, executable paths and Windows session IDs of
+the runtime supervisor, NVDA and Chrome browser processes. Session diagnostics
+include WTS connection state, account, protocol and lock state; unavailable
+queries remain explicitly unknown. For RDP recovery, require an active,
+unlocked HstOracle session containing the supervised NVDA and Chrome processes
+before running parity, and keep that session connected throughout the gate.
+The SSH observer's session is labeled separately. It does not attest the
+runtime's input desktop, and these diagnostics do not replace live runtime,
+CDP or parity evidence.
+
 Update the installed control/plugin payload without RDP:
 
 ```bash
