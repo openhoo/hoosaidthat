@@ -58,6 +58,8 @@ export class ScreenReaderProtocolError extends Error {
   constructor(
     message: string,
     readonly status?: number,
+    /** Only artifacts whose length and SHA-256 were verified before a finish failure. */
+    readonly downloadedArtifacts: readonly DownloadedArtifact[] = [],
   ) {
     super(message);
     this.name = 'ScreenReaderProtocolError';
@@ -72,6 +74,8 @@ export class HttpScreenReaderClient {
   readonly configuration: ScreenReaderClientConfiguration | undefined;
 
   private sessionId: string | undefined;
+  private sessionStarting = false;
+  private finishingSession: Promise<DownloadedArtifact[]> | undefined;
 
   constructor(
     endpoints: RuntimeEndpoints,
@@ -134,9 +138,9 @@ export class HttpScreenReaderClient {
 
   async beginSession(testId: string, recording: boolean): Promise<SessionResponse | undefined> {
     if (!this.usesV2()) return undefined;
-    if (this.sessionId) {
+    if (this.sessionId || this.sessionStarting || this.finishingSession) {
       throw new ScreenReaderProtocolError(
-        `${this.adapterLabel()} client already has an active session`,
+        `${this.adapterLabel()} client already has an active session or is starting or finishing one`,
       );
     }
     if (this.screenReaderName === 'nvda' && !this.configuration) {
@@ -151,24 +155,29 @@ export class HttpScreenReaderClient {
     ) {
       throw new ScreenReaderProtocolError('testId must contain 1 to 500 bytes');
     }
-    const value = await this.requestJSON('/v2/sessions', {
-      method: 'POST',
-      body: JSON.stringify({
-        testId,
-        recording,
-        ...(this.screenReaderName === 'nvda' ? this.configuration : {}),
-      }),
-    });
-    if (
-      !isObject(value) ||
-      typeof value.id !== 'string' ||
-      !SESSION_ID_PATTERN.test(value.id) ||
-      !isSequence(value.startSequence)
-    ) {
-      throw new ScreenReaderProtocolError(`invalid ${this.adapterLabel()} session response`);
+    this.sessionStarting = true;
+    try {
+      const value = await this.requestJSON('/v2/sessions', {
+        method: 'POST',
+        body: JSON.stringify({
+          testId,
+          recording,
+          ...(this.screenReaderName === 'nvda' ? this.configuration : {}),
+        }),
+      });
+      if (
+        !isObject(value) ||
+        typeof value.id !== 'string' ||
+        !SESSION_ID_PATTERN.test(value.id) ||
+        !isSequence(value.startSequence)
+      ) {
+        throw new ScreenReaderProtocolError(`invalid ${this.adapterLabel()} session response`);
+      }
+      this.sessionId = value.id;
+      return { id: value.id, startSequence: value.startSequence };
+    } finally {
+      this.sessionStarting = false;
     }
-    this.sessionId = value.id;
-    return { id: value.id, startSequence: value.startSequence };
   }
 
   async state(): Promise<ScreenReaderState> {
@@ -221,7 +230,7 @@ export class HttpScreenReaderClient {
         if (
           !isObject(command) ||
           typeof command.id !== 'string' ||
-          !(command.id in SCREEN_READER_ACTIONS) ||
+          !Object.hasOwn(SCREEN_READER_ACTIONS, command.id) ||
           typeof command.label !== 'string' ||
           command.label.length === 0 ||
           seen.has(command.id)
@@ -286,6 +295,9 @@ export class HttpScreenReaderClient {
   }
 
   async perform(action: ScreenReaderAction, argument?: string): Promise<ActionResponse> {
+    if (typeof action !== 'string' || !Object.hasOwn(SCREEN_READER_ACTIONS, action)) {
+      throw new ScreenReaderProtocolError('unknown screen-reader action');
+    }
     if (action === 'find' && argument === undefined) {
       throw new ScreenReaderProtocolError('find requires a query; use findText()');
     }
@@ -421,9 +433,27 @@ export class HttpScreenReaderClient {
     };
   }
 
+  /** Native source geometry for annotated reports. Only HooVDA exposes this endpoint. */
+  async reportDocument(): Promise<unknown> {
+    if (this.screenReaderName !== 'hoovda') return undefined;
+    return await this.requestJSON(`${this.sessionPath()}/document`);
+  }
+
   async finishSession(): Promise<DownloadedArtifact[]> {
+    if (this.finishingSession) return await this.finishingSession;
+    if (this.sessionStarting) {
+      throw new ScreenReaderProtocolError(`${this.adapterLabel()} session start is still in progress`);
+    }
     if (!this.usesV2() || !this.sessionId) return [];
-    const sessionId = this.sessionId;
+    this.finishingSession = this.finishActiveSession(this.sessionId);
+    try {
+      return await this.finishingSession;
+    } finally {
+      this.finishingSession = undefined;
+    }
+  }
+
+  private async finishActiveSession(sessionId: string): Promise<DownloadedArtifact[]> {
     const finishPath = `/v2/sessions/${encodeURIComponent(sessionId)}/finish`;
     const finishDeadline = Date.now() + 30_000;
     let value: unknown;
@@ -433,6 +463,7 @@ export class HttpScreenReaderClient {
           method: 'POST',
           body: '{}',
           timeoutMs: Math.max(1, finishDeadline - Date.now()),
+          onSuccess: () => { this.sessionId = undefined; },
         });
         break;
       } catch (error) {
@@ -451,10 +482,8 @@ export class HttpScreenReaderClient {
         await new Promise((resolvePromise) => setTimeout(resolvePromise, 100));
       }
     }
-    // A successful finish response means the remote session is no longer
-    // active. Clear local ownership before validating or downloading evidence
-    // so a malformed manifest cannot poison the next test in this worker.
-    this.sessionId = undefined;
+    // Local ownership was cleared on successful HTTP status, before decoding
+    // JSON. A malformed response body must not poison the next worker test.
     if (!isObject(value) || value.sessionId !== sessionId || !Array.isArray(value.artifacts)) {
       throw new ScreenReaderProtocolError(`invalid ${this.adapterLabel()} finish response`);
     }
@@ -465,25 +494,38 @@ export class HttpScreenReaderClient {
       );
     }
     const downloaded: DownloadedArtifact[] = [];
+    const downloadErrors: ScreenReaderProtocolError[] = [];
     for (const artifact of artifacts) {
-      const body = await this.requestBytes(
-        `/v2/sessions/${encodeURIComponent(sessionId)}/artifacts/${encodeURIComponent(artifact.name)}`,
-        30_000,
-        artifact.bytes,
-      );
-      if (body.byteLength !== artifact.bytes) {
-        throw new ScreenReaderProtocolError(`artifact ${artifact.name} byte count mismatch`);
+      try {
+        const body = await this.requestBytes(
+          `/v2/sessions/${encodeURIComponent(sessionId)}/artifacts/${encodeURIComponent(artifact.name)}`,
+          30_000,
+          artifact.bytes,
+        );
+        if (body.byteLength !== artifact.bytes) {
+          throw new ScreenReaderProtocolError(`artifact ${artifact.name} byte count mismatch`);
+        }
+        const digest = createHash('sha256').update(body).digest('hex');
+        if (digest !== artifact.sha256) {
+          throw new ScreenReaderProtocolError(`artifact ${artifact.name} SHA-256 mismatch`);
+        }
+        downloaded.push({ ...artifact, body });
+      } catch (error) {
+        downloadErrors.push(error instanceof ScreenReaderProtocolError ? error :
+          new ScreenReaderProtocolError(this.redactToken(error instanceof Error ? error.message : String(error))));
       }
-      const digest = createHash('sha256').update(body).digest('hex');
-      if (digest !== artifact.sha256) {
-        throw new ScreenReaderProtocolError(`artifact ${artifact.name} SHA-256 mismatch`);
-      }
-      downloaded.push({ ...artifact, body });
+    }
+    const firstError = downloadErrors[0];
+    if (firstError) {
+      throw new ScreenReaderProtocolError(firstError.message, firstError.status, downloaded);
     }
     return downloaded;
   }
 
   private sessionPath(): string {
+    if (this.finishingSession) {
+      throw new ScreenReaderProtocolError(`${this.adapterLabel()} test session is finishing`);
+    }
     if (!this.sessionId) {
       throw new ScreenReaderProtocolError(`${this.adapterLabel()} test session has not started`);
     }
@@ -511,9 +553,11 @@ export class HttpScreenReaderClient {
       method?: 'GET' | 'POST';
       body?: string;
       timeoutMs?: number;
+      onSuccess?: () => void;
     } = {},
   ): Promise<unknown> {
     const response = await this.request(path, options);
+    options.onSuccess?.();
     const text = decodeUtf8(
       await readBoundedResponse(response, MAX_JSON_RESPONSE_BYTES),
       'screen-reader JSON response',
@@ -552,7 +596,7 @@ export class HttpScreenReaderClient {
       });
     } catch (error) {
       throw new ScreenReaderProtocolError(
-        `screen-reader request failed: ${error instanceof Error ? error.message : String(error)}`,
+        `screen-reader request failed: ${this.redactToken(error instanceof Error ? error.message : String(error))}`,
       );
     }
     if (!response.ok) {
@@ -561,11 +605,15 @@ export class HttpScreenReaderClient {
         'screen-reader error response',
       );
       throw new ScreenReaderProtocolError(
-        `screen-reader request failed (${response.status}): ${text.slice(0, 500)}`,
+        `screen-reader request failed (${response.status}): ${this.redactToken(text).slice(0, 500)}`,
         response.status,
       );
     }
     return response;
+  }
+
+  private redactToken(value: string): string {
+    return this.controlToken ? value.replaceAll(this.controlToken, '[redacted]') : value;
   }
 }
 
@@ -926,7 +974,7 @@ function isV1Capabilities(value: unknown): value is ScreenReaderCapabilities {
     if (
       !isObject(item) ||
       typeof item.action !== 'string' ||
-      !(item.action in SCREEN_READER_ACTIONS) ||
+      !Object.hasOwn(SCREEN_READER_ACTIONS, item.action) ||
       typeof item.label !== 'string' ||
       item.label.length === 0 ||
       seen.has(item.action)

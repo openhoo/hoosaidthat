@@ -418,6 +418,162 @@ test('client rejects unsupported runtimes and malformed capabilities', async (t)
   await assert.rejects(() => client.capabilities(), /invalid screen-reader capabilities/);
 });
 
+test('client rejects inherited names in both adapter action catalogs', async (t) => {
+  for (const adapter of ['orca', 'hoovda'] as const) {
+    for (const action of ['toString', 'constructor', '__proto__']) {
+      await t.test(`${adapter}: ${action}`, async (subtest) => {
+        const server = createServer((_request, response) => {
+          send(response, 200, adapter === 'orca'
+            ? { protocolVersion: 1, actions: [{ action, label: 'Invalid action' }] }
+            : { commands: [{ id: action, label: 'Invalid action' }] });
+        });
+        server.listen(0, '127.0.0.1');
+        await new Promise<void>((resolve) => server.once('listening', resolve));
+        subtest.after(() => server.close());
+        const address = server.address();
+        assert(address && typeof address !== 'string');
+        const client = new HttpScreenReaderClient({
+          controlEndpoint: `http://127.0.0.1:${address.port}`,
+          cdpEndpoint: 'http://127.0.0.1:9222', controlToken: token,
+        }, adapter);
+        await assert.rejects(() => client.capabilities(), /invalid .* (capabilities|command catalog)/);
+      });
+    }
+  }
+});
+
+test('client rejects unknown direct actions before sending a request', async () => {
+  const client = new HttpScreenReaderClient({
+    controlEndpoint: 'http://127.0.0.1:1', cdpEndpoint: 'http://127.0.0.1:2', controlToken: token,
+  });
+  await assert.rejects(() => client.perform('constructor' as never), /unknown screen-reader action/);
+});
+
+test('client protects its bearer token when the control server echoes an error', async (t) => {
+  const server = createServer((_request, response) => {
+    send(response, 500, { error: `rejected Bearer ${token}` });
+  });
+  server.listen(0, '127.0.0.1');
+  await new Promise<void>((resolve) => server.once('listening', resolve));
+  t.after(() => server.close());
+  const address = server.address();
+  assert(address && typeof address !== 'string');
+  const client = new HttpScreenReaderClient({
+    controlEndpoint: `http://127.0.0.1:${address.port}`,
+    cdpEndpoint: 'http://127.0.0.1:9222', controlToken: token,
+  });
+  await assert.rejects(() => client.health(), (error: unknown) => {
+    assert(error instanceof ScreenReaderProtocolError);
+    assert.equal(error.status, 500);
+    assert(!error.message.includes(token));
+    assert(error.message.includes('[redacted]'));
+    return true;
+  });
+});
+
+test('client admits only one session start while transport is pending', async (t) => {
+  let starts = 0;
+  const server = createServer((_request, response) => {
+    starts += 1;
+    setTimeout(() => send(response, 201, { id: `start-${starts}`, startSequence: 0 }), 25);
+  });
+  server.listen(0, '127.0.0.1');
+  await new Promise<void>((resolve) => server.once('listening', resolve));
+  t.after(() => server.close());
+  const address = server.address();
+  assert(address && typeof address !== 'string');
+  const client = new HttpScreenReaderClient({
+    controlEndpoint: `http://127.0.0.1:${address.port}`,
+    cdpEndpoint: 'http://127.0.0.1:9222', controlToken: token,
+  }, 'hoovda');
+  const results = await Promise.allSettled([
+    client.beginSession('first', false), client.beginSession('second', false),
+  ]);
+  assert.equal(results.filter((result) => result.status === 'fulfilled').length, 1);
+  assert.equal(starts, 1);
+});
+
+test('client shares concurrent finish and blocks a new session until artifacts are retained', async (t) => {
+  let finishes = 0;
+  let artifactRequests = 0;
+  const body = Buffer.from('retained evidence');
+  const server = createServer((request, response) => {
+    const path = new URL(request.url ?? '/', 'http://localhost').pathname;
+    if (path === '/v2/sessions') {
+      send(response, 201, { id: 'finish-once', startSequence: 0 });
+    } else if (path.endsWith('/finish')) {
+      finishes += 1;
+      setTimeout(() => send(response, 200, { sessionId: 'finish-once', artifacts: [{
+        name: 'screenreader-events', contentType: 'application/json', bytes: body.length,
+        sha256: createHash('sha256').update(body).digest('hex'),
+      }] }), 25);
+    } else if (path.endsWith('/artifacts/screenreader-events')) {
+      artifactRequests += 1;
+      void assert.rejects(() => client.beginSession('too-early', false), /finishing|active session/)
+        .then(() => { response.writeHead(200); response.end(body); })
+        .catch((error: unknown) => { response.destroy(error as Error); });
+    } else send(response, 404, {});
+  });
+  server.listen(0, '127.0.0.1');
+  await new Promise<void>((resolve) => server.once('listening', resolve));
+  t.after(() => server.close());
+  const address = server.address();
+  assert(address && typeof address !== 'string');
+  const client = new HttpScreenReaderClient({
+    controlEndpoint: `http://127.0.0.1:${address.port}`,
+    cdpEndpoint: 'http://127.0.0.1:9222', controlToken: token,
+  }, 'hoovda');
+  await client.beginSession('first', false);
+  const [first, second] = await Promise.all([client.finishSession(), client.finishSession()]);
+  assert.deepEqual(first, second);
+  assert.equal(finishes, 1);
+  assert.equal(artifactRequests, 1);
+  await client.beginSession('next', false);
+});
+
+test('client retains verified artifacts and attempts later downloads after one artifact fails', async (t) => {
+  const bodies = new Map([
+    ['screenreader-events', Buffer.from('{"audioTimeline":[]}')],
+    ['screenreader-video', Buffer.from('video')],
+    ['screenreader-audio', Buffer.from('audio')],
+  ]);
+  const requests: string[] = [];
+  const server = createServer((request, response) => {
+    const path = new URL(request.url ?? '/', 'http://localhost').pathname;
+    if (path === '/v2/sessions') {
+      send(response, 201, { id: 'partial-evidence', startSequence: 0 });
+    } else if (path.endsWith('/finish')) {
+      send(response, 200, { sessionId: 'partial-evidence', artifacts: [...bodies].map(([name, body]) => ({
+        name, contentType: name === 'screenreader-events' ? 'application/json' : name === 'screenreader-audio' ? 'audio/wav' : 'video/webm',
+        bytes: body.length, sha256: createHash('sha256').update(body).digest('hex'),
+      })) });
+    } else if (path.includes('/artifacts/')) {
+      const name = path.slice(path.lastIndexOf('/') + 1);
+      requests.push(name);
+      if (name === 'screenreader-video') send(response, 503, { error: 'video unavailable' });
+      else { response.writeHead(200); response.end(bodies.get(name)); }
+    } else send(response, 404, {});
+  });
+  server.listen(0, '127.0.0.1');
+  await new Promise<void>((resolve) => server.once('listening', resolve));
+  t.after(() => server.close());
+  const address = server.address();
+  assert(address && typeof address !== 'string');
+  const client = new HttpScreenReaderClient({
+    controlEndpoint: `http://127.0.0.1:${address.port}`,
+    cdpEndpoint: 'http://127.0.0.1:9222', controlToken: token,
+  }, 'hoovda');
+  await client.beginSession('first', true);
+  const error = await client.finishSession().then(() => undefined, (failure: unknown) => failure);
+  assert(error instanceof ScreenReaderProtocolError);
+  assert.match(error.message, /503/);
+  assert.deepEqual(requests, ['screenreader-events', 'screenreader-video', 'screenreader-audio']);
+  const retained = error.downloadedArtifacts;
+  assert.deepEqual(retained.map(artifact => artifact.name), ['screenreader-events', 'screenreader-audio']);
+  for (const artifact of retained) assert.deepEqual(Buffer.from(artifact.body), bodies.get(artifact.name));
+  await client.beginSession('next', false);
+});
+
 test('client rejects malformed and out-of-order evidence', async (t) => {
   const server = createServer((request, response) => {
     const url = new URL(request.url ?? '/', 'http://localhost');
@@ -565,6 +721,32 @@ test('client clears a remotely finished session before rejecting its manifest', 
 
   await client.beginSession('first', false);
   await assert.rejects(() => client.finishSession(), /invalid HooVDA finish response/);
+  await client.beginSession('second', false);
+  assert.equal(sessions, 2);
+});
+
+test('client releases a remotely finished session after a non-JSON manifest', async (t) => {
+  let sessions = 0;
+  const server = createServer((request, response) => {
+    if (request.url === '/v2/sessions') {
+      sessions += 1;
+      send(response, 201, { id: `json-session-${sessions}`, startSequence: 0 });
+    } else {
+      response.writeHead(200, { 'content-type': 'application/json' });
+      response.end('malformed');
+    }
+  });
+  server.listen(0, '127.0.0.1');
+  await new Promise<void>((resolve) => server.once('listening', resolve));
+  t.after(() => server.close());
+  const address = server.address();
+  assert(address && typeof address !== 'string');
+  const client = new HttpScreenReaderClient({
+    controlEndpoint: `http://127.0.0.1:${address.port}`,
+    cdpEndpoint: 'http://127.0.0.1:9222', controlToken: token,
+  }, 'hoovda');
+  await client.beginSession('first', false);
+  await assert.rejects(() => client.finishSession(), /response was not JSON/);
   await client.beginSession('second', false);
   assert.equal(sessions, 2);
 });

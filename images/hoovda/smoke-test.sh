@@ -150,7 +150,7 @@ test "$(lou_translate --version 2>&1 | awk '\''NR == 1 { print $3 }'\'')" = "3.3
 "$engine" exec "$container_name" pkill -KILL -x hoovda
 for _attempt in $(seq 1 100); do
   running=$("$engine" inspect --format '{{.State.Running}}' "$container_name" 2>/dev/null || true)
-  if [[ "$running" != "true" ]]; then
+  if [[ "$running" == "false" ]]; then
     echo "Runtime supervisor stopped container after HooVDA exited"
     exit 0
   fi
@@ -158,5 +158,5 @@ for _attempt in $(seq 1 100); do
 done
 
 "$engine" logs --tail 100 "$container_name" >&2 || true
-echo "Runtime container stayed alive after HooVDA exited" >&2
+echo "Runtime container did not report a stopped state after HooVDA exited" >&2
 exit 1

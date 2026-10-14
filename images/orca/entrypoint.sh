@@ -23,7 +23,7 @@ require_integer_between() {
   local value=$2
   local minimum=$3
   local maximum=$4
-  if [[ ! "$value" =~ ^[0-9]+$ ]] || (( value < minimum || value > maximum )); then
+  if [[ ! "$value" =~ ^[1-9][0-9]{0,4}$ ]] || (( value < minimum || value > maximum )); then
     echo "$name must be an integer between $minimum and $maximum" >&2
     exit 64
   fi

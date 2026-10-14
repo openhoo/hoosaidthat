@@ -71,11 +71,25 @@ active CDP document alone is insufficient.
 Finish closes the test recording and returns SHA-256-bound artifacts:
 
 - `screenreader-events`
-- `screenreader-document`
+- `screenreader-document` when the final accessible document is available
 - `screenreader-audio`
 - `screenreader-video` when recording was enabled
 
 Clients must verify byte length and SHA-256 after download. HooSaidThat does.
+Closing the page or browser context before fixture teardown can make the final
+document refresh unavailable or exceed its deadline. HooVDA then omits the
+document artifact and preserves the completed events, audio, and enabled video
+recording. It never exports the stale cached graph as the final document.
+The active-session document and state endpoints still report refresh failures.
+
+Updated HooVDA engines include an optional `audioTimeline` array in the finished
+`screenreader-events` JSON. Each entry contains `monotonicNs` (the originating
+speech event timestamp), `startSample`, `sampleCount`, and `sampleRate`. Sample
+positions address frames in the actual exported WAV, after recorder-origin
+subtraction, sample rounding, ordering, and overlap serialization. Reports use
+this index to extract original utterance clips. Runtime `audioOffsetNs` alone
+is not a WAV seek offset. Engines without the index still support transcripts
+and snapshots, but reports mark utterance playback unavailable.
 Successful finish calls are idempotent while their artifacts remain retained,
 so a client can safely retry after a lost HTTP response. HooVDA bounds retained
 finished sessions to 32 and removes expired session directories.

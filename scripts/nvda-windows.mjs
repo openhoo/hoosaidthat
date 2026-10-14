@@ -26,6 +26,12 @@ const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const invocationRoot = process.cwd();
 const require = createRequire(import.meta.url);
 const playwrightCLI = require.resolve('@playwright/test/cli');
+const parityConfig = join(
+  projectRoot,
+  existsSync(join(projectRoot, 'tsconfig.build.json'))
+    ? 'oracle/parity/playwright.config.ts'
+    : 'dist/oracle/parity/playwright.config.js',
+);
 const deploymentRoot = join(projectRoot, 'oracle', 'windows-nvda');
 const runtimeRoot = resolve(
   process.env.HST_NVDA_RUNTIME_ROOT ?? join(homedir(), 'VMs', 'hoosaidthat-nvda'),
@@ -83,6 +89,7 @@ const parityActionShards = chunk(parityActions, 24);
 
 const command = process.argv[2] ?? 'status';
 
+try {
 switch (command) {
   case 'doctor':
     await doctor();
@@ -141,10 +148,16 @@ switch (command) {
       'usage: nvda-windows.mjs doctor|init|up|wait|status|control <command>|wait-ssh|sync|parity|parity-cell <locale> <layout>|down',
     );
 }
+} catch (error) {
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exitCode = 1;
+}
 
 async function doctor() {
+  if (process.platform !== 'linux') {
+    throw new Error('NVDA VM doctor failed: host must be Linux with KVM and Podman Compose');
+  }
   const failures = [];
-  if (process.platform !== 'linux') failures.push('host must be Linux');
   if (!existsSync('/dev/kvm')) failures.push('/dev/kvm missing');
   if (!existsSync('/dev/net/tun')) failures.push('/dev/net/tun missing');
   const composeProbe = spawnSync('podman', ['compose', 'version'], {
@@ -629,7 +642,9 @@ function requireInitialized() {
 async function runParityMatrix() {
   requireInitialized();
   await waitUntilReady();
-  execFileSync('npm', ['run', 'build'], { cwd: projectRoot, stdio: 'inherit' });
+  if (existsSync(join(projectRoot, 'tsconfig.build.json'))) {
+    execFileSync('npm', ['run', 'build'], { cwd: projectRoot, stdio: 'inherit' });
+  }
   const token = readControlToken();
   for (const [locale, keyboardLayout] of [
     ['en-US', 'desktop'],
@@ -710,7 +725,7 @@ function runParityInvocation(locale, keyboardLayout, token, label, overrides = {
       playwrightCLI,
       'test',
       '--config',
-      join(projectRoot, 'oracle', 'parity', 'playwright.config.ts'),
+      parityConfig,
       '--reporter=line',
       '--output',
       join(
@@ -724,6 +739,7 @@ function runParityInvocation(locale, keyboardLayout, token, label, overrides = {
       stdio: 'inherit',
       env: {
         ...process.env,
+        HOOSAIDTHAT_PARITY_ADAPTER: 'nvda',
         SCREEN_READER_LOCALE: locale,
         SCREEN_READER_KEYBOARD_LAYOUT: keyboardLayout,
         HOOSAIDTHAT_NVDA_CONTROL_TOKEN: token,

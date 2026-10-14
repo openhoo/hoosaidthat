@@ -44,3 +44,6 @@ export type {
   SpeechEvent,
 } from './types.js';
 export { devices } from '@playwright/test';
+
+export { renderScreenReaderReport } from './report.js';
+export type { ScreenReaderReport, ReportSnapshot, ReportAnnotation, ReportRect } from './report.js';

@@ -48,6 +48,7 @@ site_pid=$!
 
 "$engine" run --detach \
   --name "$container_name" \
+  --platform linux/amd64 \
   --network host \
   --shm-size 1g \
   --env "HST_CONTROL_PORT=$control_port" \
@@ -130,16 +131,18 @@ if "Screen reader harness smoke test" not in speech or "heading" not in speech.l
 print(json.dumps({"health": health, "capturedSpeech": speech}, indent=2))
 PY
 
-"$engine" exec "$container_name" pkill -KILL -f '^speech-dispatcher '
+# Emulation can prefix argv with the absolute executable path. Match the
+# owned daemon's executable and startup flag rather than assuming argv[0].
+"$engine" exec "$container_name" pkill -KILL -f '(^|[ /])speech-dispatcher --run-single([ ]|$)'
 for _attempt in $(seq 1 100); do
   running=$("$engine" inspect --format '{{.State.Running}}' "$container_name" 2>/dev/null || true)
-  if [[ "$running" != "true" ]]; then
-    echo "Runtime supervisor stopped container after screen reader exited"
+  if [[ "$running" == "false" ]]; then
+    echo "Runtime supervisor stopped container after Speech Dispatcher exited"
     exit 0
   fi
   sleep 0.05
 done
 
 "$engine" logs --tail 100 "$container_name" >&2 || true
-echo "Runtime container stayed alive after screen reader exited" >&2
+echo "Runtime container did not report a stopped state after Speech Dispatcher exited" >&2
 exit 1

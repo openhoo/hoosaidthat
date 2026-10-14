@@ -1,9 +1,13 @@
 import {
   defineConfig as baseDefineConfig,
   test as base,
+  type Browser,
+  type BrowserContext,
+  type Page,
   type PlaywrightTestConfig,
 } from '@playwright/test';
 import { HttpScreenReaderClient } from './client.js';
+import { isRuntimeBootstrapURL } from './bootstrap.js';
 import { ScreenReaderRuntime } from './runtime.js';
 import { ScreenReaderSession } from './session.js';
 import {
@@ -11,6 +15,41 @@ import {
   type ResolvedScreenReaderOptions,
   type ScreenReaderOptions,
 } from './types.js';
+
+// Native Chromium exits when its final window closes. Retain one owned
+// window outside isolated test contexts only while their final windows close.
+const keepAlivePages = new WeakMap<Browser, Page>();
+const keepAliveCreations = new WeakMap<Browser, Promise<void>>();
+const KEEP_ALIVE_URL = 'data:text/html,<title>HooSaidThat runtime keepalive</title>';
+
+async function ensureKeepAlive(
+  browser: Browser,
+  testContext: BrowserContext,
+  closingPages: readonly Page[] = testContext.pages(),
+): Promise<void> {
+  const creating = keepAliveCreations.get(browser);
+  if (creating) return await creating;
+  const existing = keepAlivePages.get(browser);
+  if (existing && !existing.isClosed()) return;
+  const otherPageExists = browser.contexts().some(candidate =>
+    candidate.pages().some(page => !page.isClosed() && !closingPages.includes(page)),
+  );
+  if (otherPageExists) return;
+  const nativeContext = browser.contexts().find(candidate => candidate !== testContext);
+  if (nativeContext) {
+    const creation = (async () => {
+      const page = await nativeContext.newPage();
+      await page.goto(KEEP_ALIVE_URL);
+      keepAlivePages.set(browser, page);
+    })();
+    keepAliveCreations.set(browser, creation);
+    try {
+      await creation;
+    } finally {
+      keepAliveCreations.delete(browser);
+    }
+  }
+}
 
 export interface ScreenReaderFixtures {
   screenReader: ScreenReaderSession;
@@ -71,11 +110,6 @@ export const test = base.extend<ScreenReaderFixtures, ScreenReaderWorkerFixtures
       const browser = await playwright.chromium.connectOverCDP(
         screenReaderRuntime.endpoints.cdpEndpoint,
       );
-      for (const context of browser.contexts()) {
-        for (const page of context.pages()) {
-          if (page.url() === 'about:blank') await page.close();
-        }
-      }
       try {
         await use(browser);
       } finally {
@@ -85,19 +119,70 @@ export const test = base.extend<ScreenReaderFixtures, ScreenReaderWorkerFixtures
     { scope: 'worker' },
   ],
 
-  page: async ({ context }, use) => {
-    // Drive the runtime-owned foreground tab. Creating a second CDP page can
-    // leave Chromium's bootstrap tab as the X11/AT-SPI active tab, making
-    // Playwright and the screenreader observe different documents.
+  page: async ({ context, browser }, use) => {
+    // Keep Playwright's per-test context for isolation, tracing, and video.
+    // Once its page exists, retire the runtime bootstrap tab even when it
+    // belongs to the browser's separate default context. Native focus must
+    // not retain a different document from the one Playwright is driving.
     const existing = context
       .pages()
-      .find((candidate) => candidate.url().startsWith('file:///opt/hoosaidthat/bootstrap.html'));
+      .find((candidate) => isRuntimeBootstrapURL(candidate.url()));
     const page = existing ?? context.pages()[0] ?? (await context.newPage());
     await page.bringToFront();
+    const keepAlive = keepAlivePages.get(browser);
+    if (keepAlive && keepAlive !== page) {
+      await keepAlive.close();
+      keepAlivePages.delete(browser);
+    }
+    for (const candidateContext of browser.contexts()) {
+      for (const candidate of candidateContext.pages()) {
+        if (candidate !== page && isRuntimeBootstrapURL(candidate.url())) {
+          await candidate.close();
+        }
+      }
+    }
+    // A test may close its final window and continue asynchronous cleanup.
+    // Establish the between-test window before close can terminate Chromium.
+    // Retire it after the next test's page exists, keeping one native window
+    // during ordinary screen-reader actions and per-test video capture.
+    const originalPageCloses = new Map<Page, Page['close']>();
+    const closingPages = new Set<Page>();
+    const guardPageClose = (candidate: Page): void => {
+      if (originalPageCloses.has(candidate)) return;
+      const closePage = candidate.close;
+      originalPageCloses.set(candidate, closePage);
+      candidate.close = async (options) => {
+        closingPages.add(candidate);
+        try {
+          if (browser.isConnected()) {
+            await ensureKeepAlive(browser, context, [...closingPages]);
+          }
+          await closePage.call(candidate, options);
+        } finally {
+          closingPages.delete(candidate);
+        }
+      };
+    };
+    for (const candidate of context.pages()) guardPageClose(candidate);
+    // Popups and secondary pages can outlive the primary fixture page. Guard
+    // their final-window closes too, including concurrent page cleanup.
+    context.on('page', guardPageClose);
+    const closeContext = context.close;
+    context.close = async (options) => {
+      if (browser.isConnected()) await ensureKeepAlive(browser, context);
+      await closeContext.call(context, options);
+    };
     try {
       await use(page);
     } finally {
-      if (!page.isClosed()) await page.close();
+      try {
+        if (browser.isConnected()) await ensureKeepAlive(browser, context);
+        if (!page.isClosed()) await page.close();
+      } finally {
+        context.off('page', guardPageClose);
+        for (const [candidate, closePage] of originalPageCloses) candidate.close = closePage;
+        context.close = closeContext;
+      }
     }
   },
 
@@ -133,5 +218,14 @@ export function defineConfig(
 function withNativeViewport(
   config: PlaywrightTestConfig<ScreenReaderFixtures, ScreenReaderWorkerFixtures>,
 ): PlaywrightTestConfig<ScreenReaderFixtures, ScreenReaderWorkerFixtures> {
-  return { ...config, use: { ...config.use, viewport: null } };
+  return {
+    ...config,
+    use: { ...config.use, viewport: null },
+    ...(config.projects ? {
+      projects: config.projects.map((project) => ({
+        ...project,
+        use: { ...project.use, viewport: null },
+      })),
+    } : {}),
+  };
 }
