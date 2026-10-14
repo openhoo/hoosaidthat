@@ -66,6 +66,7 @@ jobs:
             exit 1
           fi
           test "$(node -p 'require("./package.json").version')" = "$RELEASE_VERSION"
+          test "$GITHUB_REF" = "refs/tags/v${RELEASE_VERSION}"
           test "$(git rev-parse "refs/tags/v${RELEASE_VERSION}^{commit}")" = "$GITHUB_SHA"
           if [[ ! "$HOOVDA_REF" =~ ^[0-9a-f]{40}$ ]]; then
             echo "hoovda_ref must be a full lowercase 40-character commit SHA" >&2
