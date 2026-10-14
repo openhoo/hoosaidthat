@@ -11,6 +11,7 @@ from pathlib import Path
 from types import SimpleNamespace
 import threading
 import time
+import sys
 import unittest
 from unittest import mock
 
@@ -58,8 +59,13 @@ def load_capture():
                 and item.name in {
                     "on_speech",
                     "on_braille",
+                    "on_braille_message",
                     "event_gainFocus",
                     "capture_live_region",
+                    "install_native_live_region_capture",
+                    "remove_native_live_region_capture",
+                    "queue_native_live_region",
+                    "present_native_live_region",
                 }
             ]
     selected.append(ast.ClassDef(
@@ -70,6 +76,7 @@ def load_capture():
         "base64": base64,
         "threading": threading,
         "time": time,
+        "sys": sys,
         "MAX_EVENTS": 1000,
         "api": SimpleNamespace(getFocusObject=lambda: SimpleNamespace(isProtected=False)),
         "braille": SimpleNamespace(handler=SimpleNamespace(_cells=CELLS, _cursorPos=1)),
