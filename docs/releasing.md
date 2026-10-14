@@ -8,8 +8,11 @@ the same value is also an OCI tag.
 
 Required repository secret:
 
-- `NPM_TOKEN`: automation token for `@openhoo/hoosaidthat`; configure npm
-  provenance or trusted publishing for this workflow.
+- `NPM_TOKEN`: publishing credential for `@openhoo/hoosaidthat`. Staging accepts
+  a browser-login session token and does not require a token that bypasses MFA.
+  Deliver a temporary session token directly to the repository secret without
+  printing it, and remove that secret after the run. The workflow pins npm
+  11.20.0 for staged publishing with provenance.
 
 The workflow refuses publication unless package version and Git tag match,
 HooVDA source resolves to the requested commit, the complete provenance-pinned
@@ -41,6 +44,12 @@ Published artifacts:
 Image builds push run-scoped candidate indexes with BuildKit SBOM and maximal
 provenance attestations. Qualification pulls those exact digests. Publication
 then promotes the same OCI indexes to version tags without rebuilding them.
+The final npm step submits an attested staged package. It is not public until
+the maintainer runs `npm stage list @openhoo/hoosaidthat`, verifies the candidate
+version and provenance, and runs `npm stage approve <stage-id>`. Approval
+requires the maintainer's MFA. This workflow supports staging the first version
+before the public package exists. A successful workflow alone does not mean
+npm publication is complete.
 After a first release, set each GHCR package visibility deliberately and verify
 the npm tarball, OCI digest, SBOM, provenance, and fresh-pull smoke before
 announcing it.

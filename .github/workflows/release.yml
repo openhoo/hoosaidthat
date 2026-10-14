@@ -12,7 +12,7 @@ on:
         required: true
         type: string
       confirm_release:
-        description: Publish npm package and three GHCR images
+        description: Stage npm package and publish three GHCR images
         required: true
         default: false
         type: boolean
@@ -47,6 +47,8 @@ jobs:
           node-version: 24
           cache: npm
           registry-url: https://registry.npmjs.org
+      - name: Install pinned npm with staged publishing
+        run: npm install --global npm@11.20.0
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version: '1.27.2'
@@ -188,7 +190,7 @@ jobs:
           promote "$ENGINE_CANDIDATE" "${ENGINE_IMAGE}:${RELEASE_VERSION}"
           promote "$HOOVDA_CANDIDATE" "${HOOVDA_IMAGE}:${RELEASE_VERSION}"
           promote "$ORCA_CANDIDATE" "${ORCA_IMAGE}:${RELEASE_VERSION}"
-      - name: Publish npm package with provenance
-        run: npm publish --access public --provenance
+      - name: Stage npm package with provenance
+        run: npm stage publish --access public --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
