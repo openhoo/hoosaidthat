@@ -188,12 +188,89 @@ class CapturePrivacyTests(unittest.TestCase):
         self.assertEqual(len(self.state.events), 1)
         self.assert_suppressed(self.state.events)
 
-    def test_live_region_fallback_preserves_recent_speech_redaction(self):
-        self.state.append("speech", SENTINEL, redacted=True)
+    def test_live_region_fallback_preserves_handler_speech_redaction(self):
         self.hooks.capture_live_region(
-            SimpleNamespace(isProtected=False, name="", value=""), lambda: None, "polite",
+            SimpleNamespace(isProtected=False, name="", value=""),
+            lambda: self.state.append("speech", SENTINEL, redacted=True),
+            "polite",
         )
         self.assert_suppressed(self.state.events)
+
+    def test_empty_live_region_does_not_reuse_unrelated_previous_speech(self):
+        for command in ("event", "activate"):
+            with self.subTest(command=command):
+                self.state.events.clear()
+                self.state.command = command
+                self.state.append("speech", "Unrelated button focus")
+                self.hooks.capture_live_region(
+                    SimpleNamespace(isProtected=False, name="", value=""),
+                    lambda: None,
+                    "polite",
+                )
+                self.assertEqual([event["kind"] for event in self.state.events],
+                                 ["speech", "liveRegion"])
+                self.assertEqual(self.state.events[0]["text"], "Unrelated button focus")
+                self.assertEqual(self.state.events[1]["text"], "")
+                self.assertEqual(self.state.events[1]["priority"], "polite")
+
+    def test_empty_live_region_does_not_inherit_previous_speech_redaction(self):
+        self.state.append("speech", SENTINEL, redacted=True)
+        self.hooks.capture_live_region(
+            SimpleNamespace(isProtected=False, name="", value=""),
+            lambda: None,
+            "assertive",
+        )
+        self.assert_suppressed(self.state.events[:1])
+        live = self.state.events[1]
+        self.assertEqual(live["kind"], "liveRegion")
+        self.assertEqual(live["text"], "")
+        self.assertNotIn("redacted", live)
+        self.assertNotIn(SENTINEL, json.dumps(self.state.events))
+
+    def test_live_region_handler_speech_remains_exact(self):
+        self.state.append("speech", "Unrelated button focus")
+        self.hooks.capture_live_region(
+            SimpleNamespace(isProtected=False, name="Region label"),
+            lambda: self.hooks.on_speech(speechSequence=["Actual live update"]),
+            "assertive",
+        )
+        speech, live = self.state.events[1:]
+        self.assertEqual([speech["kind"], live["kind"]], ["speech", "liveRegion"])
+        self.assertEqual(speech["text"], "Actual live update")
+        self.assertEqual(live["text"], "Actual live update")
+        self.assertEqual(live["priority"], "assertive")
+        self.assertIsNone(self.state.live_region_context)
+
+    def test_live_region_native_name_and_value_fallbacks_remain_exact(self):
+        for name, value, expected in (
+            ("Named live update", "Other value", "Named live update"),
+            ("", "Value live update", "Value live update"),
+        ):
+            with self.subTest(name=name, value=value):
+                self.state.events.clear()
+                self.state.append("speech", "Unrelated button focus")
+                self.hooks.capture_live_region(
+                    SimpleNamespace(isProtected=False, name=name, value=value),
+                    lambda: None,
+                    "polite",
+                )
+                self.assertEqual(self.state.events[-1]["text"], expected)
+
+    def test_protected_live_region_fallback_never_reads_native_text(self):
+        class ProtectedRegion:
+            isProtected = True
+
+            @property
+            def name(self):
+                raise AssertionError("protected live-region name must remain unread")
+
+            @property
+            def value(self):
+                raise AssertionError("protected live-region value must remain unread")
+
+        self.state.append("speech", "Unrelated button focus")
+        self.hooks.capture_live_region(ProtectedRegion(), lambda: None, "polite")
+        self.assert_suppressed(self.state.events[1:])
 
 
 if __name__ == "__main__":

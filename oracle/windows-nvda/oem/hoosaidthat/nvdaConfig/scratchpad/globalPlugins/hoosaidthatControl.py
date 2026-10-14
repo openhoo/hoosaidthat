@@ -1665,6 +1665,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
             "protected": object_is_protected(obj),
         }
         with STATE.lock:
+            before_sequence = STATE.sequence
             previous_context = STATE.live_region_context
             STATE.live_region_context = context
         try:
@@ -1689,6 +1690,10 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
                     now_ns = time.monotonic_ns()
                     with STATE.lock:
                         for event in reversed(STATE.events):
+                            # Earlier focus or command output is not evidence
+                            # of speech from this live-region handler.
+                            if event["sequence"] <= before_sequence:
+                                break
                             if now_ns - event["monotonicNs"] > 1_000_000_000:
                                 break
                             if (

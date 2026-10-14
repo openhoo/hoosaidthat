@@ -20,8 +20,9 @@ const parity = runInNewContext([
   section('async function focusFixture(', 'async function prepareAction('),
   section('async function prepareAction(', 'async function installFixture('),
   section('const semanticExpectations = new Map(', '\n]);', true),
-  '({ prepareAction, semanticExpectations })',
+  '({ focusFixture, prepareAction, semanticExpectations })',
 ].join('\n')) as {
+  focusFixture(screenReader: unknown, locator: unknown, label?: string): Promise<unknown>;
   prepareAction(page: unknown, screenReader: unknown, action: string): Promise<void>;
   semanticExpectations: Map<string, RegExp>;
 };
@@ -30,16 +31,35 @@ async function preparedFocus(action: string): Promise<{ role: string; name: stri
   let focused: { role: string; name: string } | undefined;
   const page = {
     bringToFront: async () => undefined,
-    getByRole: (role: string, options: { name: string }) => ({
-      focus: async () => { focused = { role, name: options.name }; },
-    }),
+    getByRole: (role: string, options: { name: string }) => ({ role, name: options.name }),
   };
   const screenReader = {
-    observe: async (_label: string, mutation: () => Promise<void>) => { await mutation(); },
+    focus: async (locator: { role: string; name: string }) => { focused = locator; },
   };
   await parity.prepareAction(page, screenReader, action);
   return focused;
 }
+
+test('parity keyboard focus uses the public native helper and preserves its observation and label', async () => {
+  const locator = {
+    focus: async () => { throw new Error('DOM focus cannot synchronize the NVDA browse caret'); },
+  };
+  const observation = { action: 'focus', speech: 'Update live region button' };
+  let called = false;
+  const screenReader = {
+    focus: async (target: unknown, label: string) => {
+      assert.equal(target, locator);
+      assert.equal(label, 'Focus live-region fixture');
+      called = true;
+      return observation;
+    },
+  };
+  assert.equal(
+    await parity.focusFixture(screenReader, locator, 'Focus live-region fixture'),
+    observation,
+  );
+  assert.equal(called, true);
+});
 
 test('previousFocusable parity starts from the nonprotected successor of Details action', async () => {
   assert.deepEqual(await preparedFocus('previousFocusable'), {
