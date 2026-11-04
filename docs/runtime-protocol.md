@@ -208,7 +208,8 @@ persistent Chrome-context limitations and the real-device smoke suite.
 
 The `voiceover-web` profile uses a real macOS host (`platform: macos`) through an
 external authenticated v2 runtime. `voiceover-last-phrase` samples VoiceOver's
-native last phrase every 100 ms and records changes. Identical consecutive
+native last phrase and records changes, with a 100 ms delay between completed
+sample requests. Identical consecutive
 phrases and overwritten samples may be lost. `voiceover-speech-output` identifies
 the separate experimental streaming AT Driver boundary. Both require a native
 VoiceOver process/version attestation. Unsupported commands fail explicitly.

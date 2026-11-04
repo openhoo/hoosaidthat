@@ -100,7 +100,8 @@ activation, current output, document start/end and selected heading/link/table/
 image navigation. Unsupported settings, cursor-mode detection and braille fail
 explicitly. VoiceOver uses its own VO modifier chords.
 
-The default VoiceOver boundary polls `content of last phrase` every 100 ms.
+The default VoiceOver boundary reads `content of last phrase`, then schedules
+the next sample after 100 ms. AppleScript execution extends the actual interval.
 It records a phrase only when the native value changes. **Identical consecutive
 phrases and phrases replaced between polls cannot be recovered.** An action
 with no distinguishable speech times out. No stale caption is replayed as a

@@ -27,7 +27,8 @@ function run(argv) {
   }
   function geometry(element, attribute, type) {
     var value = attr(element, attribute);
-    if (!value || $.AXValueGetType(value) !== type) return null;
+    // JXA imports these C enum constants as strings.
+    if (!value || Number($.AXValueGetType(value)) !== Number(type)) return null;
     // CGPoint/CGSize each contain two CGFloat doubles on supported macOS hosts.
     // An explicit buffer avoids passing an untyped JXA Ref to a void pointer.
     var buffer = $.malloc(16);
