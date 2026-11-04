@@ -112,7 +112,7 @@ export class VoiceOverDriver {
           ['VoiceOver cursor did not enter the owned web document', 'DOCUMENT_NOT_FOUND'],
         ]);
         const reason = error.killed ? 'TIMEOUT' : reasons.get(error.message) ?? 'SCRIPT_ERROR';
-        error.nativeFaultCode = `VOICEOVER_${stage}_${reason}`;
+        error.nativeFaultCode ??= `VOICEOVER_${stage}_${reason}`;
         throw error;
       }
     });

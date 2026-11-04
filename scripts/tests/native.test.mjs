@@ -314,5 +314,8 @@ test('VoiceOver distinguishes a selected web area from a cursor already inside i
   assert.deepEqual(voiceOverCursorMembership([0, 100, 1000, 800], position, size,
     { readerCursorInDocument: false, readerCursorAtDocument: false }),
     { readerCursorInDocument: false, readerCursorAtDocument: false });
-  assert.throws(() => voiceOverCursorMembership([0, 100, 1000, 800], null, size, proven), /native document geometry/);
+  for (const [positionBytes, sizeBytes] of [[null, size], [position, encode(0, 0)], [position, encode(NaN, 700)]]) {
+    assert.deepEqual(voiceOverCursorMembership([0, 100, 1000, 800], positionBytes, sizeBytes, proven),
+      { readerCursorInDocument: false, readerCursorAtDocument: false });
+  }
 });

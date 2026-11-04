@@ -21,16 +21,19 @@ export function assertNativePlatform(screenReader, platform = process.platform) 
 }
 
 export function voiceOverCursorMembership(rectangle, positionBytes, sizeBytes, hits) {
+  const unverified = { readerCursorInDocument: false, readerCursorAtDocument: false };
   function pair(encoded) {
-    if (typeof encoded !== 'string' || !/^[A-Za-z0-9+/]{22}==$/.test(encoded)) throw new Error('invalid native document geometry');
+    if (typeof encoded !== 'string' || !/^[A-Za-z0-9+/]{22}==$/.test(encoded)) return null;
     const bytes = Buffer.from(encoded, 'base64');
+    if (bytes.length !== 16) return null;
     const values = [bytes.readDoubleLE(0), bytes.readDoubleLE(8)];
-    if (bytes.length !== 16 || !values.every(Number.isFinite)) throw new Error('invalid native document geometry');
-    return values;
+    return values.every(Number.isFinite) ? values : null;
   }
-  const [x, y] = pair(positionBytes);
-  const [width, height] = pair(sizeBytes);
-  if (width <= 0 || height <= 0) throw new Error('invalid native document geometry');
+  const position = pair(positionBytes), size = pair(sizeBytes);
+  // New about:blank windows can expose an AX web area before its geometry is
+  // available. This is missing cursor proof, not a reader identity failure.
+  if (!position || !size || size[0] <= 0 || size[1] <= 0) return unverified;
+  const [x, y] = position, [width, height] = size;
   // The VO outline can include a native scrollbar and its small focus border.
   // A selected web area requires interaction even when all AX hit tests pass.
   const atDocument = Math.abs(rectangle[0] - x) <= 4 && Math.abs(rectangle[1] - y) <= 4 &&
@@ -48,10 +51,18 @@ export async function nativeProbe(screenReader, browserPid, { voiceOverCursor = 
   const args = ['-l', 'JavaScript', fileURLToPath(new URL('focus-macos.js', directory)), String(browserPid)];
   let rectangle;
   if (screenReader === 'voiceover' && voiceOverCursor) {
-    const { stdout: bounds } = await executeProbe('CURSOR', '/usr/bin/osascript', ['-e', 'tell application "VoiceOver" to return bounds of vo cursor'], { timeout: 5000, maxBuffer: 1024 });
-    rectangle = bounds.trim().split(/,\s*/).map(Number);
-    if (rectangle.length !== 4 || !rectangle.every(Number.isFinite)) throw new Error('invalid native VoiceOver cursor bounds');
-    args.push(JSON.stringify(rectangle));
+    try {
+      const { stdout: bounds } = await executeProbe('CURSOR', '/usr/bin/osascript', ['-e', 'tell application "VoiceOver" to return bounds of vo cursor'], { timeout: 5000, maxBuffer: 1024 });
+      const candidate = bounds.trim().split(/,\s*/).map(Number);
+      if (candidate.length === 4 && candidate.every(Number.isFinite) && candidate[2] > candidate[0] && candidate[3] > candidate[1]) {
+        rectangle = candidate;
+        args.push(JSON.stringify(rectangle));
+      }
+    } catch (error) {
+      // An absent cursor is normal during a window transition. Permission,
+      // timeout and other scripting errors remain fatal.
+      if (error.nativeScriptNumber !== -1728) throw error;
+    }
   }
   const { stdout } = await executeProbe('AX_FOCUS', command, args, { timeout: 5000, maxBuffer: 65536, windowsHide: true });
   const value = JSON.parse(stdout.replace(/^\uFEFF/, ''));
@@ -61,8 +72,10 @@ export async function nativeProbe(screenReader, browserPid, { voiceOverCursor = 
       !(value.documentURL === null || typeof value.documentURL === 'string')) {
     throw new Error('invalid native accessibility probe');
   }
-  if (rectangle && value.webContentFocused) {
-    Object.assign(value, voiceOverCursorMembership(rectangle, value.documentPosition, value.documentSize, value));
+  if (voiceOverCursor) {
+    Object.assign(value, rectangle && value.webContentFocused
+      ? voiceOverCursorMembership(rectangle, value.documentPosition, value.documentSize, value)
+      : { readerCursorInDocument: false, readerCursorAtDocument: false });
   }
   if (screenReader === 'voiceover') {
     const [os, bundle] = await Promise.all([
