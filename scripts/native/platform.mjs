@@ -64,7 +64,7 @@ export async function nativeProbe(screenReader, browserPid, { voiceOverCursor = 
       if (error.nativeScriptNumber !== -1728) throw error;
     }
   }
-  const { stdout } = await executeProbe('AX_FOCUS', command, args, { timeout: 5000, maxBuffer: 65536, windowsHide: true });
+  const { stdout } = await executeProbe('AX_FOCUS', command, args, { timeout: 10000, maxBuffer: 65536, windowsHide: true });
   const value = JSON.parse(stdout.replace(/^\uFEFF/, ''));
   if (value.screenReader !== screenReader || typeof value.browserWindowActive !== 'boolean' ||
       typeof value.webContentFocused !== 'boolean' ||

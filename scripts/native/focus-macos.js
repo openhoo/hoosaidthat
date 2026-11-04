@@ -5,6 +5,12 @@ ObjC.bindFunction('malloc', ['void *', ['unsigned long']]);
 ObjC.bindFunction('free', ['void', ['void *']]);
 function run(argv) {
   if (!$.AXIsProcessTrusted()) throw new Error('Accessibility permission is required for the native bridge terminal');
+  // This sets the AX messaging timeout only for this probe process. A busy
+  // browser must return missing focus/cursor proof instead of blocking the
+  // entire probe in one synchronous accessibility request.
+  if ($.AXUIElementSetMessagingTimeout($.AXUIElementCreateSystemWide(), 1.0) !== 0) {
+    throw new Error('Could not bound native accessibility messaging');
+  }
   var expectedPid = Number(argv[0]);
   var workspace = $.NSWorkspace.sharedWorkspace;
   var apps = workspace.runningApplications;
