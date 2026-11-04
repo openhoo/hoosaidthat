@@ -43,7 +43,7 @@ with AppleScript** preference. The provisioner grants only those automation
 permissions in the disposable guest. It never disables SIP. Protected or
 unsupported TCC databases fail provisioning; configure the permissions inside
 the guest in that case. Host permissions and preferences are untouched.
-The provisioner also enables and verifies Do Not Disturb through the guest's
+After the guest desktop starts, the runner enables and verifies Do Not Disturb through its
 native Focus controls. It dismisses existing system notification alerts through
 their native Close actions and verifies that no alert remains. These guest-only
 steps prevent background-activity banners from covering the tested cursor;

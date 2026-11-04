@@ -28,6 +28,9 @@ cleanup() {
 }
 trap cleanup EXIT
 sleep 12
+# Allow the freshly granted guest permissions and desktop services to settle
+# before preparing Focus and dismissing existing native notification alerts.
+/usr/bin/osascript -l JavaScript "$work/node_modules/@openhoo/hoosaidthat/oracle/macos-voiceover/quiet-desktop.js"
 browser="$(node --input-type=module -e 'import { chromium } from "@playwright/test"; console.log(chromium.executablePath())')"
 node node_modules/@openhoo/hoosaidthat/scripts/native-screen-reader.mjs --screen-reader voiceover --token-file "$HST_NATIVE_TOKEN_FILE" --browser-executable "$browser" >"$shared/results/bridge.log" 2>&1 &
 bridge=$!
