@@ -22,6 +22,10 @@ test('checkout is announced', async ({ page, screenReader }) => {
 });
 ```
 
+Experimental Android TalkBack support connects a dedicated device or emulator
+through adb and captures its text-to-speech requests. See the
+[TalkBack guide](oracle/android-talkback/README.md) for setup and qualification limits.
+
 ## Release state
 
 The declared `nvda-web-2026.1.1` browser profile contains 190 unique actions.
@@ -90,6 +94,25 @@ use `npx hoosaidthat-nvda-windows parity` for the managed Windows oracle or
 for a configured HooVDA runtime image.
 
 ## Configuration
+
+### Android TalkBack
+
+Install the helper APKs and select the capture TTS engine on a prepared Android
+14+ device with TalkBack and Chrome. Then run its device checks:
+
+```bash
+npm run talkback:android:build
+npm run talkback:android:doctor -- --serial emulator-5554
+npm run talkback:android:run -- --serial emulator-5554 --token-file /tmp/hst-talkback/control-token
+```
+
+Consumer tests use `screenReader: 'talkback'`, `runtime: 'external'`,
+`workers: 1` and the distinct `talkback-web` profile. The run command supplies
+the `HOOSAIDTHAT_TALKBACK_*` endpoints and token to a child suite. Android uses
+Chrome's persistent device context; see the [guide](oracle/android-talkback/README.md)
+for isolation and speech-capture boundaries. Real device qualification remains
+required; package tests use synthetic Android transport.
+
 
 ```ts
 import { defineConfig } from '@openhoo/hoosaidthat';

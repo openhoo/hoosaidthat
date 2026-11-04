@@ -173,6 +173,24 @@ proxy to the QEMU user-network boundary. Both host mappings remain loopback
 only. A separate key-only, host-key-pinned SSH control plane manages the VM;
 its forced dispatcher is not part of the browser/runtime HTTP protocol.
 
+## Android TalkBack protocol v2
+
+The Android bridge uses the authenticated protocol v2 session/finish endpoints with
+`screenReader: "talkback"`, `platform: "android"`, `profile: "talkback-web"`
+and `capture: "talkback-tts-output"`. These fields are validated by the client.
+Native keyboard injection and accessibility-focus actions declare
+`delivery: "emulated"`. Its action catalog follows TalkBack's Default Alt
+keymap and excludes unmapped NVDA actions and settings.
+
+A separate Android instrumentation process verifies the native foreground
+package and WebView focus while leaving TalkBack enabled. The capture app
+records actual `TextToSpeechService` requests only from TalkBack's UID, with
+generation and consecutive sequence checks. It preserves repeated utterances
+and fails on loss or restart. It supplies textual synthesis-boundary evidence;
+silent PCM is not an acoustic recording or a voice-timing oracle. See the
+[Android guide](../oracle/android-talkback/README.md) for prerequisites,
+persistent Chrome-context limitations and the real-device smoke suite.
+
 ## Security and platform rules
 
 - Orca and HooVDA containers are Linux/amd64; real NVDA is Windows 11 on KVM.

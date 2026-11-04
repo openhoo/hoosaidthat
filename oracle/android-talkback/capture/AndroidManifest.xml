@@ -1,0 +1,9 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="dev.openhoo.hoosaidthat.tts">
+  <uses-sdk android:minSdkVersion="34" android:targetSdkVersion="35" />
+  <queries><package android:name="com.google.android.marvin.talkback" /></queries>
+  <application android:label="HooSaidThat capture TTS" android:debuggable="true" android:allowBackup="false">
+    <service android:name=".CaptureService" android:exported="true" android:label="HooSaidThat capture TTS">
+      <intent-filter><action android:name="android.intent.action.TTS_SERVICE" /><category android:name="android.intent.category.DEFAULT" /></intent-filter>
+    </service>
+  </application>
+</manifest>
