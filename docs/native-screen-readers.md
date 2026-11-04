@@ -109,6 +109,13 @@ successful announcement. This capture is suitable for bounded checks, not a
 claim of complete VoiceOver utterance coverage. Streaming AT Driver capture
 has the distinct `voiceover-speech-output` boundary.
 
+`toHaveSpoken` checks the last observation immediately. A polite live region can
+arrive after an earlier help hint has settled. For asynchronous announcements,
+take a `screenReader.checkpoint()` before the action, then use `expect.poll`
+to read actual captured speech from that same checkpoint with
+`screenReader.readFrom(checkpoint)`. The native smoke suite demonstrates this
+with a bounded 15-second assertion on the expected announcement.
+
 Finished sessions retain a SHA-256-bound `screenreader-events` artifact with
 the reader/version/profile/capture boundary. Actual speech has
 `screenReaderOutput` provenance. Lifecycle markers remain separate. Late

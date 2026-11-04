@@ -22,8 +22,12 @@ test('native speech captures a live region from an ordinary page action', async 
   await page.goto(`data:text/html,${encodeURIComponent(markup)}`);
   await screenReader.returnToPage();
   await screenReader.focus(page.getByRole('button', { name: 'Continue checkout' }));
+  const checkpoint = await screenReader.checkpoint();
   await screenReader.observe('Checkout status', async () => {
     await page.getByRole('button', { name: 'Continue checkout' }).click();
   });
-  await expect(screenReader).toHaveSpoken(/Checkout is ready/i);
+  await expect.poll(async () => {
+    const observation = await screenReader.readFrom(checkpoint, 'Await checkout announcement');
+    return observation.speech;
+  }, { timeout: 15000 }).toMatch(/Checkout is ready/i);
 });
