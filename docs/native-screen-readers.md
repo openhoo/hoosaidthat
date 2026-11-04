@@ -43,8 +43,8 @@ with AppleScript** preference. The provisioner grants only those automation
 permissions in the disposable guest. It never disables SIP. Protected or
 unsupported TCC databases fail provisioning; configure the permissions inside
 the guest in that case. Host permissions and preferences are untouched.
-After the guest desktop starts, the runner enables and verifies Do Not Disturb through its
-native Focus controls. It dismisses existing system notification alerts through
+After the guest desktop starts, the runner enables and verifies Do Not Disturb
+through its native Focus controls. It dismisses existing system notification alerts through
 their native Close actions and verifies that no alert remains. These guest-only
 steps prevent background-activity banners from covering the tested cursor;
 AX hit tests still reject actual occlusion.
@@ -149,7 +149,10 @@ Verified on November 4, 2026:
 
 The VoiceOver run used the immutable guest image in `runtime-lock.json`, no
 host audio or desktop window, and the `voiceover-last-phrase` capture boundary.
+The same two scenarios also passed three times each across worker restarts
+(6/6, no retries or skips) before the final cold installed-package check.
 This qualifies the two bounded scenarios for that combination; it is not a
 command or browser compatibility matrix. Local JSON, transcripts, hashes and
 portable HTML reports are retained under
-`test-results/native-qualification/2026-11-04/voiceover` (ignored by Git).
+`test-results/release-voiceover/repeated-qualified` and
+`test-results/release-voiceover/final-qualified` (ignored by Git).
