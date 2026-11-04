@@ -355,3 +355,27 @@ test('VoiceOver aligns with native keyboard focus even when another window has m
     assert.equal(aligned, true);
   } finally { await driver.close(); }
 });
+
+test('VoiceOver enters the aligned web area without leaving its verified scope', async () => {
+  let atDocument = false;
+  let insideDocument = false;
+  let leftDocument = false;
+  const driver = await VoiceOverDriver.connect({ runScript: async script => {
+    if (script.includes('move voiceover cursor to keyboard focus')) atDocument = true;
+    if (script.includes('vo cursor to move out of item')) {
+      atDocument = false;
+      leftDocument = true;
+    }
+    if (atDocument && script.includes('vo cursor to move into item')) insideDocument = true;
+    return '';
+  } });
+  try {
+    await driver.focusWeb(async () => ({
+      browserWindowActive: true, webContentFocused: true,
+      focus: { id: 'aligned-document' },
+      readerCursorAtDocument: atDocument, readerCursorInDocument: insideDocument,
+    }));
+    assert.equal(insideDocument, true);
+    assert.equal(leftDocument, false);
+  } finally { await driver.close(); }
+});

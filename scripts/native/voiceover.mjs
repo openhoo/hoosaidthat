@@ -83,12 +83,25 @@ export class VoiceOverDriver {
           stage = `MOVE_${direction.toUpperCase().replaceAll(' ', '_')}`;
           return this.#execute(`tell application "VoiceOver" to tell vo cursor to move ${direction}`);
         };
+        const enterDocument = async () => {
+          await move('into item');
+          // Interaction can complete before AX cursor bounds reflect the child.
+          const entryDeadline = Math.min(deadline, Date.now() + 2000);
+          do {
+            if (await inDocument()) return;
+            await new Promise(resolve => setTimeout(resolve, 50));
+          } while (Date.now() < entryDeadline);
+          throw new Error(atDocument ? 'VoiceOver web area did not expose a child cursor' : 'VoiceOver left the verified web document');
+        };
         // Bounds alone cannot identify a VoiceOver cursor retained in a
         // different window at the same screen position. Always align first.
         await inDocument();
         stage = 'ALIGN_KEYBOARD';
         await this.#execute('tell application "VoiceOver" to tell commander to perform command "move voiceover cursor to keyboard focus"');
         if (await inDocument()) return;
+        // Alignment often selects the verified web area itself. Enter it
+        // directly instead of leaving it and traversing the entire window.
+        if (atDocument) { await enterDocument(); return; }
         // Chrome can retain VoiceOver inside a toolbar group after opening a
         // test window. Leave that scope, then traverse the native window tree.
         // Every success is verified by AX hit-testing the actual VO cursor.
@@ -97,15 +110,8 @@ export class VoiceOverDriver {
         for (let index = 0; index < 16 && Date.now() < deadline; index++) {
           if (await inDocument()) return;
           if (atDocument) {
-            await move('into item');
-            // VoiceOver can acknowledge interaction before AX cursor bounds
-            // reflect the new child. Verify the same document while it settles.
-            const entryDeadline = Math.min(deadline, Date.now() + 2000);
-            do {
-              if (await inDocument()) return;
-              await new Promise(resolve => setTimeout(resolve, 50));
-            } while (Date.now() < entryDeadline);
-            throw new Error(atDocument ? 'VoiceOver web area did not expose a child cursor' : 'VoiceOver left the verified web document');
+            await enterDocument();
+            return;
           }
           await move('right');
         }
