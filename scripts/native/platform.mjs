@@ -2,7 +2,15 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
-const execute = promisify(execFile);
+const executeFile = promisify(execFile);
+async function executeProbe(stage, binary, args, options) {
+  try { return await executeFile(binary, args, options); }
+  catch (error) {
+    error.nativeFaultCode = `VOICEOVER_${stage}_${error.killed ? 'TIMEOUT' : 'SCRIPT_ERROR'}`;
+    error.nativeScriptNumber = Number(/\((-?\d+)\)\s*$/.exec(error.stderr ?? '')?.[1]) || undefined;
+    throw error;
+  }
+}
 
 export function assertNativePlatform(screenReader, platform = process.platform) {
   if (screenReader !== 'voiceover') throw new Error('native reader must be voiceover');
@@ -19,12 +27,12 @@ export async function nativeProbe(screenReader, browserPid, { voiceOverCursor = 
   const command = '/usr/bin/osascript';
   const args = ['-l', 'JavaScript', fileURLToPath(new URL('focus-macos.js', directory)), String(browserPid)];
   if (screenReader === 'voiceover' && voiceOverCursor) {
-    const { stdout: bounds } = await execute('/usr/bin/osascript', ['-e', 'tell application "VoiceOver" to return bounds of vo cursor'], { timeout: 5000, maxBuffer: 1024 });
+    const { stdout: bounds } = await executeProbe('CURSOR', '/usr/bin/osascript', ['-e', 'tell application "VoiceOver" to return bounds of vo cursor'], { timeout: 5000, maxBuffer: 1024 });
     const rectangle = bounds.trim().split(/,\s*/).map(Number);
     if (rectangle.length !== 4 || !rectangle.every(Number.isFinite)) throw new Error('invalid native VoiceOver cursor bounds');
     args.push(JSON.stringify(rectangle));
   }
-  const { stdout } = await execute(command, args, { timeout: 5000, maxBuffer: 65536, windowsHide: true });
+  const { stdout } = await executeProbe('AX_FOCUS', command, args, { timeout: 5000, maxBuffer: 65536, windowsHide: true });
   const value = JSON.parse(stdout.replace(/^\uFEFF/, ''));
   if (value.screenReader !== screenReader || typeof value.browserWindowActive !== 'boolean' ||
       typeof value.webContentFocused !== 'boolean' ||
@@ -34,8 +42,8 @@ export async function nativeProbe(screenReader, browserPid, { voiceOverCursor = 
   }
   if (screenReader === 'voiceover') {
     const [os, bundle] = await Promise.all([
-      execute('/usr/bin/sw_vers', ['-productVersion'], { timeout: 3000 }),
-      execute('/usr/libexec/PlistBuddy', ['-c', 'Print :CFBundleShortVersionString', '-c', 'Print :CFBundleVersion',
+      executeProbe('OS_VERSION', '/usr/bin/sw_vers', ['-productVersion'], { timeout: 3000 }),
+      executeProbe('READER_VERSION', '/usr/libexec/PlistBuddy', ['-c', 'Print :CFBundleShortVersionString', '-c', 'Print :CFBundleVersion',
         '/System/Library/CoreServices/VoiceOver.app/Contents/Info.plist'], { timeout: 3000 }),
     ]);
     const [shortVersion, build] = bundle.stdout.trim().split(/\r?\n/);

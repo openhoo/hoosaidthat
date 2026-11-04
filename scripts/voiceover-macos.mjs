@@ -72,6 +72,18 @@ function ssh(ip,script,options={}) {
     '-o','ConnectTimeout=10','-o','NumberOfPasswordPrompts=1','-o','PubkeyAuthentication=no',`admin@${ip}`,script],
   {env:{...environment,SSH_ASKPASS:join(root,'askpass'),SSH_ASKPASS_REQUIRE:'force',DISPLAY:'hoosaidthat'},timeout:commandTimeoutMs,...options});
 }
+async function waitForSSH(ip) {
+  const deadline=Date.now()+120000;
+  while(Date.now()<deadline && !interrupted) {
+    try {
+      ssh(ip,'true',{stdio:['ignore','pipe','pipe'],timeout:5000});
+      return;
+    } catch {
+      await new Promise(resolve=>setTimeout(resolve,1000));
+    }
+  }
+  throw new Error(interrupted ? 'VoiceOver VM job interrupted' : 'VoiceOver guest SSH did not become ready within 120 seconds');
+}
 async function main() {
   doctor();
   if(['init','run','stop'].includes(command)) await acquireLease();
@@ -87,6 +99,7 @@ async function main() {
       owned=true;
       vmProcess.once('error',error=>console.error(`VM launch failed: ${error.message}`));
       const ip=address();
+      await waitForSSH(ip);
       if(interrupted) throw new Error('VoiceOver VM job interrupted');
       ssh(ip,"bash '/Volumes/My Shared Files/hoosaidthat/payload/provision.sh'");
       ssh(ip,"bash '/Volumes/My Shared Files/hoosaidthat/payload/run-check.sh'");

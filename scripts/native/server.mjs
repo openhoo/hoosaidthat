@@ -200,6 +200,10 @@ export async function startNativeServer({ screenReader, token, driver, probe,
         throw new HttpError(405, 'method not allowed');
       } finally { busy = false; }
     } catch (error) {
+      if (screenReader === 'voiceover' && /^VOICEOVER_[A-Z_]{1,70}$/.test(error.nativeFaultCode ?? '')) {
+        console.error(JSON.stringify({ nativeFaultCode: error.nativeFaultCode,
+          ...(Number.isSafeInteger(error.nativeScriptNumber) ? { scriptNumber: error.nativeScriptNumber } : {}) }));
+      }
       // Do not reflect request bodies, upstream errors, URLs, or bearer tokens.
       send(response, error instanceof HttpError ? error.status : 503,
         { error: error instanceof HttpError ? error.message : 'native runtime failed; inspect the host and restart the bridge' });

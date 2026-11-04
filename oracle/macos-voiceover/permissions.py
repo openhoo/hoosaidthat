@@ -26,7 +26,7 @@ for path in paths:
     if not os.path.isfile(path):
         continue
     # Run sqlite as root without opening unrelated user data or granting disk access.
-    sql = 'BEGIN;\n'
+    sql = '.timeout 10000\nBEGIN;\n'
     for row in rows:
         values = ','.join(str(v) if isinstance(v,int) else "'"+v.replace("'","''")+"'" for v in row)
         sql += 'INSERT OR REPLACE INTO access ('+columns+') VALUES ('+values+');\n'

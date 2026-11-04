@@ -93,7 +93,8 @@ export class VoiceOverDriver {
         for (let index = 0; index < 6; index++) await move('out of item');
         await move('into item');
         for (let index = 0; index < 16 && Date.now() < deadline; index++) {
-          if (await inDocument() || atDocument) {
+          if (await inDocument()) return;
+          if (atDocument) {
             await move('into item');
             if (!(await inDocument())) throw new Error('VoiceOver left the verified web document');
             return;
@@ -129,7 +130,11 @@ export class VoiceOverDriver {
   #read() {
     // Normalize the native missing value before serialization. Scripting and
     // authorization failures still reject and make the driver unhealthy.
-    return this.#execute('tell application "VoiceOver"\nset phraseText to content of last phrase\nif phraseText is missing value then return ""\nreturn phraseText\nend tell');
+    return this.#execute('tell application "VoiceOver"\nset phraseText to content of last phrase\nif phraseText is missing value then return ""\nreturn phraseText\nend tell').catch(error => {
+      error.nativeFaultCode = 'VOICEOVER_PHRASE_SCRIPT_ERROR';
+      error.nativeScriptNumber = Number(/\((-?\d+)\)\s*$/.exec(error.stderr ?? '')?.[1]) || undefined;
+      throw error;
+    });
   }
   async #sample() {
     const phrase = await this.#read();

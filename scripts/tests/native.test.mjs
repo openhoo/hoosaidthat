@@ -270,3 +270,27 @@ test('pending sampled output is drained before attributing a new native command'
   const events = JSON.parse(Buffer.from(artifacts[0].body).toString()).events;
   assert.equal(events.find(event => event.text === 'Pending asynchronous output').causalCommand, 'event');
 });
+
+test('VoiceOver stops delivering entry gestures once its cursor belongs to the document', async () => {
+  let insideDocument = false;
+  let unexpectedEntry = false;
+  const driver = await VoiceOverDriver.connect({ runScript: async script => {
+    if (script.includes('vo cursor to move right')) insideDocument = true;
+    if (insideDocument && script.includes('vo cursor to move into item')) {
+      unexpectedEntry = true;
+      insideDocument = false;
+    }
+    return '';
+  } });
+  try {
+    await driver.focusWeb(async () => ({
+      browserWindowActive: true, webContentFocused: true,
+      focus: { id: 'owned-document' },
+      readerCursorInDocument: insideDocument, readerCursorAtDocument: false,
+    }));
+    assert.equal(unexpectedEntry, false);
+    assert.equal(insideDocument, true);
+  } finally {
+    await driver.close();
+  }
+});
