@@ -49,6 +49,9 @@ even while native keyboard focus belongs to the page. `returnToPage()` aligns
 the reader, traverses the native window if necessary, and verifies its cursor
 through AX hit tests against the focused web document. A web-area rectangle
 that includes a native scrollbar is entered before accepting child membership.
+Native AX position and size distinguish the selected web area itself from a
+cursor on one of its descendants, including when every rectangle hit is inside
+the document. Entry gestures stop once descendant membership is verified.
 Losing browser focus, changing documents, or failing cursor verification fails
 the action and preserves a bounded diagnostic code in the native evidence.
 

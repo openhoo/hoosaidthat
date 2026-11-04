@@ -8,7 +8,7 @@ import { startNativeServer } from '../native/server.mjs';
 import { nativeCommands, KEY } from '../native/commands.mjs';
 import { ATDriver } from '../native/at-driver.mjs';
 import { VoiceOverDriver, voiceOverKeyScript } from '../native/voiceover.mjs';
-import { assertNativePlatform } from '../native/platform.mjs';
+import { assertNativePlatform, voiceOverCursorMembership } from '../native/platform.mjs';
 import { loadControlToken, parseArguments } from '../native-screen-reader.mjs';
 
 const token = 'test-only-native-token-000000000000';
@@ -293,4 +293,26 @@ test('VoiceOver stops delivering entry gestures once its cursor belongs to the d
   } finally {
     await driver.close();
   }
+});
+
+
+test('VoiceOver distinguishes a selected web area from a cursor already inside it', () => {
+  const encode = (a, b) => {
+    const bytes = Buffer.alloc(16);
+    bytes.writeDoubleLE(a, 0); bytes.writeDoubleLE(b, 8);
+    return bytes.toString('base64');
+  };
+  const position = encode(0, 100), size = encode(1000, 700);
+  const proven = { readerCursorInDocument: true, readerCursorAtDocument: true };
+  assert.deepEqual(voiceOverCursorMembership([0, 100, 1000, 800], position, size, proven),
+    { readerCursorInDocument: false, readerCursorAtDocument: true });
+  assert.deepEqual(voiceOverCursorMembership([-2, 98, 1015, 802], position, size,
+    { readerCursorInDocument: false, readerCursorAtDocument: true }),
+    { readerCursorInDocument: false, readerCursorAtDocument: true });
+  assert.deepEqual(voiceOverCursorMembership([8, 108, 300, 150], position, size, proven),
+    { readerCursorInDocument: true, readerCursorAtDocument: false });
+  assert.deepEqual(voiceOverCursorMembership([0, 100, 1000, 800], position, size,
+    { readerCursorInDocument: false, readerCursorAtDocument: false }),
+    { readerCursorInDocument: false, readerCursorAtDocument: false });
+  assert.throws(() => voiceOverCursorMembership([0, 100, 1000, 800], null, size, proven), /native document geometry/);
 });

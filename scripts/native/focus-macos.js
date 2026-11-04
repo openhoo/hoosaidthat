@@ -1,6 +1,8 @@
 // Run with /usr/bin/osascript -l JavaScript. Reads native AX focus only.
 ObjC.import('AppKit');
 ObjC.import('ApplicationServices');
+ObjC.bindFunction('malloc', ['void *', ['unsigned long']]);
+ObjC.bindFunction('free', ['void', ['void *']]);
 function run(argv) {
   if (!$.AXIsProcessTrusted()) throw new Error('Accessibility permission is required for the native bridge terminal');
   var expectedPid = Number(argv[0]);
@@ -22,6 +24,18 @@ function run(argv) {
     var result = ObjC.unwrap(value);
     if (typeof result === 'string') return result;
     try { return ObjC.unwrap(value.absoluteString); } catch (_) { return null; }
+  }
+  function geometry(element, attribute, type) {
+    var value = attr(element, attribute);
+    if (!value || $.AXValueGetType(value) !== type) return null;
+    // CGPoint/CGSize each contain two CGFloat doubles on supported macOS hosts.
+    // An explicit buffer avoids passing an untyped JXA Ref to a void pointer.
+    var buffer = $.malloc(16);
+    if (!buffer) throw new Error('Could not allocate native geometry buffer');
+    try {
+      if (!$.AXValueGetValue(value, type, buffer)) return null;
+      return ObjC.unwrap($.NSData.dataWithBytesLength(buffer, 16).base64EncodedStringWithOptions(0));
+    } finally { $.free(buffer); }
   }
   var front = workspace.frontmostApplication;
   var pid = Number(front.processIdentifier);
@@ -70,6 +84,8 @@ function run(argv) {
     webContentFocused: Boolean(document),
     documentTitle: document ? string(attr(document, 'AXTitle')) : null,
     documentURL: document ? string(attr(document, 'AXURL')) : null,
+    documentPosition: document ? geometry(document, 'AXPosition', $.kAXValueCGPointType) : null,
+    documentSize: document ? geometry(document, 'AXSize', $.kAXValueCGSizeType) : null,
     readerCursorInDocument: cursorInDocument,
     readerCursorAtDocument: cursorAtDocument
   });
