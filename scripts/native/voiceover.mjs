@@ -83,7 +83,9 @@ export class VoiceOverDriver {
           stage = `MOVE_${direction.toUpperCase().replaceAll(' ', '_')}`;
           return this.#execute(`tell application "VoiceOver" to tell vo cursor to move ${direction}`);
         };
-        if (await inDocument()) return;
+        // Bounds alone cannot identify a VoiceOver cursor retained in a
+        // different window at the same screen position. Always align first.
+        await inDocument();
         stage = 'ALIGN_KEYBOARD';
         await this.#execute('tell application "VoiceOver" to tell commander to perform command "move voiceover cursor to keyboard focus"');
         if (await inDocument()) return;
@@ -96,8 +98,14 @@ export class VoiceOverDriver {
           if (await inDocument()) return;
           if (atDocument) {
             await move('into item');
-            if (!(await inDocument())) throw new Error('VoiceOver left the verified web document');
-            return;
+            // VoiceOver can acknowledge interaction before AX cursor bounds
+            // reflect the new child. Verify the same document while it settles.
+            const entryDeadline = Math.min(deadline, Date.now() + 2000);
+            do {
+              if (await inDocument()) return;
+              await new Promise(resolve => setTimeout(resolve, 50));
+            } while (Date.now() < entryDeadline);
+            throw new Error(atDocument ? 'VoiceOver web area did not expose a child cursor' : 'VoiceOver left the verified web document');
           }
           await move('right');
         }
@@ -109,6 +117,7 @@ export class VoiceOverDriver {
           ['native focus changed to another document', 'DOCUMENT_CHANGED'],
           ['native VoiceOver cursor verification is required', 'MISSING_CURSOR_PROOF'],
           ['VoiceOver left the verified web document', 'LEFT_DOCUMENT'],
+          ['VoiceOver web area did not expose a child cursor', 'WEB_AREA_NOT_ENTERED'],
           ['VoiceOver cursor did not enter the owned web document', 'DOCUMENT_NOT_FOUND'],
         ]);
         const reason = error.killed ? 'TIMEOUT' : reasons.get(error.message) ?? 'SCRIPT_ERROR';

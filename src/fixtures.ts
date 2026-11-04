@@ -7,7 +7,7 @@ import {
   type PlaywrightTestConfig,
 } from '@playwright/test';
 import { HttpScreenReaderClient } from './client.js';
-import { isRuntimeBootstrapURL } from './bootstrap.js';
+import { isRuntimeBootstrapURL, RUNTIME_KEEP_ALIVE_URL } from './bootstrap.js';
 import { androidContextFactory, type ScreenReaderContextFactory } from './android-context.js';
 import { ScreenReaderRuntime } from './runtime.js';
 import { ScreenReaderSession } from './session.js';
@@ -22,7 +22,6 @@ import {
 // window outside isolated test contexts only while their final windows close.
 const keepAlivePages = new WeakMap<Browser, Page>();
 const keepAliveCreations = new WeakMap<Browser, Promise<void>>();
-const KEEP_ALIVE_URL = 'data:text/html,<title>HooSaidThat runtime keepalive</title>';
 
 async function ensureKeepAlive(
   browser: Browser,
@@ -41,7 +40,7 @@ async function ensureKeepAlive(
   if (nativeContext) {
     const creation = (async () => {
       const page = await nativeContext.newPage();
-      await page.goto(KEEP_ALIVE_URL);
+      await page.goto(RUNTIME_KEEP_ALIVE_URL);
       keepAlivePages.set(browser, page);
     })();
     keepAliveCreations.set(browser, creation);

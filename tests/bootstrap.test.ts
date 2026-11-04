@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { isRuntimeBootstrapURL } from '../src/bootstrap.js';
+import { isRuntimeBootstrapURL, RUNTIME_KEEP_ALIVE_URL } from '../src/bootstrap.js';
 
 test('recognizes only owned Linux and Windows bootstrap files', () => {
   for (const value of [
@@ -19,4 +19,8 @@ test('recognizes only owned Linux and Windows bootstrap files', () => {
     'file://unowned-host/C:/HooSaidThat/bootstrap.html',
     'file:///C:/HooSaidThat/bootstrap.html.backup',
   ]) assert.equal(isRuntimeBootstrapURL(value), false, value);
+});
+test('retires an exact owned keepalive left by a previous worker', () => {
+  assert.equal(isRuntimeBootstrapURL(RUNTIME_KEEP_ALIVE_URL), true);
+  assert.equal(isRuntimeBootstrapURL(RUNTIME_KEEP_ALIVE_URL + '<main>User page</main>'), false);
 });

@@ -319,3 +319,39 @@ test('VoiceOver distinguishes a selected web area from a cursor already inside i
       { readerCursorInDocument: false, readerCursorAtDocument: false });
   }
 });
+
+test('VoiceOver waits for native cursor membership after asynchronous web-area entry', async () => {
+  let atDocument = false;
+  let insideDocument = false;
+  const driver = await VoiceOverDriver.connect({ runScript: async script => {
+    if (script.includes('vo cursor to move right')) atDocument = true;
+    if (atDocument && script.includes('vo cursor to move into item')) {
+      setTimeout(() => { insideDocument = true; }, 50);
+    }
+    return '';
+  } });
+  try {
+    await driver.focusWeb(async () => ({
+      browserWindowActive: true, webContentFocused: true,
+      focus: { id: 'owned-document' },
+      readerCursorAtDocument: atDocument, readerCursorInDocument: insideDocument,
+    }));
+    assert.equal(insideDocument, true);
+  } finally { await driver.close(); }
+});
+
+test('VoiceOver aligns with native keyboard focus even when another window has matching cursor bounds', async () => {
+  let aligned = false;
+  const driver = await VoiceOverDriver.connect({ runScript: async script => {
+    if (script.includes('move voiceover cursor to keyboard focus')) aligned = true;
+    return '';
+  } });
+  try {
+    await driver.focusWeb(async () => ({
+      browserWindowActive: true, webContentFocused: true,
+      focus: { id: 'new-owned-document' },
+      readerCursorInDocument: true, readerCursorAtDocument: false,
+    }));
+    assert.equal(aligned, true);
+  } finally { await driver.close(); }
+});
