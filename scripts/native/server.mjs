@@ -12,7 +12,7 @@ const MAX_EVENT_BYTES = 8 * 1024 * 1024;
 export async function startNativeServer({ screenReader, token, driver, probe,
   port = 0, locale = 'en-US', keyboardLayout = 'desktop', quietMs = 300,
   actionTimeoutMs = 15000, browser }) {
-  if (screenReader !== 'talkback') throw new Error('native reader must be talkback');
+  if (!['voiceover', 'talkback'].includes(screenReader)) throw new Error('native reader must be voiceover or talkback');
   if (typeof token !== 'string' || Buffer.byteLength(token) < 16 || Buffer.byteLength(token) > 4096 || /[\u0000-\u0020\u007f]/.test(token)) {
     throw new Error('native control token must contain 16 to 4096 bytes without whitespace or control characters');
   }
@@ -25,8 +25,9 @@ export async function startNativeServer({ screenReader, token, driver, probe,
   const version = initialState.version;
   if (typeof version !== 'string' || !version.trim()) throw new Error('native version attestation is required');
   const profile = `${screenReader}-web`;
-  const platform = 'android';
-  const capture = 'talkback-tts-output';
+  const platform = screenReader === 'talkback' ? 'android' : 'macos';
+  const capture = screenReader === 'talkback' ? 'talkback-tts-output'
+    : driver.capture === 'voiceover-last-phrase' ? 'voiceover-last-phrase' : 'voiceover-speech-output';
   const commands = nativeCommands(screenReader);
   const secret = Buffer.from(`Bearer ${token}`);
   let active;
@@ -105,7 +106,7 @@ export async function startNativeServer({ screenReader, token, driver, probe,
           screenReader, version, profile, locale, keyboardLayout, browser,
           platform,
           capture,
-          identitySource: 'android-accessibility-service', localeSource: 'operator-configured',
+          identitySource: screenReader === 'talkback' ? 'android-accessibility-service' : 'native-process', localeSource: 'operator-configured',
           outputSource: driver.outputSource ?? 'at-driver-interaction.capturedOutput' });
       }
       if (method === 'GET' && path === '/v2/actions') {
@@ -170,7 +171,7 @@ export async function startNativeServer({ screenReader, token, driver, probe,
           if (typeof command !== 'string' || !Object.hasOwn(commands, command) || Object.keys(body).some(key => key !== 'command')) {
             throw new HttpError(400, 'unsupported native command or argument');
           }
-          // Foreground app identity comes from Android's native accessibility probe.
+          // Foreground app identity comes from AX/UIA and the connected CDP browser PID.
           const state = await nativeState();
           if (!state.browserWindowActive) throw new HttpError(409, 'the connected browser must own native desktop focus');
           // Drain sampled output while it still belongs to asynchronous events.
@@ -179,19 +180,30 @@ export async function startNativeServer({ screenReader, token, driver, probe,
           currentCommand = command;
           append('commandStarted', command);
           try {
-            await driver.press(commands[command]);
-            const result = await settle(beforeSequence, actionTimeoutMs, quietMs, command !== 'stopSpeech' && command !== 'escape' && command !== 'returnToPage');
+            if (screenReader === 'voiceover' && driver.focusWeb && command === 'moveToFocusObject') {
+              await driver.focusWeb(probe);
+            } else {
+              await driver.press(commands[command]);
+              if (screenReader === 'voiceover' && driver.focusWeb && command === 'returnToPage') await driver.focusWeb(probe);
+            }
+            const result = await settle(beforeSequence, actionTimeoutMs, quietMs, !['stopSpeech','escape','returnToPage','moveToFocusObject'].includes(command));
             append('commandSettled', result.timedOut ? 'timed-out' : 'settled');
             return send(response, 200, { command, beforeSequence, cursor: sequence,
               events: active.events.filter(event => event.sequence > beforeSequence), timedOut: result.timedOut, delivery: 'emulated' });
           } catch (error) {
-            fault ??= new Error('native action failed; restart the bridge');
+            const code = typeof error.nativeFaultCode === 'string' && /^VOICEOVER_[A-Z_]{1,70}$/.test(error.nativeFaultCode) ? error.nativeFaultCode : null;
+            fault ??= new Error(`native action failed${code ? ` (${code})` : ''}; restart the bridge`);
+            if (code) console.error(`Native action ${command} failed: ${code}`);
             throw error;
           } finally { currentCommand = 'event'; }
         }
         throw new HttpError(405, 'method not allowed');
       } finally { busy = false; }
     } catch (error) {
+      if (screenReader === 'voiceover' && /^VOICEOVER_[A-Z_]{1,70}$/.test(error.nativeFaultCode ?? '')) {
+        console.error(JSON.stringify({ nativeFaultCode: error.nativeFaultCode,
+          ...(Number.isSafeInteger(error.nativeScriptNumber) ? { scriptNumber: error.nativeScriptNumber } : {}) }));
+      }
       // Do not reflect request bodies, upstream errors, URLs, or bearer tokens.
       send(response, error instanceof HttpError ? error.status : 503,
         { error: error instanceof HttpError ? error.message : 'native runtime failed; inspect the host and restart the bridge' });

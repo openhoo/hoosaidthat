@@ -313,3 +313,27 @@ See [runtime protocol](docs/runtime-protocol.md),
 [HooVDA image](images/hoovda/README.md), and
 [Orca image](images/orca/README.md), and the
 [Windows NVDA oracle](oracle/windows-nvda/README.md).
+
+## VoiceOver in an isolated macOS guest
+
+Actual VoiceOver is available with `screenReader: 'voiceover'` and the
+`voiceover-web` profile. On an Apple Silicon Mac with Tart installed:
+
+```bash
+npm run build
+npm run voiceover:macos:doctor
+npm run voiceover:macos:run
+```
+
+For an installed package, use `npx hoosaidthat-voiceover-macos run`.
+The helper provisions a pinned headless macOS guest and runs two native checks
+inside it, then stops the guest. Host audio, desktop windows, clipboard and USB
+passthrough are disabled. The helper leaves host VoiceOver and host settings
+untouched. VoiceOver requires macOS; a Linux container can host the client.
+
+On November 4, 2026, VoiceOver 10 (993) / macOS 26.6.2 / Chrome 151.0.7922.34
+passed heading navigation, keyboard button focus and asynchronous live-region
+speech checks from an installed package. Last-phrase sampling may miss identical
+consecutive phrases and phrases replaced between polls. This is bounded smoke
+coverage. See [the VoiceOver guide](docs/native-screen-readers.md) for setup,
+configuration, capture limits and qualification details. JAWS remains deferred.

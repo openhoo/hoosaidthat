@@ -182,7 +182,7 @@ export class ScreenReaderSession {
     }
     await this.returnToPage();
     const initiallyActive = await locator.evaluate(isDeepActiveElement);
-    if (initiallyActive && this.options.screenReader === 'orca') {
+    if (initiallyActive && (this.options.screenReader === 'orca' || this.options.screenReader === 'voiceover')) {
       const observation = await this.act('readCurrent');
       return await this.relabelLastObservation(observation, 'focus', label, locator);
     }
@@ -758,7 +758,14 @@ export class ScreenReaderSession {
         pageURL === this.verifiedPageDocumentURL
       );
     };
-    if (await pageContextReady()) return;
+    if (await pageContextReady()) {
+      // Align VoiceOver's independent cursor with verified native web focus.
+      if (this.options.screenReader === 'voiceover') {
+        await this.act('moveToFocusObject');
+        if (!(await pageContextReady())) throw new Error('VoiceOver focus left the target web document');
+      }
+      return;
+    }
     for (let attempt = 0; attempt < maxGestures; attempt += 1) {
       await this.act('returnToPage');
       if (await pageContextReady()) return;

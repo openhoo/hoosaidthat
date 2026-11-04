@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import type {
   BrailleEvent,
+  CaptureBoundary,
   DownloadedArtifact,
   KeyboardLayout,
   RuntimeArtifact,
@@ -106,7 +107,8 @@ export class HttpScreenReaderClient {
         screenReader: {
           name: this.screenReaderName,
           version: value.version,
-          capture: this.screenReaderName === 'talkback' ? 'talkback-tts-output'
+          capture: this.screenReaderName === 'voiceover' ? value.capture as CaptureBoundary
+            : this.screenReaderName === 'talkback' ? 'talkback-tts-output'
             : this.screenReaderName === 'nvda' ? 'nvda-presentation-hooks'
             : 'hoovda-structured-presentation',
         },
@@ -125,7 +127,8 @@ export class HttpScreenReaderClient {
               },
             }
           : {}),
-        platform: this.screenReaderName === 'talkback' ? 'android'
+        platform: this.screenReaderName === 'voiceover' ? 'macos'
+          : this.screenReaderName === 'talkback' ? 'android'
           : this.screenReaderName === 'nvda' ? 'windows' : 'linux',
       };
     }
@@ -331,7 +334,7 @@ export class HttpScreenReaderClient {
           value.delivery !== 'structured') ||
         (argument === undefined &&
           value.delivery !==
-            (this.screenReaderName === 'talkback'
+            (this.screenReaderName === 'voiceover' || this.screenReaderName === 'talkback'
               ? 'emulated'
               : STRUCTURED_SCREEN_READER_ACTIONS.has(action)
               ? 'structured'
@@ -549,7 +552,8 @@ export class HttpScreenReaderClient {
   }
 
   private adapterLabel(): string {
-    return this.screenReaderName === 'talkback' ? 'TalkBack'
+    return this.screenReaderName === 'voiceover' ? 'VoiceOver'
+      : this.screenReaderName === 'talkback' ? 'TalkBack'
       : this.screenReaderName === 'nvda' ? 'NVDA' : 'HooVDA';
   }
 
@@ -947,12 +951,15 @@ function isV2Health(
   ready: true;
   screenReader?: string;
   browser?: unknown;
-  capture?: 'talkback-tts-output';
+  capture?: CaptureBoundary;
 } {
   return (
     isObject(value) &&
     value.protocolVersion === '2.0' &&
     value.status === 'ok' &&
+    (expected !== 'voiceover' ||
+      (value.screenReader === 'voiceover' && value.platform === 'macos' &&
+        (value.capture === 'voiceover-last-phrase' || value.capture === 'voiceover-speech-output'))) &&
     (expected !== 'talkback' ||
       (value.screenReader === 'talkback' && value.platform === 'android' &&
         value.capture === 'talkback-tts-output')) &&
