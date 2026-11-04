@@ -49,6 +49,8 @@ through its native Focus controls. It dismisses existing system notification ale
 their native Close actions and verifies that no alert remains. These guest-only
 steps prevent background-activity banners from covering the tested cursor;
 AX hit tests still reject actual occlusion.
+The managed setup waits up to 60 seconds for cold-login authorization to become
+available. Persisting authorization errors stop the run with their native error.
 
 Chrome can retain VoiceOver's cursor in a toolbar when a new test window opens,
 even while native keyboard focus belongs to the page. `returnToPage()` aligns

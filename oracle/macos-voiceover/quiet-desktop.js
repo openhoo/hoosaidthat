@@ -1,5 +1,5 @@
 // Run only in the disposable macOS guest, after its automation permissions exist.
-function run() {
+function prepareGuest() {
   var current = Application.currentApplication();
   current.includeStandardAdditions = true;
   var model = current.doShellScript('/usr/sbin/sysctl -n hw.model');
@@ -110,4 +110,23 @@ function run() {
     delay(0.5);
   }
   return 'Guest Do Not Disturb verified; visible notifications cleared (' + dismissed + ')';
+}
+
+function run() {
+  // During cold login TCC can still reject clients whose guest grants are
+  // already present. Retry only these authorization errors while the desktop
+  // starts; success still requires every native state check above.
+  var deadline = Date.now() + 60000;
+  var reported = false;
+  while (true) {
+    try { return prepareGuest(); }
+    catch (error) {
+      if (![1002, -1743, -25211].includes(error.errorNumber) || Date.now() >= deadline) throw error;
+      if (!reported) {
+        console.log('Waiting for guest automation authorization (' + error.errorNumber + ')');
+        reported = true;
+      }
+      delay(1);
+    }
+  }
 }
