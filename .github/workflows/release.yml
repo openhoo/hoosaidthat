@@ -11,8 +11,16 @@ on:
         description: Full 40-character HooVDA commit containing complete oracle corpus
         required: true
         type: string
+      npm_publish_mode:
+        description: Trusted OIDC publishes publicly; bootstrap stages for maintainer MFA approval
+        required: true
+        default: trusted
+        type: choice
+        options:
+          - trusted
+          - bootstrap-stage
       confirm_release:
-        description: Stage npm package and publish three GHCR images
+        description: Publish npm package and three GHCR images using the selected mode
         required: true
         default: false
         type: boolean
@@ -34,6 +42,7 @@ jobs:
     env:
       RELEASE_VERSION: ${{ inputs.version }}
       HOOVDA_REF: ${{ inputs.hoovda_ref }}
+      NPM_PUBLISH_MODE: ${{ inputs.npm_publish_mode }}
       ENGINE_IMAGE: ghcr.io/openhoo/hoosaidthat-hoovda-engine
       HOOVDA_IMAGE: ghcr.io/openhoo/hoosaidthat-hoovda
       ORCA_IMAGE: ghcr.io/openhoo/hoosaidthat-orca
@@ -49,9 +58,9 @@ jobs:
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 24
-          cache: npm
+          package-manager-cache: false
           registry-url: https://registry.npmjs.org
-      - name: Install pinned npm with staged publishing
+      - name: Install pinned npm with trusted publishing
         run: npm install --global npm@11.20.0
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
@@ -73,7 +82,12 @@ jobs:
             exit 1
           fi
           test "$(git -C hoovda rev-parse HEAD)" = "$HOOVDA_REF"
-      - name: Verify npm publishing identity
+          case "$NPM_PUBLISH_MODE" in
+            trusted|bootstrap-stage) ;;
+            *) echo "Unknown npm publishing mode" >&2; exit 1 ;;
+          esac
+      - name: Verify npm bootstrap identity
+        if: inputs.npm_publish_mode == 'bootstrap-stage'
         run: npm whoami
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
@@ -95,18 +109,20 @@ jobs:
               echo "Cannot prove npm version is absent; release refused" >&2
               return 1
             fi
-            stage_result=$(mktemp)
-            if npm stage list "$package_name" --json --registry=https://registry.npmjs.org \
-              > "$stage_result" 2> "${stage_result}.stderr"; then
-              if ! jq -e --arg package "$package_name" --arg version "$RELEASE_VERSION" \
-                'type == "array" and all(.[]; type == "object" and .packageName == $package and (.version | type == "string")) and all(.[]; .version != $version)' \
-                "$stage_result" > /dev/null; then
-                echo "npm staged version exists or stage listing is invalid; release refused" >&2
+            if [[ "$NPM_PUBLISH_MODE" == bootstrap-stage ]]; then
+              stage_result=$(mktemp)
+              if npm stage list "$package_name" --json --registry=https://registry.npmjs.org \
+                > "$stage_result" 2> "${stage_result}.stderr"; then
+                if ! jq -e --arg package "$package_name" --arg version "$RELEASE_VERSION" \
+                  'type == "array" and all(.[]; type == "object" and .packageName == $package and (.version | type == "string")) and all(.[]; .version != $version)' \
+                  "$stage_result" > /dev/null; then
+                  echo "npm staged version exists or stage listing is invalid; release refused" >&2
+                  return 1
+                fi
+              elif ! jq -e 'type == "object" and .error.code == "E404"' "$stage_result" > /dev/null; then
+                echo "Cannot prove npm staged version is absent; release refused" >&2
                 return 1
               fi
-            elif ! jq -e 'type == "object" and .error.code == "E404"' "$stage_result" > /dev/null; then
-              echo "Cannot prove npm staged version is absent; release refused" >&2
-              return 1
             fi
           }
           require_unused_image_tag() {
@@ -127,7 +143,7 @@ jobs:
           source "$RUNNER_TEMP/release-absence-guards.sh"
           require_unused_npm_version
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ inputs.npm_publish_mode == 'bootstrap-stage' && secrets.NPM_TOKEN || '' }}
       - name: Verify HooVDA release gate
         working-directory: hoovda
         run: |
@@ -259,7 +275,7 @@ jobs:
           require_unused_image_tag "${HOOVDA_IMAGE}:${RELEASE_VERSION}"
           require_unused_image_tag "${ORCA_IMAGE}:${RELEASE_VERSION}"
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ inputs.npm_publish_mode == 'bootstrap-stage' && secrets.NPM_TOKEN || '' }}
       - name: Promote qualified image manifests
         shell: bash
         run: |
@@ -275,7 +291,7 @@ jobs:
           promote "$ENGINE_CANDIDATE" "${ENGINE_IMAGE}:${RELEASE_VERSION}"
           promote "$HOOVDA_CANDIDATE" "${HOOVDA_IMAGE}:${RELEASE_VERSION}"
           promote "$ORCA_CANDIDATE" "${ORCA_IMAGE}:${RELEASE_VERSION}"
-      - name: Stage npm package with provenance
+      - name: Publish npm package from GitHub Actions with provenance
         shell: bash
         run: |
           set -euo pipefail
@@ -283,44 +299,39 @@ jobs:
           if [[ "$RELEASE_VERSION" == *-* ]]; then
             npm_tag=next
           fi
-          npm stage publish --access public --provenance --tag "$npm_tag" --json \
-            > "$RUNNER_TEMP/npm-stage-raw.json"
+          publish_command=(npm publish)
+          if [[ "$NPM_PUBLISH_MODE" == bootstrap-stage ]]; then
+            publish_command=(npm stage publish)
+          fi
+          "${publish_command[@]}" --access public --provenance --tag "$npm_tag" --json \
+            > "$RUNNER_TEMP/npm-publish-raw.json"
           export NPM_RELEASE_TAG="$npm_tag"
-          node --input-type=module <<'NODE'
-          import { readFileSync, writeFileSync } from 'node:fs';
-          const { name } = JSON.parse(readFileSync('package.json', 'utf8'));
-          const raw = JSON.parse(readFileSync(`${process.env.RUNNER_TEMP}/npm-stage-raw.json`, 'utf8'));
-          const item = raw[name];
-          if (!item || item.name !== name || item.version !== process.env.RELEASE_VERSION ||
-              item.id !== `${name}@${process.env.RELEASE_VERSION}` ||
-              typeof item.stageId !== 'string' ||
-              !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(item.stageId) ||
-              typeof item.shasum !== 'string' || !/^[0-9a-f]{40}$/.test(item.shasum) ||
-              typeof item.integrity !== 'string' || !/^sha512-[A-Za-z0-9+/]+={0,2}$/.test(item.integrity)) {
-            throw new Error('npm stage receipt does not match the release identity');
-          }
-          const receipt = {
-            schemaVersion: 1,
-            repository: process.env.GITHUB_REPOSITORY,
-            sourceRef: process.env.GITHUB_REF,
-            sourceCommit: process.env.GITHUB_SHA,
-            companionCommit: process.env.HOOVDA_REF,
-            run: { id: process.env.GITHUB_RUN_ID, attempt: process.env.GITHUB_RUN_ATTEMPT },
-            provenanceRequested: true,
-            package: { id: item.id, name: item.name, version: item.version,
-              stageId: item.stageId, tag: process.env.NPM_RELEASE_TAG,
-              shasum: item.shasum, integrity: item.integrity },
-          };
-          for (const key of ['size', 'unpackedSize', 'entryCount']) {
-            if (!Number.isSafeInteger(item[key]) || item[key] < 0) {
-              throw new Error(`npm stage receipt has invalid ${key}`);
-            }
-            receipt.package[key] = item[key];
-          }
-          writeFileSync('test-results/npm-stage-receipt.json', `${JSON.stringify(receipt, null, 2)}\n`);
-          NODE
+          node scripts/release-receipt.mjs create "$RUNNER_TEMP/npm-publish-raw.json" \
+            test-results/npm-publication-receipt.json
+          if [[ "$NPM_PUBLISH_MODE" == bootstrap-stage ]]; then
+            echo '### npm package staged; publication requires maintainer MFA approval' >> "$GITHUB_STEP_SUMMARY"
+            echo 'Review the sanitized stage receipt in release-qualification-evidence and approve the stage on npmjs.com.' >> "$GITHUB_STEP_SUMMARY"
+          fi
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ inputs.npm_publish_mode == 'bootstrap-stage' && secrets.NPM_TOKEN || '' }}
+      - name: Verify public npm integrity and provenance
+        if: inputs.npm_publish_mode == 'trusted'
+        shell: bash
+        run: |
+          set -euo pipefail
+          package_name=$(node -p 'require("./package.json").name')
+          for attempt in {1..6}; do
+            if npm view "${package_name}@${RELEASE_VERSION}" --json \
+                --registry=https://registry.npmjs.org > "$RUNNER_TEMP/npm-public-metadata.json" && \
+                node scripts/release-receipt.mjs verify test-results/npm-publication-receipt.json \
+                  "$RUNNER_TEMP/npm-public-metadata.json"; then
+              echo "### Published ${package_name}@${RELEASE_VERSION} from GitHub Actions with provenance" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            if (( attempt < 6 )); then sleep 5; fi
+          done
+          echo 'Public npm integrity/provenance verification failed' >&2
+          exit 1
       - name: Preserve release qualification and publication receipts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         if: always()
