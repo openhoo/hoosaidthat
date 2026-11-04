@@ -47,7 +47,8 @@ export function createNpmReceipt(raw, identity) {
 export function verifyNpmPublication(receipt, metadata) {
   const { package: pkg } = receipt;
   const provenance = metadata?.dist?.attestations;
-  const expectedUrl = `https://registry.npmjs.org/-/npm/v1/attestations/${pkg.name.replace('/', '%2f')}@${pkg.version}`;
+  const packagePath = encodeURIComponent(pkg.name).replaceAll('%40', '@').replaceAll('%2F', '%2f');
+  const expectedUrl = `https://registry.npmjs.org/-/npm/v1/attestations/${packagePath}@${encodeURIComponent(pkg.version)}`;
   if (receipt.status !== 'published' || metadata?.name !== pkg.name ||
       metadata?.version !== pkg.version || metadata?.dist?.shasum !== pkg.shasum ||
       metadata?.dist?.integrity !== pkg.integrity ||
