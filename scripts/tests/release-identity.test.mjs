@@ -51,6 +51,7 @@ esac
         GITHUB_SHA: sourceCommit,
         GITHUB_REF: ref,
         HOOVDA_REF: companionCommit,
+        NPM_PUBLISH_MODE: 'trusted',
         TEST_RELEASE_TAG_COMMIT: sourceCommit,
         TEST_COMPANION_COMMIT: companionCommit,
       },
