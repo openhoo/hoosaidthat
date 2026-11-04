@@ -41,4 +41,7 @@ fi
 # columns, grants only AX/keyboard and the two automation targets, and never
 # changes SIP. A protected or unknown database fails instead of broadening access.
 /usr/bin/python3 "$shared/payload/permissions.py"
+# A Cirrus background-activity banner can cover the native VoiceOver cursor.
+# Use the guest's actual Focus controls; keep strict cursor hit-testing enabled.
+/usr/bin/osascript -l JavaScript "$work/node_modules/@openhoo/hoosaidthat/oracle/macos-voiceover/quiet-desktop.js"
 echo 'Guest provisioned; native speech still must pass the startup probe.'

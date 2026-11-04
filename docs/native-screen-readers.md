@@ -43,6 +43,9 @@ with AppleScript** preference. The provisioner grants only those automation
 permissions in the disposable guest. It never disables SIP. Protected or
 unsupported TCC databases fail provisioning; configure the permissions inside
 the guest in that case. Host permissions and preferences are untouched.
+The provisioner also enables and verifies Do Not Disturb through the guest's
+native Focus controls. This prevents background-activity notifications from
+covering the tested cursor; AX hit tests still reject actual occlusion.
 
 Chrome can retain VoiceOver's cursor in a toolbar when a new test window opens,
 even while native keyboard focus belongs to the page. `returnToPage()` aligns
