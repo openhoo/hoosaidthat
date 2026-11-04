@@ -203,3 +203,16 @@ persistent Chrome-context limitations and the real-device smoke suite.
 - Normal container runtime needs no Windows, KVM, QEMU, Wine, or NVDA binary.
 - The optional Windows oracle installs a hash-pinned official NVDA binary at runtime; repository and npm package contain no NVDA binary or source.
 - Unknown commands and artifact names fail closed.
+
+## VoiceOver native boundary
+
+The `voiceover-web` profile uses a real macOS host (`platform: macos`) through an
+external authenticated v2 runtime. `voiceover-last-phrase` samples VoiceOver's
+native last phrase every 100 ms and records changes. Identical consecutive
+phrases and overwritten samples may be lost. `voiceover-speech-output` identifies
+the separate experimental streaming AT Driver boundary. Both require a native
+VoiceOver process/version attestation. Unsupported commands fail explicitly.
+Native AX focus and VoiceOver cursor membership are verified before web entry is
+accepted. Captured speech uses `screenReaderOutput` provenance; lifecycle events
+remain separate. Finished event artifacts are bound to their SHA-256 digests.
+See [the VoiceOver guide](native-screen-readers.md) for setup and qualification.

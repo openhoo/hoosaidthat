@@ -25,7 +25,9 @@
     "hoovda",
     "testing",
     "talkback",
-    "android"
+    "android",
+    "voiceover",
+    "macos"
   ],
   "engines": {
     "node": ">=20"
@@ -39,7 +41,9 @@
   },
   "bin": {
     "hoosaidthat-nvda-windows": "./scripts/nvda-windows.mjs",
-    "hoosaidthat-talkback-android": "./scripts/talkback-android.mjs"
+    "hoosaidthat-talkback-android": "./scripts/talkback-android.mjs",
+    "hoosaidthat-native": "./scripts/native-screen-reader.mjs",
+    "hoosaidthat-voiceover-macos": "./scripts/voiceover-macos.mjs"
   },
   "types": "./dist/index.d.ts",
   "files": [
@@ -65,7 +69,15 @@
     "scripts/native/talkback.mjs",
     "scripts/native/android-devtools.mjs",
     "oracle/android-talkback",
-    "!oracle/android-talkback/build"
+    "!oracle/android-talkback/build",
+    "scripts/native-screen-reader.mjs",
+    "scripts/voiceover-macos.mjs",
+    "scripts/native/at-driver.mjs",
+    "scripts/native/voiceover.mjs",
+    "scripts/native/focus-macos.js",
+    "scripts/native/platform.mjs",
+    "oracle/macos-voiceover",
+    "oracle/native-check"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json && tsc -p tsconfig.parity.json && node scripts/build-parity.mjs",
@@ -106,7 +118,14 @@
     "talkback:android:doctor": "node scripts/talkback-android.mjs doctor",
     "talkback:android:start": "node scripts/talkback-android.mjs start",
     "talkback:android:run": "node scripts/talkback-android.mjs run",
-    "test:e2e:talkback": "npm run build && playwright test --config oracle/android-talkback/playwright.config.mjs"
+    "test:e2e:talkback": "npm run build && playwright test --config oracle/android-talkback/playwright.config.mjs",
+    "native:start": "node scripts/native-screen-reader.mjs",
+    "test:e2e:native": "npm run build && playwright test --config examples/native/playwright.config.ts",
+    "voiceover:macos:doctor": "node scripts/voiceover-macos.mjs doctor",
+    "voiceover:macos:init": "node scripts/voiceover-macos.mjs init",
+    "voiceover:macos:run": "node scripts/voiceover-macos.mjs run",
+    "voiceover:macos:status": "node scripts/voiceover-macos.mjs status",
+    "voiceover:macos:stop": "node scripts/voiceover-macos.mjs stop"
   },
   "peerDependencies": {
     "@playwright/test": ">=1.62.1 <1.63.0"

@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "profile": "voiceover-web",
+  "tart": {
+    "version": "2.41.1",
+    "image": "ghcr.io/cirruslabs/macos-tahoe-base@sha256:4aaa751fa7538902d73c767f27a066fc87e83f183069da4e4b5022863abd4c77"
+  },
+  "node": {
+    "version": "26.13.0",
+    "url": "https://nodejs.org/dist/v26.13.0/node-v26.13.0-darwin-arm64.tar.gz",
+    "sha256": "d38bd5e5a2ddce6bbb5ce45e46e208337da4d51fffe611e567fd32073d6439f6"
+  },
+  "isolation": "A separate macOS guest on Apple Silicon. No host desktop automation. Tart runs with --no-graphics --no-audio --no-clipboard --no-usb-accessories. Only the dedicated payload and results folder is shared.",
+  "capture": "VoiceOver's actual sampled last phrase. Identical consecutive phrases and phrases replaced between polls cannot be distinguished. This is not a complete utterance stream.",
+  "permissions": "Scripting, Accessibility and AppleEvents permissions are required inside the guest. The provisioner refuses physical Macs and never disables SIP. If guest permissions cannot be configured, it fails with the exact error."
+}

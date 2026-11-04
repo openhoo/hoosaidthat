@@ -235,8 +235,8 @@ export const STRUCTURED_SCREEN_READER_ACTIONS = new Set<ScreenReaderAction>([
   'brailleRoute',
   'brailleReportFormatting',
 ]);
-export type ScreenReaderName = 'orca' | 'hoovda' | 'nvda' | 'talkback';
-export type ScreenReaderProfile = 'nvda-web-2026.1.1' | 'talkback-web';
+export type ScreenReaderName = 'orca' | 'hoovda' | 'nvda' | 'voiceover' | 'talkback';
+export type ScreenReaderProfile = 'nvda-web-2026.1.1' | 'voiceover-web' | 'talkback-web';
 export type ScreenReaderLocale = 'en-US' | 'de-DE';
 export type KeyboardLayout = 'desktop' | 'laptop';
 export type ContainerRuntime = 'auto' | 'docker' | 'podman' | 'external';
@@ -246,14 +246,17 @@ export type CaptureBoundary =
   | 'speech-dispatcher-output-module'
   | 'hoovda-structured-presentation'
   | 'nvda-presentation-hooks'
+  | 'voiceover-last-phrase'
+  | 'voiceover-speech-output'
   | 'talkback-tts-output';
 
 export function requiresNativeHost(name: ScreenReaderName): boolean {
-  return name === 'nvda' || name === 'talkback';
+  return name === 'nvda' || name === 'voiceover' || name === 'talkback';
 }
 
 export function defaultProfile(name: ScreenReaderName): ScreenReaderProfile {
-  return name === 'talkback' ? 'talkback-web' : 'nvda-web-2026.1.1';
+  return name === 'voiceover' ? 'voiceover-web'
+    : name === 'talkback' ? 'talkback-web' : 'nvda-web-2026.1.1';
 }
 
 export interface ScreenReaderOptions {
@@ -434,7 +437,7 @@ export interface ScreenReaderHealth {
   locale?: ScreenReaderLocale;
   keyboardLayout?: KeyboardLayout;
   browser?: { name: string; version: string; cdpPort: number };
-  platform: 'linux' | 'windows' | 'android';
+  platform: 'linux' | 'windows' | 'macos' | 'android';
 }
 
 export interface ScreenReaderCapabilities {
@@ -533,8 +536,8 @@ export interface ScanResult {
 
 export function resolveOptions(options: ScreenReaderOptions = {}): ResolvedScreenReaderOptions {
   const screenReader = options.screenReader ?? 'orca';
-  if (screenReader !== 'orca' && screenReader !== 'hoovda' && screenReader !== 'nvda' && screenReader !== 'talkback') {
-    throw new Error('screenReaderOptions.screenReader must be "orca", "hoovda", "nvda", or "talkback"');
+  if (screenReader !== 'orca' && screenReader !== 'hoovda' && screenReader !== 'nvda' && screenReader !== 'voiceover' && screenReader !== 'talkback') {
+    throw new Error('screenReaderOptions.screenReader must be "orca", "hoovda", "nvda", "voiceover", or "talkback"');
   }
   const profile = options.profile ?? defaultProfile(screenReader);
   if (profile !== defaultProfile(screenReader)) {
@@ -548,8 +551,8 @@ export function resolveOptions(options: ScreenReaderOptions = {}): ResolvedScree
   if (keyboardLayout !== 'desktop' && keyboardLayout !== 'laptop') {
     throw new Error('screenReaderOptions.keyboardLayout must be "desktop" or "laptop"');
   }
-  if (screenReader === 'talkback' && keyboardLayout !== 'desktop') {
-    throw new Error('talkback currently requires keyboardLayout "desktop"');
+  if ((screenReader === 'voiceover' || screenReader === 'talkback') && keyboardLayout !== 'desktop') {
+    throw new Error(`${screenReader} currently requires keyboardLayout "desktop"`);
   }
   const allowedRuntimes: readonly ContainerRuntime[] = ['auto', 'docker', 'podman', 'external'];
   if (options.runtime !== undefined && !allowedRuntimes.includes(options.runtime)) {
@@ -573,7 +576,7 @@ export function resolveOptions(options: ScreenReaderOptions = {}): ResolvedScree
       (screenReader === 'hoovda'
         ? (process.env.HOOSAIDTHAT_HOOVDA_IMAGE ?? 'ghcr.io/openhoo/hoosaidthat-hoovda:0.1.0')
         : requiresNativeHost(screenReader)
-          ? (screenReader === 'talkback' ? 'external:talkback-android' : 'external:nvda-windows')
+          ? (screenReader === 'voiceover' ? 'external:voiceover-macos' : screenReader === 'talkback' ? 'external:talkback-android' : 'external:nvda-windows')
           : (process.env.HOOSAIDTHAT_ORCA_IMAGE ?? 'ghcr.io/openhoo/hoosaidthat-orca:0.1.0')),
     controlEndpoint:
       options.controlEndpoint ??
@@ -611,8 +614,8 @@ export function resolveOptions(options: ScreenReaderOptions = {}): ResolvedScree
       "screenReaderOptions.actionTimeoutMs must exceed HooVDA's 5000ms graph refresh deadline",
     );
   }
-  if (screenReader === 'talkback' && resolved.runtime !== 'external') {
-    throw new Error('TalkBack requires runtime "external" on Android');
+  if ((screenReader === 'voiceover' || screenReader === 'talkback') && resolved.runtime !== 'external') {
+    throw new Error(`${screenReader} requires runtime "external" on ${screenReader === 'voiceover' ? 'macOS' : 'Android'}`);
   }
   if (screenReader === 'nvda' && resolved.runtime !== 'external') {
     throw new Error('NVDA is a Windows reference oracle and requires runtime "external"');

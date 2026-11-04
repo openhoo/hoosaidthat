@@ -48,8 +48,8 @@ export class ScreenReaderRuntime {
     if (options.screenReader === 'nvda') {
       throw new Error('NVDA requires an externally managed Windows reference VM');
     }
-    if (options.screenReader === 'talkback') {
-      throw new Error('TalkBack requires an externally managed Android host');
+    if (options.screenReader === 'voiceover' || options.screenReader === 'talkback') {
+      throw new Error(`${options.screenReader} requires an externally managed native host`);
     }
 
     const engine = await resolveEngine(options.runtime);
@@ -159,7 +159,7 @@ export function buildContainerArguments(
     cdpPort: number;
   },
 ): string[] {
-  if (options.screenReader === 'nvda' || options.screenReader === 'talkback') {
+  if (options.screenReader === 'nvda' || options.screenReader === 'voiceover' || options.screenReader === 'talkback') {
     throw new Error(`${options.screenReader.toUpperCase()} cannot be launched as a Linux container`);
   }
   return [
@@ -255,11 +255,11 @@ async function waitUntilReady(
           ((screenReader === 'orca' &&
             controlValue.protocolVersion === 1 &&
             controlValue.status === 'ready') ||
-            ((screenReader === 'hoovda' || screenReader === 'nvda' || screenReader === 'talkback') &&
+            ((screenReader === 'hoovda' || screenReader === 'nvda' || screenReader === 'voiceover' || screenReader === 'talkback') &&
               controlValue.protocolVersion === '2.0' &&
               controlValue.status === 'ok' &&
               controlValue.ready === true &&
-              ((screenReader !== 'nvda' && screenReader !== 'talkback') || controlValue.screenReader === screenReader))) &&
+              ((screenReader !== 'nvda' && screenReader !== 'voiceover' && screenReader !== 'talkback') || controlValue.screenReader === screenReader))) &&
           isObject(cdpValue) &&
           typeof cdpValue.webSocketDebuggerUrl === 'string' &&
           cdpValue.webSocketDebuggerUrl.length > 0
