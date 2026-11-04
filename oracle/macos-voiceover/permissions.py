@@ -35,3 +35,7 @@ for path in paths:
     found = True
 if not found:
     raise RuntimeError('No supported guest TCC database; configure Accessibility and automation permissions in the guest')
+# The guest's TCC daemons retain cached decisions across these direct CI grants.
+# Reload the same narrowly scoped policy before starting automation clients.
+subprocess.run(['sudo', '-n', 'killall', 'tccd'], check=True)
+print('Guest TCC permission cache refreshed')

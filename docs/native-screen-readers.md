@@ -42,7 +42,8 @@ System Events/VoiceOver, and VoiceOver's **Allow VoiceOver to be controlled
 with AppleScript** preference. The provisioner grants only those automation
 permissions in the disposable guest. It never disables SIP. Protected or
 unsupported TCC databases fail provisioning; configure the permissions inside
-the guest in that case. Host permissions and preferences are untouched.
+the guest in that case. It restarts the guest TCC service after applying the
+grants so cached decisions are reloaded. Host permissions and preferences are untouched.
 After the guest desktop starts, the runner enables and verifies Do Not Disturb
 through its native Focus controls. It dismisses existing system notification alerts through
 their native Close actions and verifies that no alert remains. These guest-only
