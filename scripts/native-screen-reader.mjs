@@ -123,6 +123,10 @@ Use one Playwright worker per native desktop. Ctrl+C closes the owned browser.`)
     if (!captured) {
       throw new Error('the native reader did not announce the bootstrap web control; check scripting, keyboard navigation and the configured capture voice');
     }
+    // The sampled announcement can arrive after another Tab has already moved
+    // keyboard focus into browser chrome. Establish and verify native web
+    // interaction again before advertising readiness.
+    if (typeof driver.focusWeb === 'function') await driver.focusWeb(probe);
     if (!(await probe()).webContentFocused) throw new Error('the native bootstrap announcement was captured but its web control no longer has native focus');
     bridge = await startNativeServer({ screenReader, token, driver, probe,
       port: +options['control-port'], locale: options.locale,
