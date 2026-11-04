@@ -1,0 +1,6 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="dev.openhoo.hoosaidthat.probe">
+  <uses-sdk android:minSdkVersion="34" android:targetSdkVersion="35" />
+  <queries><package android:name="com.google.android.marvin.talkback" /><package android:name="com.android.chrome" /></queries>
+  <application android:label="HooSaidThat native probe" android:debuggable="true" android:allowBackup="false" />
+  <instrumentation android:name=".Probe" android:targetPackage="dev.openhoo.hoosaidthat.probe" />
+</manifest>

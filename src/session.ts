@@ -8,6 +8,7 @@ import { addReportAudio, captureReportSnapshot, renderScreenReaderReport, type R
 import { ensureOverlay, installOverlay, removeOverlay, updateOverlay } from './overlay.js';
 import {
   SCREEN_READER_ACTIONS,
+  requiresNativeHost,
   type DownloadedArtifact,
   type ElementCapture,
   type ResolvedScreenReaderOptions,
@@ -75,7 +76,7 @@ export class ScreenReaderSession {
     }
     let sessionStarted = false;
     try {
-      if (options.screenReader === 'nvda') {
+      if (requiresNativeHost(options.screenReader)) {
         await assertNativeViewport(page);
       }
       if (options.screenReader === 'nvda') {
@@ -763,7 +764,7 @@ export class ScreenReaderSession {
       if (await pageContextReady()) return;
     }
     throw new Error(
-      `web-content focus was not verified after ${maxGestures} screen-reader F6 gestures`,
+      `web-content focus was not verified after ${maxGestures} native screen-reader focus actions`,
     );
   }
 
@@ -1078,7 +1079,7 @@ async function assertNativeViewport(page: Page): Promise<void> {
     geometry.innerHeight >= geometry.outerHeight
   ) {
     throw new Error(
-      `NVDA requires Playwright's native browser viewport; use defineConfig from @openhoo/hoosaidthat or set use.viewport=null (${JSON.stringify(geometry)})`,
+      `Native screen readers require Playwright's native browser viewport; use defineConfig from @openhoo/hoosaidthat or set use.viewport=null (${JSON.stringify(geometry)})`,
     );
   }
 }

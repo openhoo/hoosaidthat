@@ -8,10 +8,12 @@ import {
 } from '@playwright/test';
 import { HttpScreenReaderClient } from './client.js';
 import { isRuntimeBootstrapURL } from './bootstrap.js';
+import { androidContextFactory, type ScreenReaderContextFactory } from './android-context.js';
 import { ScreenReaderRuntime } from './runtime.js';
 import { ScreenReaderSession } from './session.js';
 import {
   resolveOptions,
+  requiresNativeHost,
   type ResolvedScreenReaderOptions,
   type ScreenReaderOptions,
 } from './types.js';
@@ -62,8 +64,17 @@ export interface ScreenReaderWorkerFixtures {
   screenReaderClient: HttpScreenReaderClient;
 }
 
-export const test = base.extend<ScreenReaderFixtures, ScreenReaderWorkerFixtures>({
+// Playwright is constrained to 1.62.x in package.json. Preserve its context
+// fixture (including trace hooks), replacing only creation on Android.
+interface NativeContextFixtures { _contextFactory: ScreenReaderContextFactory }
+
+export const test = base.extend<ScreenReaderFixtures & NativeContextFixtures, ScreenReaderWorkerFixtures>({
   screenReaderOptions: [{}, { option: true, scope: 'worker' }],
+
+  _contextFactory: [async ({ _contextFactory, browser, screenReaderResolvedOptions }, use) => {
+    await use(screenReaderResolvedOptions.screenReader === 'talkback'
+      ? androidContextFactory(browser) : _contextFactory);
+  }, { scope: 'test' }],
 
   screenReaderResolvedOptions: [
     async ({ screenReaderOptions }, use) => {
@@ -74,6 +85,9 @@ export const test = base.extend<ScreenReaderFixtures, ScreenReaderWorkerFixtures
 
   screenReaderRuntime: [
     async ({ screenReaderResolvedOptions }, use, workerInfo) => {
+      if (requiresNativeHost(screenReaderResolvedOptions.screenReader) && workerInfo.config.workers !== 1) {
+        throw new Error(`${screenReaderResolvedOptions.screenReader.toUpperCase()} owns one native desktop; configure workers: 1 and serialize native screen-reader projects.`);
+      }
       const runtime = await ScreenReaderRuntime.start(
         screenReaderResolvedOptions,
         workerInfo.workerIndex,
@@ -119,7 +133,7 @@ export const test = base.extend<ScreenReaderFixtures, ScreenReaderWorkerFixtures
     { scope: 'worker' },
   ],
 
-  page: async ({ context, browser }, use) => {
+  page: async ({ context, browser, screenReaderResolvedOptions }, use) => {
     // Keep Playwright's per-test context for isolation, tracing, and video.
     // Once its page exists, retire the runtime bootstrap tab even when it
     // belongs to the browser's separate default context. Native focus must
@@ -127,7 +141,8 @@ export const test = base.extend<ScreenReaderFixtures, ScreenReaderWorkerFixtures
     const existing = context
       .pages()
       .find((candidate) => isRuntimeBootstrapURL(candidate.url()));
-    const page = existing ?? context.pages()[0] ?? (await context.newPage());
+    const page = existing ?? (screenReaderResolvedOptions.screenReader === 'talkback'
+      ? await context.newPage() : context.pages()[0] ?? await context.newPage());
     await page.bringToFront();
     const keepAlive = keepAlivePages.get(browser);
     if (keepAlive && keepAlive !== page) {

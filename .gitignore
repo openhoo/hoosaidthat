@@ -7,3 +7,4 @@ playwright-report/
 .env
 __pycache__/
 *.pyc
+oracle/android-talkback/build/

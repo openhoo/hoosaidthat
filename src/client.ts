@@ -17,7 +17,7 @@ import type {
   ScreenReaderState,
   SpeechEvent,
 } from './types.js';
-import { SCREEN_READER_ACTIONS, STRUCTURED_SCREEN_READER_ACTIONS } from './types.js';
+import { SCREEN_READER_ACTIONS, STRUCTURED_SCREEN_READER_ACTIONS, defaultProfile, requiresNativeHost } from './types.js';
 
 const MAX_JSON_RESPONSE_BYTES = 128 * 1024 * 1024;
 const MAX_ERROR_RESPONSE_BYTES = 4 * 1024;
@@ -106,10 +106,9 @@ export class HttpScreenReaderClient {
         screenReader: {
           name: this.screenReaderName,
           version: value.version,
-          capture:
-            this.screenReaderName === 'nvda'
-              ? 'nvda-presentation-hooks'
-              : 'hoovda-structured-presentation',
+          capture: this.screenReaderName === 'talkback' ? 'talkback-tts-output'
+            : this.screenReaderName === 'nvda' ? 'nvda-presentation-hooks'
+            : 'hoovda-structured-presentation',
         },
         profile: value.profile,
         locale: value.locale,
@@ -126,7 +125,8 @@ export class HttpScreenReaderClient {
               },
             }
           : {}),
-        platform: this.screenReaderName === 'nvda' ? 'windows' : 'linux',
+        platform: this.screenReaderName === 'talkback' ? 'android'
+          : this.screenReaderName === 'nvda' ? 'windows' : 'linux',
       };
     }
     const value = await this.requestJSON('/v1/health', { timeoutMs });
@@ -143,9 +143,9 @@ export class HttpScreenReaderClient {
         `${this.adapterLabel()} client already has an active session or is starting or finishing one`,
       );
     }
-    if (this.screenReaderName === 'nvda' && !this.configuration) {
+    if (requiresNativeHost(this.screenReaderName) && !this.configuration) {
       throw new ScreenReaderProtocolError(
-        'NVDA client requires profile, locale, and keyboard layout',
+        `${this.adapterLabel()} client requires profile, locale, and keyboard layout`,
       );
     }
     if (
@@ -162,7 +162,7 @@ export class HttpScreenReaderClient {
         body: JSON.stringify({
           testId,
           recording,
-          ...(this.screenReaderName === 'nvda' ? this.configuration : {}),
+          ...(requiresNativeHost(this.screenReaderName) ? this.configuration : {}),
         }),
       });
       if (
@@ -331,7 +331,9 @@ export class HttpScreenReaderClient {
           value.delivery !== 'structured') ||
         (argument === undefined &&
           value.delivery !==
-            (STRUCTURED_SCREEN_READER_ACTIONS.has(action)
+            (this.screenReaderName === 'talkback'
+              ? 'emulated'
+              : STRUCTURED_SCREEN_READER_ACTIONS.has(action)
               ? 'structured'
               : this.screenReaderName === 'nvda'
                 ? 'emulated'
@@ -533,6 +535,9 @@ export class HttpScreenReaderClient {
   }
 
   private requireV2Session(feature: string): void {
+    if (requiresNativeHost(this.screenReaderName) && this.screenReaderName !== 'nvda') {
+      throw new ScreenReaderProtocolError(`${this.adapterLabel()} does not expose NVDA presentation settings`);
+    }
     if (!this.usesV2()) {
       throw new ScreenReaderProtocolError(`${feature} require a protocol v2 adapter`);
     }
@@ -540,11 +545,12 @@ export class HttpScreenReaderClient {
   }
 
   private usesV2(): boolean {
-    return this.screenReaderName === 'hoovda' || this.screenReaderName === 'nvda';
+    return this.screenReaderName !== 'orca';
   }
 
   private adapterLabel(): string {
-    return this.screenReaderName === 'nvda' ? 'NVDA' : 'HooVDA';
+    return this.screenReaderName === 'talkback' ? 'TalkBack'
+      : this.screenReaderName === 'nvda' ? 'NVDA' : 'HooVDA';
   }
 
   private async requestJSON(
@@ -935,17 +941,21 @@ function isV2Health(
   protocolVersion: '2.0';
   status: 'ok';
   version: string;
-  profile: 'nvda-web-2026.1.1';
+  profile: ScreenReaderProfile;
   locale: 'en-US' | 'de-DE';
   keyboardLayout: 'desktop' | 'laptop';
   ready: true;
   screenReader?: string;
   browser?: unknown;
+  capture?: 'talkback-tts-output';
 } {
   return (
     isObject(value) &&
     value.protocolVersion === '2.0' &&
     value.status === 'ok' &&
+    (expected !== 'talkback' ||
+      (value.screenReader === 'talkback' && value.platform === 'android' &&
+        value.capture === 'talkback-tts-output')) &&
     (expected !== 'nvda' || value.screenReader === 'nvda') &&
     (expected !== 'hoovda' ||
       value.screenReader === undefined ||
@@ -953,7 +963,7 @@ function isV2Health(
     typeof value.version === 'string' &&
     value.version.length > 0 &&
     (expected !== 'nvda' || value.version === '2026.1.1') &&
-    value.profile === 'nvda-web-2026.1.1' &&
+    value.profile === defaultProfile(expected) &&
     (value.locale === 'en-US' || value.locale === 'de-DE') &&
     (value.keyboardLayout === 'desktop' || value.keyboardLayout === 'laptop') &&
     value.ready === true &&

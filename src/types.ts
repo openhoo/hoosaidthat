@@ -235,8 +235,8 @@ export const STRUCTURED_SCREEN_READER_ACTIONS = new Set<ScreenReaderAction>([
   'brailleRoute',
   'brailleReportFormatting',
 ]);
-export type ScreenReaderName = 'orca' | 'hoovda' | 'nvda';
-export type ScreenReaderProfile = 'nvda-web-2026.1.1';
+export type ScreenReaderName = 'orca' | 'hoovda' | 'nvda' | 'talkback';
+export type ScreenReaderProfile = 'nvda-web-2026.1.1' | 'talkback-web';
 export type ScreenReaderLocale = 'en-US' | 'de-DE';
 export type KeyboardLayout = 'desktop' | 'laptop';
 export type ContainerRuntime = 'auto' | 'docker' | 'podman' | 'external';
@@ -245,7 +245,16 @@ export type RecordingMode = 'off' | 'on';
 export type CaptureBoundary =
   | 'speech-dispatcher-output-module'
   | 'hoovda-structured-presentation'
-  | 'nvda-presentation-hooks';
+  | 'nvda-presentation-hooks'
+  | 'talkback-tts-output';
+
+export function requiresNativeHost(name: ScreenReaderName): boolean {
+  return name === 'nvda' || name === 'talkback';
+}
+
+export function defaultProfile(name: ScreenReaderName): ScreenReaderProfile {
+  return name === 'talkback' ? 'talkback-web' : 'nvda-web-2026.1.1';
+}
 
 export interface ScreenReaderOptions {
   screenReader?: ScreenReaderName;
@@ -425,7 +434,7 @@ export interface ScreenReaderHealth {
   locale?: ScreenReaderLocale;
   keyboardLayout?: KeyboardLayout;
   browser?: { name: string; version: string; cdpPort: number };
-  platform: 'linux' | 'windows';
+  platform: 'linux' | 'windows' | 'android';
 }
 
 export interface ScreenReaderCapabilities {
@@ -524,12 +533,12 @@ export interface ScanResult {
 
 export function resolveOptions(options: ScreenReaderOptions = {}): ResolvedScreenReaderOptions {
   const screenReader = options.screenReader ?? 'orca';
-  if (screenReader !== 'orca' && screenReader !== 'hoovda' && screenReader !== 'nvda') {
-    throw new Error('screenReaderOptions.screenReader must be "orca", "hoovda", or "nvda"');
+  if (screenReader !== 'orca' && screenReader !== 'hoovda' && screenReader !== 'nvda' && screenReader !== 'talkback') {
+    throw new Error('screenReaderOptions.screenReader must be "orca", "hoovda", "nvda", or "talkback"');
   }
-  const profile = options.profile ?? 'nvda-web-2026.1.1';
-  if (profile !== 'nvda-web-2026.1.1') {
-    throw new Error('screenReaderOptions.profile must be "nvda-web-2026.1.1"');
+  const profile = options.profile ?? defaultProfile(screenReader);
+  if (profile !== defaultProfile(screenReader)) {
+    throw new Error(`screenReaderOptions.profile must be "${defaultProfile(screenReader)}" for ${screenReader}`);
   }
   const locale = options.locale ?? 'en-US';
   if (locale !== 'en-US' && locale !== 'de-DE') {
@@ -538,6 +547,9 @@ export function resolveOptions(options: ScreenReaderOptions = {}): ResolvedScree
   const keyboardLayout = options.keyboardLayout ?? 'desktop';
   if (keyboardLayout !== 'desktop' && keyboardLayout !== 'laptop') {
     throw new Error('screenReaderOptions.keyboardLayout must be "desktop" or "laptop"');
+  }
+  if (screenReader === 'talkback' && keyboardLayout !== 'desktop') {
+    throw new Error('talkback currently requires keyboardLayout "desktop"');
   }
   const allowedRuntimes: readonly ContainerRuntime[] = ['auto', 'docker', 'podman', 'external'];
   if (options.runtime !== undefined && !allowedRuntimes.includes(options.runtime)) {
@@ -555,27 +567,27 @@ export function resolveOptions(options: ScreenReaderOptions = {}): ResolvedScree
     profile,
     locale,
     keyboardLayout,
-    runtime: options.runtime ?? (screenReader === 'nvda' ? 'external' : 'auto'),
+    runtime: options.runtime ?? (requiresNativeHost(screenReader) ? 'external' : 'auto'),
     image:
       options.image ??
       (screenReader === 'hoovda'
         ? (process.env.HOOSAIDTHAT_HOOVDA_IMAGE ?? 'ghcr.io/openhoo/hoosaidthat-hoovda:0.1.0')
-        : screenReader === 'nvda'
-          ? 'external:nvda-windows'
+        : requiresNativeHost(screenReader)
+          ? (screenReader === 'talkback' ? 'external:talkback-android' : 'external:nvda-windows')
           : (process.env.HOOSAIDTHAT_ORCA_IMAGE ?? 'ghcr.io/openhoo/hoosaidthat-orca:0.1.0')),
     controlEndpoint:
       options.controlEndpoint ??
-      (screenReader === 'nvda' ? process.env.HOOSAIDTHAT_NVDA_CONTROL_ENDPOINT : undefined),
+      (requiresNativeHost(screenReader) ? process.env[`HOOSAIDTHAT_${screenReader.toUpperCase()}_CONTROL_ENDPOINT`] : undefined),
     cdpEndpoint:
       options.cdpEndpoint ??
-      (screenReader === 'nvda' ? process.env.HOOSAIDTHAT_NVDA_CDP_ENDPOINT : undefined),
+      (requiresNativeHost(screenReader) ? process.env[`HOOSAIDTHAT_${screenReader.toUpperCase()}_CDP_ENDPOINT`] : undefined),
     controlToken:
       options.controlToken ??
-      (screenReader === 'nvda' ? process.env.HOOSAIDTHAT_NVDA_CONTROL_TOKEN : undefined),
+      (requiresNativeHost(screenReader) ? process.env[`HOOSAIDTHAT_${screenReader.toUpperCase()}_CONTROL_TOKEN`] : undefined),
     startupTimeoutMs: options.startupTimeoutMs ?? 60_000,
     actionTimeoutMs:
       options.actionTimeoutMs ??
-      (screenReader === 'hoovda' || screenReader === 'nvda' ? 15_000 : 5_000),
+      (screenReader !== 'orca' ? 15_000 : 5_000),
     quietMs: options.quietMs ?? 300,
     overlay: options.overlay ?? true,
     recording: options.recording ?? 'on',
@@ -598,6 +610,9 @@ export function resolveOptions(options: ScreenReaderOptions = {}): ResolvedScree
     throw new Error(
       "screenReaderOptions.actionTimeoutMs must exceed HooVDA's 5000ms graph refresh deadline",
     );
+  }
+  if (screenReader === 'talkback' && resolved.runtime !== 'external') {
+    throw new Error('TalkBack requires runtime "external" on Android');
   }
   if (screenReader === 'nvda' && resolved.runtime !== 'external') {
     throw new Error('NVDA is a Windows reference oracle and requires runtime "external"');
@@ -634,8 +649,8 @@ export function resolveOptions(options: ScreenReaderOptions = {}): ResolvedScree
       'screenReaderOptions.containerEngineArgs must contain at most 100 non-empty strings of at most 4096 bytes',
     );
   }
-  if (screenReader === 'nvda' && resolved.containerEngineArgs.length > 0) {
-    throw new Error('screenReaderOptions.containerEngineArgs are not supported by external NVDA');
+  if (requiresNativeHost(screenReader) && resolved.containerEngineArgs.length > 0) {
+    throw new Error(`screenReaderOptions.containerEngineArgs are not supported by external ${screenReader.toUpperCase()}`);
   }
   if (resolved.runtime === 'external') {
     if (!resolved.controlEndpoint || !resolved.cdpEndpoint || !resolved.controlToken) {
