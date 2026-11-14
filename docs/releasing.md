@@ -2,7 +2,9 @@
 
 Releases are manual and fail closed. Run `.github/workflows/release.yml` from
 the exact `v<package-version>` tag. Supply the full lowercase 40-character SHA
-of an immutable HooVDA commit and explicitly confirm publication. Release
+of an immutable HooVDA commit and explicitly confirm publication. The commit
+must also match `images/hoovda/source.json`, which is exercised by the native
+HooVDA image CI job and records the consumer's engine dependency. Release
 versions may include a SemVer prerelease suffix but not build metadata, because
 the same value is also an OCI tag.
 

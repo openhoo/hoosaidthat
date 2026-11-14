@@ -82,6 +82,7 @@ jobs:
             exit 1
           fi
           test "$(git -C hoovda rev-parse HEAD)" = "$HOOVDA_REF"
+          test "$(node -p 'require("./images/hoovda/source.json").commit')" = "$HOOVDA_REF"
           case "$NPM_PUBLISH_MODE" in
             trusted|bootstrap-stage) ;;
             *) echo "Unknown npm publishing mode" >&2; exit 1 ;;
@@ -184,6 +185,9 @@ jobs:
           docker buildx build --platform linux/amd64 --push --sbom=true --provenance=mode=max \
             --build-arg "HOOVDA_IMAGE=${ENGINE_IMAGE}@${engine_digest}" \
             --build-arg "IMAGE_VERSION=${RELEASE_VERSION}" \
+            --build-arg "IMAGE_REVISION=${GITHUB_SHA}" \
+            --build-arg "HOOVDA_COMMIT=${hoovda_commit}" \
+            --build-arg "BUILD_DATE=$(git show -s --format=%cI HEAD)" \
             --metadata-file "$RUNNER_TEMP/hoovda-metadata.json" \
             --tag "${HOOVDA_IMAGE}:${candidate_tag}" \
             --file images/hoovda/Dockerfile .

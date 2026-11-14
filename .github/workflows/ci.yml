@@ -11,6 +11,10 @@ permissions:
 jobs:
   package:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        playwright: ['1.62.1', '1.63.0', '1.64.1']
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
@@ -18,9 +22,64 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+      - name: Select supported Playwright version
+        if: matrix.playwright != '1.62.1'
+        run: npm install --no-save --package-lock=false --ignore-scripts "@playwright/test@${{ matrix.playwright }}"
       - run: npm audit --audit-level=high
       - run: npm test
       - run: npm run pack:check
+
+  hoovda-image:
+    runs-on: ubuntu-latest
+    needs: package
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Read pinned HooVDA source
+        id: hoovda-source
+        run: |
+          node --input-type=module -e '
+            import { readFileSync } from "node:fs";
+            const source = JSON.parse(readFileSync("images/hoovda/source.json", "utf8"));
+            if (source.repository !== "openhoo/hoovda" || !/^[0-9a-f]{40}$/.test(source.commit)) throw new Error("Invalid HooVDA source pin");
+            console.log(`commit=${source.commit}`);
+          ' >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          repository: openhoo/hoovda
+          ref: ${{ steps.hoovda-source.outputs.commit }}
+          path: hoovda
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npx playwright install ffmpeg
+      - name: Build pinned native runtime
+        run: |
+          test "$(git -C hoovda rev-parse HEAD)" = "${{ steps.hoovda-source.outputs.commit }}"
+          docker build --platform linux/amd64 --tag hoovda-engine:dev \
+            --build-arg VERSION=0.1.0-ci \
+            --build-arg COMMIT="${{ steps.hoovda-source.outputs.commit }}" \
+            --build-arg BUILD_DATE="$(git -C hoovda show -s --format=%cI HEAD)" hoovda
+          docker build --platform linux/amd64 --tag hoosaidthat-hoovda:dev \
+            --build-arg HOOVDA_COMMIT="${{ steps.hoovda-source.outputs.commit }}" \
+            --build-arg IMAGE_REVISION="$GITHUB_SHA" \
+            --build-arg BUILD_DATE="$(git show -s --format=%cI HEAD)" \
+            --file images/hoovda/Dockerfile .
+      - run: CONTAINER_ENGINE=docker bash images/hoovda/smoke-test.sh hoosaidthat-hoovda:dev
+      - run: CONTAINER_ENGINE=docker npm run test:e2e:hoovda
+      - name: Verify native fixtures with current supported Playwright
+        run: |
+          npm install --no-save --package-lock=false --ignore-scripts @playwright/test@1.64.1
+          CONTAINER_ENGINE=docker npm run test:e2e:hoovda -- --output test-results/hoovda-playwright-1.64.1 --grep 'Tab-Eintritt|Verschachtelte Gruppen|showModal|Ausgeschaltete Gruppenansagen|Eigene Beschreibungen'
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        if: always()
+        with:
+          name: hoovda-playwright-evidence
+          path: test-results
+          if-no-files-found: ignore
+          retention-days: 14
 
   orca-image:
     runs-on: ubuntu-latest

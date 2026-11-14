@@ -36,10 +36,16 @@ COPY --chown=pwuser:pwuser images/orca/bootstrap.html /opt/hoosaidthat/bootstrap
 RUN chmod 0755 /opt/hoosaidthat/entrypoint.sh /usr/local/bin/hoovda
 
 ARG IMAGE_VERSION=dev
+ARG IMAGE_REVISION=unknown
+ARG HOOVDA_COMMIT=unknown
+ARG BUILD_DATE=unknown
 LABEL org.opencontainers.image.title="HooSaidThat HooVDA runtime" \
       org.opencontainers.image.description="HooVDA, Chromium, AT-SPI, physical X11 input, and synchronized evidence recording" \
       org.opencontainers.image.source="https://github.com/openhoo/hoosaidthat" \
       org.opencontainers.image.version="${IMAGE_VERSION}" \
+      org.opencontainers.image.revision="${IMAGE_REVISION}" \
+      org.opencontainers.image.created="${BUILD_DATE}" \
+      dev.hoosaidthat.hoovda.revision="${HOOVDA_COMMIT}" \
       org.opencontainers.image.licenses="MIT AND Apache-2.0 AND GPL-3.0-or-later AND LGPL-2.1-or-later" \
       dev.hoosaidthat.corresponding-source="/usr/src/hoovda-third-party" \
       dev.hoosaidthat.third-party-notices="/usr/share/doc/hoovda/THIRD_PARTY_NOTICES.md" \
