@@ -64,7 +64,7 @@ jobs:
         run: npm install --global npm@11.20.0
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
-          go-version: '1.27.2'
+          go-version: '1.27.4'
           cache-dependency-path: hoovda/go.sum
       - name: Validate immutable release identity
         shell: bash
