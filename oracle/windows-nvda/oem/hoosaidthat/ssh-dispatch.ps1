@@ -49,7 +49,7 @@ function Get-ProcessSnapshot {
             }
         }
         elseif ($path -and $process.Name -ieq 'powershell.exe' -and
-            [string]$process.CommandLine -match '(?i)(?:^|\s)-File\s+(?:"C:\\HooSaidThat\\start-runtime\.ps1"|C:\\HooSaidThat\\start-runtime\.ps1)(?:\s|$)') {
+            [string]$process.CommandLine -match '(?i)(?:^|\s)(?:"-File"|-File)\s+(?:"C:\\HooSaidThat\\start-runtime\.ps1"|C:\\HooSaidThat\\start-runtime\.ps1)(?:\s|$)') {
             $role = 'runtime-supervisor'
         }
         if ($role -and $IncludeDetails) {
