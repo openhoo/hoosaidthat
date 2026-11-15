@@ -63,8 +63,8 @@ export interface ScreenReaderWorkerFixtures {
   screenReaderClient: HttpScreenReaderClient;
 }
 
-// Playwright is constrained to 1.62.x in package.json. Preserve its context
-// fixture (including trace hooks), replacing only creation on Android.
+// Preserve Playwright's context fixture (including trace hooks), replacing only
+// creation on Android. CI exercises each supported Playwright minor version.
 interface NativeContextFixtures { _contextFactory: ScreenReaderContextFactory }
 
 export const test = base.extend<ScreenReaderFixtures & NativeContextFixtures, ScreenReaderWorkerFixtures>({

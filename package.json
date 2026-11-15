@@ -51,6 +51,7 @@
     "docs",
     "images/*/README.md",
     "images/*/runtime-contract.json",
+    "images/*/source.json",
     "oracle/windows-nvda",
     "!oracle/windows-nvda/tests/**",
     "oracle/parity",
@@ -128,7 +129,7 @@
     "voiceover:macos:stop": "node scripts/voiceover-macos.mjs stop"
   },
   "peerDependencies": {
-    "@playwright/test": ">=1.62.1 <1.63.0"
+    "@playwright/test": ">=1.62.1 <1.65.0"
   },
   "devDependencies": {
     "@playwright/test": "1.62.1",

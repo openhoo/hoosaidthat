@@ -25,12 +25,14 @@ function identityScript() {
   }).join('\n');
 }
 
-function validateIdentity(ref) {
+function validateIdentity(ref, pinnedCompanionCommit = companionCommit) {
   const temporary = mkdtempSync(join(tmpdir(), 'hoosaidthat-release-identity-'));
   try {
     const bin = join(temporary, 'bin');
     mkdirSync(bin);
     writeFileSync(join(temporary, 'package.json'), JSON.stringify({ version: '0.1.0' }));
+    mkdirSync(join(temporary, 'images/hoovda'), { recursive: true });
+    writeFileSync(join(temporary, 'images/hoovda/source.json'), JSON.stringify({ commit: pinnedCompanionCommit }));
     // Every case has the same exact tag commit and companion commit. Only the
     // workflow dispatch ref changes; no repository or registry is contacted.
     writeFileSync(join(bin, 'git'), `#!/bin/sh
@@ -71,4 +73,10 @@ test('release identity accepts dispatch from the exact release tag', () => {
   const result = validateIdentity('refs/tags/v0.1.0');
   assert.equal(result.error, undefined);
   assert.equal(result.status, 0, result.stderr);
+});
+
+test('release identity rejects an engine commit different from the consumer source pin', () => {
+  const result = validateIdentity('refs/tags/v0.1.0', 'c'.repeat(40));
+  assert.equal(result.error, undefined);
+  assert.equal(result.status, 1, result.stderr);
 });

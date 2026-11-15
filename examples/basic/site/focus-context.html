@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Native focus context</title>
+  </head>
+  <body>
+    <h1>Native focus context</h1>
+
+    <button id="before-dates">Before date group</button>
+    <div role="group" aria-label="Choose a date: November 2026">
+      <button id="first-date">16 November</button>
+      <button id="second-date">17 November</button>
+    </div>
+    <button id="after-dates">After date group</button>
+
+    <button id="before-times">Before time group</button>
+    <fieldset>
+      <legend>Choose a time</legend>
+      <button id="first-time">10:00</button>
+      <button id="second-time">10:30</button>
+    </fieldset>
+    <button id="after-times">After time group</button>
+
+    <button id="before-nested">Before nested groups</button>
+    <div role="group" aria-label="Consultation options">
+      <div role="group" aria-label="Contact method">
+        <button id="telephone">Telephone</button>
+        <button id="video">Video</button>
+      </div>
+    </div>
+    <button id="after-nested">After nested groups</button>
+
+    <button id="before-description">Before described button</button>
+    <button id="described" aria-describedby="button-description">Review booking</button>
+    <p id="button-description">Check the appointment details before continuing.</p>
+
+    <button id="open-dialog">Open leave dialog</button>
+    <dialog id="leave-dialog" aria-labelledby="dialog-title" aria-describedby="dialog-description">
+      <h2 id="dialog-title">Leave consultation?</h2>
+      <p id="dialog-description">Your appointment remains booked.</p>
+      <button id="close-dialog" autofocus>Close leave dialog</button>
+    </dialog>
+
+    <script>
+      const dialog = document.getElementById('leave-dialog');
+      document.getElementById('open-dialog').addEventListener('click', () => dialog.showModal());
+      document.getElementById('close-dialog').addEventListener('click', () => dialog.close());
+    </script>
+  </body>
+</html>
