@@ -1073,10 +1073,59 @@ class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
 
 
 class CdpProxyHandler(BaseRequestHandler):
+    @staticmethod
+    def _connect_chrome_loopback():
+        pending = []
+        deadline = time.monotonic() + 3.0
+        try:
+            for family, address in (
+                (socket.AF_INET6, "::1"),
+                (socket.AF_INET, "127.0.0.1"),
+            ):
+                try:
+                    endpoint = socket.socket(family, socket.SOCK_STREAM)
+                except OSError:
+                    continue
+                pending.append(endpoint)
+                endpoint.setblocking(False)
+                try:
+                    endpoint.connect((address, 9223))
+                except BlockingIOError:
+                    continue
+                except OSError as error:
+                    # Winsock can expose pending connects as a plain OSError.
+                    pending_errors = (10035, 10036, 10037)
+                    if error.errno in pending_errors or getattr(error, "winerror", None) in pending_errors:
+                        continue
+                    pending.remove(endpoint)
+                    endpoint.close()
+                else:
+                    pending.remove(endpoint)
+                    return endpoint
+            while pending:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                _, writable, exceptional = select.select(
+                    [], pending, pending, remaining
+                )
+                for endpoint in dict.fromkeys(writable + exceptional):
+                    if endpoint.getsockopt(socket.SOL_SOCKET, socket.SO_ERROR) == 0:
+                        pending.remove(endpoint)
+                        return endpoint
+                    pending.remove(endpoint)
+                    endpoint.close()
+            return None
+        finally:
+            for endpoint in pending:
+                endpoint.close()
+
     def handle(self):
         try:
-            upstream = socket.create_connection(("127.0.0.1", 9223), timeout=3.0)
+            upstream = self._connect_chrome_loopback()
         except OSError:
+            return
+        if upstream is None:
             return
         sockets = (self.request, upstream)
         peers = {self.request: upstream, upstream: self.request}
