@@ -68,12 +68,42 @@ function invoke(command, scenario, acceleration = 'tcg') {
       let now = 0;
       let fetches = 0;
       let locale = 'en-US';
+      const httpRequests = [];
+      const httpOverlaps = [];
+      let httpActive = 0;
+      let httpMaxActive = 0;
+      let nextTimer = 0;
+      let timerPumpScheduled = false;
+      const timers = new Map();
+      const signalTimers = new WeakMap();
       Date.now = () => now;
+      // Promise-Fortsetzungen dürfen Timer löschen, bevor die virtuelle Uhr weiterläuft.
+      function pumpTimers() {
+        if (timerPumpScheduled || timers.size === 0) return;
+        timerPumpScheduled = true;
+        setImmediate(() => {
+          timerPumpScheduled = false;
+          const next = [...timers].sort((left, right) => left[1].at - right[1].at || left[0] - right[0])[0];
+          if (!next) return;
+          timers.delete(next[0]);
+          now = Math.max(now, next[1].at);
+          next[1].callback(...next[1].args);
+          pumpTimers();
+        });
+      }
       globalThis.setTimeout = (callback, duration, ...args) => {
         assert.ok(Number.isFinite(duration) && duration >= 0);
-        now += duration;
-        queueMicrotask(() => callback(...args));
-        return 0;
+        const id = ++nextTimer;
+        timers.set(id, { at: now + duration, callback, args });
+        pumpTimers();
+        return id;
+      };
+      globalThis.clearTimeout = id => timers.delete(id);
+      AbortSignal.timeout = duration => {
+        const controller = new AbortController();
+        signalTimers.set(controller.signal,
+          setTimeout(() => controller.abort(new DOMException('Zeitlimit der HTTP-Probe erreicht', 'TimeoutError')), duration));
+        return controller.signal;
       };
       childProcess.execFileSync = () => { throw new Error('unexpected process execution'); };
       childProcess.spawnSync = (program, args, options) => {
@@ -106,7 +136,7 @@ function invoke(command, scenario, acceleration = 'tcg') {
           Object.assign(payload, { command: 'update', payloadGeneration: expectedGeneration, files: manifest.files.length });
         }
         if (scenario === 'invalid-json') return { status: 0, stdout: '{broken', stderr: '' };
-        if (scenario === 'wrong-command') return { status: 0, stdout: JSON.stringify({ ...payload, command: 'other' }), stderr: '' };
+        if (scenario === 'wrong-command' || scenario === 'http-invalid-ssh') return { status: 0, stdout: JSON.stringify({ ...payload, command: 'other' }), stderr: '' };
         if (scenario === 'process-timeout') {
           now += options.timeout;
           return { status: null, stdout: '', stderr: '', error: Object.assign(new Error('spawnSync ssh ETIMEDOUT'), { code: 'ETIMEDOUT' }) };
@@ -136,14 +166,118 @@ function invoke(command, scenario, acceleration = 'tcg') {
         return { status: 0, stdout: JSON.stringify(payload), stderr: '' };
       };
       syncBuiltinESMExports();
-      globalThis.fetch = async url => {
+      function simulatedHttp(url, options) {
+        const address = String(url);
+        assert.ok(['http://127.0.0.1:3002/v2/health', 'http://127.0.0.1:9224/json/version'].includes(address), address);
+        const control = address === 'http://127.0.0.1:3002/v2/health';
+        const headers = new Headers(options.headers);
+        assert.equal(headers.get('authorization'), control ? 'Bearer ' + 'a'.repeat(64) : null);
+        assert.ok(options.signal instanceof AbortSignal);
+        const index = httpRequests.length;
+        const round = Math.floor(index / 2);
+        if (index % 2 === 0 && httpActive !== 0) httpOverlaps.push({ round, active: httpActive, at: now });
+        const request = { index, round, endpoint: control ? 'control' : 'cdp', started: now,
+          headersAt: null, abortedAt: null, endedAt: null, cancelledAt: null, endReason: null };
+        httpRequests.push(request);
+        httpActive += 1;
+        httpMaxActive = Math.max(httpMaxActive, httpActive);
+        const health = { protocolVersion: '2.0', screenReader: 'nvda', version: '2026.1.1', ready: true };
+        const version = { webSocketDebuggerUrl: 'ws://127.0.0.1/devtools/browser/fixture' };
+        if (scenario === 'http-invalid-protocol') health.protocolVersion = '1.0';
+        if (scenario === 'http-invalid-version') health.version = '2025.1';
+        if (scenario === 'http-invalid-reader') health.screenReader = 'hoovda';
+        if (scenario === 'http-invalid-ready') health.ready = false;
+        if (scenario === 'http-invalid-cdp') version.webSocketDebuggerUrl = null;
+        let headerMs = scenario === 'http-slow-headers' && control ? 29_689 : 10;
+        let bodyMs = scenario === 'http-slow-body' && control ? 29_589 : 0;
+        if (scenario === 'http-slow-body' && control) headerMs = 100;
+        if (scenario === 'http-total-budget') { headerMs = 20_000; bodyMs = 15_000; }
+        if (scenario === 'http-deadline-clamp') headerMs = Infinity;
+        const firstRoundFailure = round === 0 && ['http-sibling-headers', 'http-sibling-body', 'http-non-ok'].includes(scenario);
+        if (firstRoundFailure && !control) {
+          if (scenario === 'http-sibling-body') bodyMs = 100_000;
+          else headerMs = 100_000;
+        }
+        if (firstRoundFailure && scenario === 'http-non-ok' && control) bodyMs = 100_000;
+        const status = firstRoundFailure && scenario === 'http-non-ok' && control ? 503 : 200;
+        const brokenJson = control && (scenario === 'http-invalid-json' || firstRoundFailure && scenario === 'http-sibling-body');
+        const bytes = new TextEncoder().encode(brokenJson ? '{ungueltig' : JSON.stringify(control ? health : version));
+        // Die Bereinigung dauert länger als die Retrypause und macht Überlappungen sichtbar.
+        const cleanupMs = firstRoundFailure ? 7_000 : 0;
+        let headerTimer, bodyTimer, bodyController, rejectFetch, closing = false, closed = false, cleanup;
+        const finish = reason => {
+          if (closed) return;
+          closed = true;
+          clearTimeout(headerTimer);
+          clearTimeout(bodyTimer);
+          clearTimeout(signalTimers.get(options.signal));
+          options.signal.removeEventListener('abort', aborted);
+          httpActive -= 1;
+          request.endedAt = now;
+          request.endReason = reason;
+        };
+        const close = (reason, error) => {
+          if (closed) return Promise.resolve();
+          if (closing) return cleanup;
+          closing = true;
+          clearTimeout(headerTimer);
+          clearTimeout(bodyTimer);
+          cleanup = new Promise(resolveCleanup => setTimeout(() => {
+            finish(reason);
+            if (error && bodyController) bodyController.error(error);
+            else if (error) rejectFetch(error);
+            resolveCleanup();
+          }, cleanupMs));
+          return cleanup;
+        };
+        const aborted = () => {
+          request.abortedAt = now;
+          close('aborted', options.signal.reason ?? new DOMException('Abgebrochen', 'AbortError'));
+        };
+        return new Promise((resolveFetch, reject) => {
+          rejectFetch = reject;
+          options.signal.addEventListener('abort', aborted, { once: true });
+          if (options.signal.aborted) return aborted();
+          if (!Number.isFinite(headerMs)) return;
+          headerTimer = setTimeout(() => {
+            if (firstRoundFailure && scenario === 'http-sibling-headers' && control) {
+              finish('transport-error');
+              reject(new Error('Simulierter HTTP-Verbindungsfehler'));
+              return;
+            }
+            request.headersAt = now;
+            const body = new ReadableStream({
+              start(controller) {
+                bodyController = controller;
+                bodyTimer = setTimeout(() => {
+                  if (closed || closing) return;
+                  controller.enqueue(bytes);
+                  controller.close();
+                  finish('body-complete');
+                }, bodyMs);
+              },
+              cancel() {
+                request.cancelledAt = now;
+                return close('cancelled');
+              },
+            });
+            const responseHeaders = scenario === 'http-oversized-body' && control
+              ? { 'content-length': '65537' } : { 'content-length': String(bytes.byteLength) };
+            resolveFetch(new Response(body, { status, headers: responseHeaders }));
+          }, headerMs);
+        });
+      }
+      globalThis.fetch = async (url, options) => {
         fetches += 1;
+        if (scenario.startsWith('http-')) return simulatedHttp(url, options);
+        clearTimeout(signalTimers.get(options?.signal));
         if (scenario === 'fetch-exhausts-deadline' && fetches === 1) now += 45 * 60_000;
         return new Response(JSON.stringify(String(url).includes('/v2/health')
           ? { protocolVersion: '2.0', screenReader: 'nvda', version: '2026.1.1', ready: true }
           : { webSocketDebuggerUrl: 'ws://127.0.0.1/devtools/browser/fixture' }));
       };
-      process.on('exit', () => writeFileSync(${JSON.stringify(receiptPath)}, JSON.stringify({ calls, now, fetches, playwrightCalls })));
+      process.on('exit', () => writeFileSync(${JSON.stringify(receiptPath)}, JSON.stringify({ calls, now, fetches, playwrightCalls,
+        httpRequests, httpOverlaps, httpActive, httpMaxActive })));
     `);
     const env = { ...process.env, HST_NVDA_RUNTIME_ROOT: runtimeRoot };
     if (acceleration === null) delete env.HST_NVDA_ACCELERATION;
@@ -287,6 +421,111 @@ test('HTTP-Bereitschaft darf nach Ablauf der gemeinsamen Deadline kein SSH mehr 
   assert.equal(result.status, 1, result.stderr);
   assert.equal(result.calls.length, 0);
   assert.equal(result.now, 45 * 60_000);
+});
+
+for (const scenario of ['http-slow-headers', 'http-slow-body']) {
+  test(`TCG wartet innerhalb einer HTTP-Runde auf gültige ${scenario === 'http-slow-headers' ? 'Header' : 'Bodydaten'} nach 29,689 Sekunden`, t => {
+    const result = invoke(['wait'], scenario);
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.fetches, 2, 'die erste vollständige Probenrunde muss genügen');
+    assert.deepEqual(result.calls.map(call => call.command), ['status']);
+    const control = result.httpRequests.find(request => request.endpoint === 'control');
+    assert.equal(control.endedAt - control.started, 29_689);
+    assert.equal(control.endReason, 'body-complete');
+    assert.equal(control.abortedAt, null);
+    assert.equal(result.httpActive, 0);
+    assert.deepEqual(result.httpOverlaps, []);
+    t.diagnostic(JSON.stringify({ fixture: 'echte lokale CLI mit simulierten HTTP-Antworten', scenario,
+      httpRequests: result.httpRequests, sshCalls: result.calls }));
+  });
+}
+
+for (const acceleration of ['kvm', 'auto', null]) {
+  test(`${acceleration || 'ohne Modus'} behält die HTTP-Frist von zwei Sekunden`, () => {
+    const result = invoke(['wait'], 'http-slow-headers', acceleration);
+    assert.equal(result.status, 1);
+    assert.equal(result.calls.length, 0, 'eine unvollständige HTTP-Runde darf kein SSH freigeben');
+    assert.equal(result.httpRequests[0].abortedAt - result.httpRequests[0].started, 2_000);
+    assert.equal(result.now, 45 * 60_000);
+    assert.equal(result.httpActive, 0);
+    assert.deepEqual(result.httpOverlaps, []);
+  });
+}
+
+test('TCG teilt die 30 Sekunden zwischen HTTP-Headern und Body und begrenzt die letzte Runde auf die Außenfrist', t => {
+  const result = invoke(['wait'], 'http-total-budget');
+  assert.equal(result.status, 1);
+  assert.equal(result.calls.length, 0);
+  const first = result.httpRequests[0];
+  assert.equal(first.headersAt - first.started, 20_000);
+  assert.equal(first.abortedAt - first.started, 30_000, 'der Body erhält keine neue eigene Frist');
+  const lastRound = result.httpRequests.filter(request => request.round === result.httpRequests.at(-1).round);
+  assert.equal(lastRound.length, 2);
+  for (const request of lastRound) {
+    assert.equal(request.abortedAt - request.started, 5_000);
+    assert.equal(request.endedAt, 45 * 60_000);
+  }
+  assert.equal(result.now, 45 * 60_000);
+  assert.equal(result.httpActive, 0);
+  assert.equal(result.httpMaxActive, 2);
+  assert.deepEqual(result.httpOverlaps, []);
+  t.diagnostic(JSON.stringify({ fixture: 'echte lokale CLI mit simulierter gemeinsamer HTTP-Frist',
+    firstRound: result.httpRequests.slice(0, 2), lastRound, endedAt: result.now }));
+});
+
+test('TCG begrenzt auch ausbleibende HTTP-Header auf die restliche gemeinsame Außenfrist', () => {
+  const result = invoke(['wait'], 'http-deadline-clamp');
+  assert.equal(result.status, 1);
+  assert.equal(result.calls.length, 0);
+  assert.equal(result.httpRequests[0].abortedAt - result.httpRequests[0].started, 30_000);
+  for (const request of result.httpRequests.slice(-2)) {
+    assert.equal(request.abortedAt - request.started, 5_000);
+    assert.equal(request.headersAt, null);
+    assert.equal(request.endedAt, 45 * 60_000);
+  }
+  assert.equal(result.now, 45 * 60_000);
+  assert.equal(result.httpActive, 0);
+  assert.deepEqual(result.httpOverlaps, []);
+});
+
+for (const scenario of ['http-sibling-headers', 'http-sibling-body', 'http-non-ok']) {
+  test(`${scenario} bricht die Schwesterprobe ab und wartet vor dem Retry auf deren Bereinigung`, t => {
+    const result = invoke(['wait'], scenario);
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.fetches, 4, 'nach der fehlgeschlagenen Runde muss genau eine vollständige Runde folgen');
+    assert.deepEqual(result.calls.map(call => call.command), ['status']);
+    const sibling = result.httpRequests[1];
+    assert.equal(sibling.abortedAt, 10, 'der Fehler muss die Schwester vor ihrer eigenen Deadline abbrechen');
+    assert.equal(sibling.endedAt, 7_010, 'die asynchrone Bereinigung bleibt bis zum Abschluss in Bearbeitung');
+    assert.ok(result.httpRequests[2].started >= sibling.endedAt + 5_000,
+      JSON.stringify(result.httpRequests));
+    assert.equal(result.httpActive, 0);
+    assert.equal(result.httpMaxActive, 2);
+    assert.deepEqual(result.httpOverlaps, []);
+    t.diagnostic(JSON.stringify({ fixture: 'echte lokale CLI mit asynchroner Schwesterbereinigung',
+      scenario, httpRequests: result.httpRequests, httpMaxActive: result.httpMaxActive }));
+  });
+}
+
+for (const scenario of ['http-invalid-json', 'http-invalid-protocol', 'http-invalid-version',
+  'http-invalid-reader', 'http-invalid-ready', 'http-invalid-cdp', 'http-oversized-body']) {
+  test(`HTTP-Readiness verwirft weiterhin ${scenario} vor dem SSH-Status`, () => {
+    const result = invoke(['wait'], scenario);
+    assert.equal(result.status, 1);
+    assert.equal(result.calls.length, 0, 'ungültige HTTP-Daten dürfen den SSH-Status nicht freigeben');
+    assert.doesNotMatch(result.stdout, /oracle ready/);
+    assert.equal(result.httpActive, 0);
+    assert.deepEqual(result.httpOverlaps, []);
+  });
+}
+
+test('Gültige HTTP-Antworten ersetzen nicht den validierten SSH-Statusvertrag', () => {
+  const result = invoke(['wait'], 'http-invalid-ssh');
+  assert.equal(result.status, 1);
+  assert.ok(result.calls.length > 0);
+  assert.doesNotMatch(result.stdout, /oracle ready/);
+  assert.equal(result.httpActive, 0);
+  assert.deepEqual(result.httpOverlaps, []);
 });
 
 for (const acceleration of ['kvm', 'auto', null]) {

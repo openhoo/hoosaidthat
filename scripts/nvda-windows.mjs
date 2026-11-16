@@ -325,43 +325,24 @@ async function waitUntilReady() {
       console.log(phaseSummary);
     }
     try {
-      const [control, cdp] = await Promise.all([
-        fetch('http://127.0.0.1:3002/v2/health', {
-          // The validated secret is intentionally sent only to the fixed host-loopback
-          // control endpoint. It never influences request destination or path.
-          // codeql[js/file-access-to-http]
-          headers: { authorization: `Bearer ${token}` },
-          signal: AbortSignal.timeout(2_000),
-        }),
-        fetch('http://127.0.0.1:9224/json/version', {
-          signal: AbortSignal.timeout(2_000),
-        }),
-      ]);
-      if (control.ok && cdp.ok) {
-        const [health, version] = await Promise.all([
-          readBoundedJsonResponse(control, 64 * 1024, 'NVDA control health'),
-          readBoundedJsonResponse(cdp, 64 * 1024, 'Chrome CDP version'),
-        ]);
-        if (
-          health.protocolVersion === '2.0' &&
-          health.screenReader === 'nvda' &&
-          health.version === '2026.1.1' &&
-          health.ready === true &&
-          typeof version.webSocketDebuggerUrl === 'string'
-        ) {
-          const ssh = trySshControl('status', deadline);
-          if (ssh.status === 0) {
-            console.log(
-              'NVDA 2026.1.1 oracle ready: SSH 127.0.0.1:2224, control 127.0.0.1:3002, CDP 127.0.0.1:9224.',
-            );
-            return;
-          }
-          lastError = `SSH control unavailable: ${(ssh.stderr || ssh.error?.message || `exit ${ssh.status}`).trim()}`;
-        } else {
-          lastError = 'readiness payload invalid';
+      const [health, version] = await probeHttpReadiness(token, deadline);
+      if (
+        health.protocolVersion === '2.0' &&
+        health.screenReader === 'nvda' &&
+        health.version === '2026.1.1' &&
+        health.ready === true &&
+        typeof version.webSocketDebuggerUrl === 'string'
+      ) {
+        const ssh = trySshControl('status', deadline);
+        if (ssh.status === 0) {
+          console.log(
+            'NVDA 2026.1.1 oracle ready: SSH 127.0.0.1:2224, control 127.0.0.1:3002, CDP 127.0.0.1:9224.',
+          );
+          return;
         }
+        lastError = `SSH control unavailable: ${(ssh.stderr || ssh.error?.message || `exit ${ssh.status}`).trim()}`;
       } else {
-        lastError = `control HTTP ${control.status}; CDP HTTP ${cdp.status}`;
+        lastError = 'readiness payload invalid';
       }
     } catch (error) {
       if (error?.code === 'HST_SSH_TIMEOUT') throw error;
@@ -373,6 +354,55 @@ async function waitUntilReady() {
     }
   }
   throw new Error(`NVDA oracle did not become ready in 45 minutes: ${lastError}`);
+}
+
+async function probeHttpReadiness(token, deadline) {
+  const timeoutMs = Math.min(
+    process.env.HST_NVDA_ACCELERATION === 'tcg' ? 30_000 : 2_000,
+    deadline - Date.now(),
+  );
+  if (timeoutMs <= 0) throw new Error('Die HTTP-Bereitschaftsfrist ist abgelaufen');
+  const controller = new AbortController();
+  // Header und Body teilen sich die Frist dieser parallelen Probenrunde.
+  const timer = setTimeout(() => controller.abort(
+    new Error(`Die HTTP-Bereitschaftsprüfung überschritt ${timeoutMs} ms`),
+  ), timeoutMs);
+  const probes = [];
+  try {
+    probes.push(readHttpReadinessResponse(
+      fetch('http://127.0.0.1:3002/v2/health', {
+        // The validated secret is intentionally sent only to the fixed host-loopback
+        // control endpoint. It never influences request destination or path.
+        // codeql[js/file-access-to-http]
+        headers: { authorization: `Bearer ${token}` },
+        signal: controller.signal,
+      }),
+      'NVDA-Control-Bereitschaft', controller,
+    ));
+    probes.push(readHttpReadinessResponse(
+      fetch('http://127.0.0.1:9224/json/version', { signal: controller.signal }),
+      'Chrome-CDP-Version', controller,
+    ));
+    return await Promise.all(probes);
+  } finally {
+    clearTimeout(timer);
+    controller.abort();
+    await Promise.allSettled(probes);
+  }
+}
+
+async function readHttpReadinessResponse(responsePromise, label, controller) {
+  let response;
+  try {
+    response = await responsePromise;
+    if (!response.ok) throw new Error(`${label}: HTTP ${response.status}`);
+    return await readBoundedJsonResponse(response, 64 * 1024, label);
+  } catch (error) {
+    controller.abort(error);
+    throw error;
+  } finally {
+    await response?.body?.cancel().catch(() => undefined);
+  }
 }
 
 function status() {
