@@ -37,6 +37,9 @@ jobs:
       - name: Verify installed OpenSSH reconfiguration without online servicing
         shell: powershell
         run: ./oracle/windows-nvda/tests/test_configure_ssh.ps1
+      - name: Verify status heartbeat after process and session diagnostics
+        shell: powershell
+        run: ./oracle/windows-nvda/tests/test_ssh_dispatch_status.ps1
 
   hoovda-image:
     runs-on: ubuntu-latest
