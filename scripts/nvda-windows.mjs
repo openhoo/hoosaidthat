@@ -436,7 +436,7 @@ function pinGuestHostKey() {
 }
 
 function sshArguments(remoteCommand, timeoutMs) {
-  const connectTimeout = sshRuntimeStatusCommands.has(remoteCommand) && process.env.HST_NVDA_ACCELERATION === 'tcg'
+  const connectTimeout = process.env.HST_NVDA_ACCELERATION === 'tcg'
     ? 120
     : 5;
   return [
