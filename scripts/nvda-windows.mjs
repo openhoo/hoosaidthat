@@ -63,6 +63,15 @@ const sshCommands = new Set([
   'shutdown',
   'reboot',
 ]);
+// Diese Antworten enthalten dieselbe vollstaendige Get-RuntimeStatus-Diagnose.
+const sshRuntimeStatusCommands = new Set([
+  'status',
+  'start',
+  'stop',
+  'restart',
+  'locale-en-US',
+  'locale-de-DE',
+]);
 const maxControlPayloadFileBytes = 2 * 1024 * 1024;
 const maxControlPayloadBytes = 8 * 1024 * 1024;
 const controlPayloadFiles = [
@@ -340,7 +349,7 @@ async function waitUntilReady() {
           health.ready === true &&
           typeof version.webSocketDebuggerUrl === 'string'
         ) {
-          const ssh = trySshControl('status');
+          const ssh = trySshControl('status', deadline);
           if (ssh.status === 0) {
             console.log(
               'NVDA 2026.1.1 oracle ready: SSH 127.0.0.1:2224, control 127.0.0.1:3002, CDP 127.0.0.1:9224.',
@@ -355,9 +364,13 @@ async function waitUntilReady() {
         lastError = `control HTTP ${control.status}; CDP HTTP ${cdp.status}`;
       }
     } catch (error) {
+      if (error?.code === 'HST_SSH_TIMEOUT') throw error;
       lastError = error instanceof Error ? error.message : String(error);
     }
-    await new Promise((resolvePromise) => setTimeout(resolvePromise, 5_000));
+    const remaining = deadline - Date.now();
+    if (remaining > 0) {
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, Math.min(5_000, remaining)));
+    }
   }
   throw new Error(`NVDA oracle did not become ready in 45 minutes: ${lastError}`);
 }
@@ -422,7 +435,10 @@ function pinGuestHostKey() {
   chmodSync(knownHostsPath, 0o600);
 }
 
-function sshArguments(remoteCommand) {
+function sshArguments(remoteCommand, timeoutMs) {
+  const connectTimeout = sshRuntimeStatusCommands.has(remoteCommand) && process.env.HST_NVDA_ACCELERATION === 'tcg'
+    ? 120
+    : 5;
   return [
     '-p',
     '2224',
@@ -441,7 +457,7 @@ function sshArguments(remoteCommand) {
     '-o',
     'KbdInteractiveAuthentication=no',
     '-o',
-    'ConnectTimeout=5',
+    `ConnectTimeout=${Math.min(connectTimeout, Math.max(1, Math.floor(timeoutMs / 1000)))}`,
     '-o',
     'LogLevel=ERROR',
     'HstOracle@127.0.0.1',
@@ -449,16 +465,38 @@ function sshArguments(remoteCommand) {
   ];
 }
 
-function trySshControl(remoteCommand) {
+function sshTimeoutMs(remoteCommand, defaultTimeoutMs, deadline = Infinity) {
+  const budget = sshRuntimeStatusCommands.has(remoteCommand) && process.env.HST_NVDA_ACCELERATION === 'tcg'
+    ? 15 * 60_000
+    : defaultTimeoutMs;
+  return Math.min(budget, deadline - Date.now());
+}
+
+function rejectSshProcessTimeout(result, remoteCommand, timeoutMs) {
+  if (result.error?.code !== 'ETIMEDOUT') return;
+  const error = new Error(
+    `SSH control ${remoteCommand} timed out after ${timeoutMs} ms; remote process may still be running. Refusing overlapping retries.`,
+    { cause: result.error },
+  );
+  error.code = 'HST_SSH_TIMEOUT';
+  throw error;
+}
+
+function trySshControl(remoteCommand, deadline = Infinity) {
   try {
     pinGuestHostKey();
   } catch (error) {
     return { status: 1, stdout: '', stderr: '', error };
   }
-  const result = spawnSync('ssh', sshArguments(remoteCommand), {
+  const timeout = sshTimeoutMs(remoteCommand, 15_000, deadline);
+  if (timeout <= 0) {
+    return { status: 1, stdout: '', stderr: '', error: new Error('SSH readiness deadline exhausted') };
+  }
+  const result = spawnSync('ssh', sshArguments(remoteCommand, timeout), {
     encoding: 'utf8',
-    timeout: 15_000,
+    timeout,
   });
+  rejectSshProcessTimeout(result, remoteCommand, timeout);
   if (result.status === 0) {
     try {
       validateSshPayload(result.stdout, remoteCommand);
@@ -478,11 +516,13 @@ function runSshControl(remoteCommand) {
 
 function runSshCommand(remoteCommand, expectedCommand) {
   pinGuestHostKey();
-  const result = spawnSync('ssh', sshArguments(remoteCommand), {
+  const timeout = sshTimeoutMs(remoteCommand, remoteCommand === 'reconfigure-ssh' ? 120_000 : 30_000);
+  const result = spawnSync('ssh', sshArguments(remoteCommand, timeout), {
     encoding: 'utf8',
-    timeout: remoteCommand === 'reconfigure-ssh' ? 120_000 : 30_000,
+    timeout,
     maxBuffer: 1024 * 1024,
   });
+  rejectSshProcessTimeout(result, remoteCommand, timeout);
   if (result.error) throw result.error;
   if (result.stderr) process.stderr.write(result.stderr);
   if (result.status !== 0) {
@@ -594,14 +634,17 @@ async function waitUntilSshReady() {
   const deadline = Date.now() + 20 * 60_000;
   let lastError = 'not started';
   while (Date.now() < deadline) {
-    const result = trySshControl('status');
+    const result = trySshControl('status', deadline);
     if (result.status === 0) {
       process.stdout.write(result.stdout);
       console.log('NVDA SSH control ready at 127.0.0.1:2224.');
       return;
     }
     lastError = (result.stderr || result.error?.message || `exit ${result.status}`).trim();
-    await new Promise((resolvePromise) => setTimeout(resolvePromise, 3_000));
+    const remaining = deadline - Date.now();
+    if (remaining > 0) {
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, Math.min(3_000, remaining)));
+    }
   }
   throw new Error(`NVDA SSH control did not become ready in 20 minutes: ${lastError}`);
 }

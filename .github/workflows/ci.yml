@@ -29,6 +29,18 @@ jobs:
       - run: npm test
       - run: npm run pack:check
 
+  windows-ssh-configuration:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Verify installed OpenSSH reconfiguration without online servicing
+        shell: powershell
+        run: ./oracle/windows-nvda/tests/test_configure_ssh.ps1
+      - name: Verify status heartbeat after process and session diagnostics
+        shell: powershell
+        run: ./oracle/windows-nvda/tests/test_ssh_dispatch_status.ps1
+
   hoovda-image:
     runs-on: ubuntu-latest
     needs: package

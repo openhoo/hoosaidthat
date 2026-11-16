@@ -93,6 +93,37 @@ function Set-StrictSshFileAcl([string]$Path, [string]$OwnerSidValue) {
     }
 }
 
+function Get-InstalledOpenSshRoot {
+    $services = @(Get-CimInstance -ClassName Win32_Service -Filter "Name='sshd'" -ErrorAction Stop)
+    if ($services.Count -ne 1) { throw 'Installed OpenSSH service missing or ambiguous' }
+
+    # Den registrierten Dienstpfad nur als einzelnen literalen Dateipfad lesen.
+    # Unquotierte Pfade mit Leerzeichen sind als Windows-Dienstpfad mehrdeutig.
+    $servicePath = [string]$services[0].PathName
+    $match = [regex]::Match($servicePath, '\A"(?<executable>[A-Za-z]:\\[^"\x00-\x1F]+)"\z')
+    if (-not $match.Success) {
+        $match = [regex]::Match($servicePath, '\A(?<executable>[A-Za-z]:\\[^\s"\x00-\x1F]+)\z')
+    }
+    if (-not $match.Success) { throw 'Installed OpenSSH service path invalid' }
+    $executable = $match.Groups['executable'].Value
+    if ($executable -match '[<>|?*]' -or $executable.IndexOf(':', 2) -ge 0) {
+        throw 'Installed OpenSSH service path invalid'
+    }
+    try { $canonical = [IO.Path]::GetFullPath($executable) }
+    catch { throw 'Installed OpenSSH service path invalid' }
+    if (-not [string]::Equals($executable, $canonical, [StringComparison]::OrdinalIgnoreCase) -or
+        -not [string]::Equals([IO.Path]::GetFileName($canonical), 'sshd.exe', [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Installed OpenSSH service path invalid'
+    }
+    $root = [IO.Path]::GetDirectoryName($canonical)
+    $keygen = Join-Path $root 'ssh-keygen.exe'
+    if (-not (Test-Path -LiteralPath $canonical -PathType Leaf) -or
+        -not (Test-Path -LiteralPath $keygen -PathType Leaf)) {
+        throw 'Installed OpenSSH service binaries unavailable'
+    }
+    return $root
+}
+
 try {
     [System.IO.Directory]::CreateDirectory($BootstrapRoot) | Out-Null
     Publish-Status 'running' 'validate-input'
@@ -100,15 +131,19 @@ try {
     $publicKey = Get-ValidatedPublicKey
 
     Publish-Status 'running' 'install-openssh'
-    $capabilityName = 'OpenSSH.Server~~~~0.0.1.0'
-    $capability = Get-WindowsCapability -Online -Name $capabilityName
-    if ($capability.State -ne 'Installed') {
-        Add-WindowsCapability -Online -Name $capabilityName | Out-Null
-        $capability = Get-WindowsCapability -Online -Name $capabilityName
+    if ($DeferServiceRestart) {
+        $openSshRoot = Get-InstalledOpenSshRoot
     }
-    if ($capability.State -ne 'Installed') { throw 'Windows inbox OpenSSH capability installation incomplete' }
-
-    $openSshRoot = 'C:\Windows\System32\OpenSSH'
+    else {
+        $capabilityName = 'OpenSSH.Server~~~~0.0.1.0'
+        $capability = Get-WindowsCapability -Online -Name $capabilityName
+        if ($capability.State -ne 'Installed') {
+            Add-WindowsCapability -Online -Name $capabilityName | Out-Null
+            $capability = Get-WindowsCapability -Online -Name $capabilityName
+        }
+        if ($capability.State -ne 'Installed') { throw 'Windows inbox OpenSSH capability installation incomplete' }
+        $openSshRoot = 'C:\Windows\System32\OpenSSH'
+    }
     $sshd = Join-Path $openSshRoot 'sshd.exe'
     $sshKeygen = Join-Path $openSshRoot 'ssh-keygen.exe'
     if (-not (Test-Path -LiteralPath $sshd -PathType Leaf) -or

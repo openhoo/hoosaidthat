@@ -216,6 +216,8 @@ namespace HooSaidThat {
 function Get-RuntimeStatus {
     $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
     $taskInfo = Get-ScheduledTaskInfo -TaskName $TaskName -ErrorAction Stop
+    $processes = Get-ProcessSnapshot -IncludeDetails
+    $sessionDiagnostics = Get-SessionDiagnostics
     $runtime = $null
     if (Test-Path -LiteralPath $RuntimeStatusPath -PathType Leaf) {
         try {
@@ -226,7 +228,6 @@ function Get-RuntimeStatus {
         }
         catch { $runtime = [ordered]@{ invalid = $true } }
     }
-    $processes = Get-ProcessSnapshot -IncludeDetails
     $runtimeFresh = $false
     if ($runtime -and $runtime.generatedUtc) {
         try {
@@ -254,7 +255,7 @@ function Get-RuntimeStatus {
             lastTaskResult = [int64]$taskInfo.LastTaskResult
         }
         processes = $processes
-        sessionDiagnostics = Get-SessionDiagnostics
+        sessionDiagnostics = $sessionDiagnostics
         runtime = $runtime
     }
 }
