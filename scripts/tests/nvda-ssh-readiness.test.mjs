@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, resolve } from 'node:path';
@@ -7,9 +8,18 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import test from 'node:test';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
+const payloadFiles = [
+  'bootstrap.html',
+  'configure-ssh.ps1',
+  'nvdaConfig/nvda.ini',
+  'nvdaConfig/scratchpad/globalPlugins/hoosaidthatControl.py',
+  'runtime-startup.cmd',
+  'ssh-dispatch.ps1',
+  'start-runtime.ps1',
+];
 
-// Invoke the installed CLI. All process, HTTP, clock and sleep effects are local fakes;
-// the implementation under test is copied from the actual distribution script.
+// Die installierte CLI und ihre echten Payloaddateien stammen aus der Distribution.
+// Prozesse, HTTP, Uhr und Pausen werden ausschließlich lokal simuliert.
 function invoke(command, scenario, acceleration = 'tcg') {
   const temporary = mkdtempSync(resolve(tmpdir(), 'hoosaidthat-ssh-readiness-'));
   try {
@@ -21,6 +31,22 @@ function invoke(command, scenario, acceleration = 'tcg') {
     }
     cpSync(resolve(root, 'scripts/nvda-windows.mjs'), resolve(packageRoot, 'scripts/nvda-windows.mjs'));
     cpSync(resolve(root, 'oracle/parity/coverage.json'), resolve(packageRoot, 'oracle/parity/coverage.json'));
+    const generationHash = createHash('sha256');
+    const payloadEntries = payloadFiles.map(name => {
+      const source = resolve(root, 'oracle/windows-nvda/oem/hoosaidthat', name);
+      const destination = resolve(packageRoot, 'oracle/windows-nvda/oem/hoosaidthat', name);
+      mkdirSync(dirname(destination), { recursive: true });
+      cpSync(source, destination);
+      const data = readFileSync(source);
+      const length = Buffer.alloc(8);
+      length.writeBigUInt64BE(BigInt(data.length));
+      generationHash.update(Buffer.from(name, 'utf8'));
+      generationHash.update(Buffer.from([0]));
+      generationHash.update(length);
+      generationHash.update(data);
+      return { name, bytes: data.length, sha256: createHash('sha256').update(data).digest('hex') };
+    });
+    const payloadGeneration = generationHash.digest('hex');
     writeFileSync(resolve(packageRoot, 'node_modules/@playwright/test/package.json'), JSON.stringify({ exports: { './cli': './cli.cjs' } }));
     writeFileSync(resolve(packageRoot, 'node_modules/@playwright/test/cli.cjs'), '');
     for (const path of ['shared/secrets', 'shared/bootstrap', 'ssh']) {
@@ -34,7 +60,7 @@ function invoke(command, scenario, acceleration = 'tcg') {
     writeFileSync(preload, `
       import assert from 'node:assert/strict';
       import childProcess from 'node:child_process';
-      import { writeFileSync } from 'node:fs';
+      import { readFileSync, writeFileSync } from 'node:fs';
       import { syncBuiltinESMExports } from 'node:module';
       const scenario = ${JSON.stringify(scenario)};
       const calls = [];
@@ -67,6 +93,18 @@ function invoke(command, scenario, acceleration = 'tcg') {
         const connect = Number(args.find(value => value.startsWith('ConnectTimeout=')).split('=')[1]);
         calls.push({ command, timeout: options.timeout, connect, started: now });
         const payload = { schema: 'hoosaidthat.nvda-ssh-control', version: 1, command, status: 'ready', ready: true, runtimeFresh: true, runtime: { locale } };
+        if (command.startsWith('update ')) {
+          const expectedGeneration = ${JSON.stringify(payloadGeneration)};
+          assert.equal(command, 'update ' + expectedGeneration);
+          const staged = ${JSON.stringify(resolve(runtimeRoot, 'shared/control/payloads'))} + '/' + expectedGeneration;
+          const manifest = JSON.parse(readFileSync(staged + '/payload-manifest.json', 'utf8'));
+          assert.deepEqual(manifest, { payloadGeneration: expectedGeneration, files: ${JSON.stringify(payloadEntries)} });
+          for (const entry of manifest.files) {
+            assert.deepEqual(readFileSync(staged + '/' + entry.name),
+              readFileSync(${JSON.stringify(resolve(packageRoot, 'oracle/windows-nvda/oem/hoosaidthat'))} + '/' + entry.name));
+          }
+          Object.assign(payload, { command: 'update', payloadGeneration: expectedGeneration, files: manifest.files.length });
+        }
         if (scenario === 'invalid-json') return { status: 0, stdout: '{broken', stderr: '' };
         if (scenario === 'wrong-command') return { status: 0, stdout: JSON.stringify({ ...payload, command: 'other' }), stderr: '' };
         if (scenario === 'process-timeout') {
@@ -74,6 +112,7 @@ function invoke(command, scenario, acceleration = 'tcg') {
           return { status: null, stdout: '', stderr: '', error: Object.assign(new Error('spawnSync ssh ETIMEDOUT'), { code: 'ETIMEDOUT' }) };
         }
         let handshake = scenario === 'slow-banner' ? 30_000 : 100;
+        if (scenario === 'slow-sync-banner') handshake = 20_000;
         let dispatch = scenario === 'slow-status' ? 240_000 : 100;
         if (scenario === 'slow-locale' && command.startsWith('locale-')) dispatch = 240_000;
         if (scenario === 'unavailable') handshake = Infinity;
@@ -115,6 +154,31 @@ function invoke(command, scenario, acceleration = 'tcg') {
   }
 }
 
+test('TCG-Synchronisierung wartet auf einen SSH-Banner über fünf Sekunden innerhalb ihrer bestehenden Budgets', () => {
+  const result = invoke(['sync'], 'slow-sync-banner');
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(result.calls.map(call => call.command.startsWith('update ') ? 'update' : call.command),
+    ['update', 'reconfigure-ssh', 'status']);
+  assert.deepEqual(result.calls.map(({ timeout, connect }) => ({ timeout, connect })), [
+    { timeout: 30_000, connect: 30 },
+    { timeout: 120_000, connect: 120 },
+    { timeout: 900_000, connect: 120 },
+  ]);
+  assert.equal(result.fetches, 0);
+});
+
+test('TCG-Synchronisierung beendet einen lokalen SSH-Prozess-Timeout nach 30 Sekunden ohne Folgeaufruf', () => {
+  const result = invoke(['sync'], 'process-timeout');
+  assert.equal(result.status, 1);
+  assert.equal(result.calls.length, 1, result.stderr);
+  assert.match(result.calls[0].command, /^update [a-f0-9]{64}$/);
+  assert.equal(result.calls[0].timeout, 30_000);
+  assert.equal(result.calls[0].connect, 30);
+  assert.equal(result.now, 30_000);
+  assert.match(result.stderr, /remote process may still be running/i);
+  assert.match(result.stderr, /refusing overlapping retries/i);
+});
+
 test('TCG-Status wartet auf einen langsamen SSH-Banner', () => {
   const result = invoke(['wait-ssh'], 'slow-banner');
   assert.equal(result.status, 0, result.stderr);
@@ -134,7 +198,7 @@ for (const command of [['wait-ssh'], ['wait'], ['control', 'status'], ['status']
   });
 }
 
-for (const command of [['wait-ssh'], ['wait'], ['control', 'status'], ...['start', 'stop', 'restart', 'locale-en-US', 'locale-de-DE'].map(value => ['control', value])]) {
+for (const command of [['wait-ssh'], ['wait'], ['control', 'status'], ...['start', 'stop', 'restart', 'locale-en-US', 'locale-de-DE', 'logs', 'time-sync', 'reconfigure-ssh', 'shutdown', 'reboot'].map(value => ['control', value])]) {
   test(`${command.join(' ')} startet nach lokalem SSH-Prozess-Timeout keine überlappende Abfrage`, () => {
     const result = invoke(command, 'process-timeout');
     assert.equal(result.status, 1);
@@ -198,15 +262,28 @@ for (const acceleration of ['kvm', 'auto', null]) {
       assert.equal(result.calls[0].connect, 5);
     });
   }
+  test(`${acceleration || 'ohne Modus'} behält alle bestehenden SSH-Budgets bei der Synchronisierung`, () => {
+    const result = invoke(['sync'], 'ready', acceleration);
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(result.calls.map(call => call.command.startsWith('update ') ? 'update' : call.command),
+      ['update', 'reconfigure-ssh', 'status']);
+    assert.deepEqual(result.calls.map(({ timeout, connect }) => ({ timeout, connect })), [
+      { timeout: 30_000, connect: 5 },
+      { timeout: 120_000, connect: 5 },
+      { timeout: 15_000, connect: 5 },
+    ]);
+    assert.equal(result.fetches, 0);
+  });
 }
 
-for (const [remoteCommand, timeout] of [['logs', 30_000], ['time-sync', 30_000], ['reconfigure-ssh', 120_000]]) {
-  test(`TCG verändert das bisherige Budget für ${remoteCommand} ohne Runtime-Statusantwort nicht`, () => {
+for (const [remoteCommand, timeout, connect] of [['logs', 30_000, 30], ['time-sync', 30_000, 30], ['reconfigure-ssh', 120_000, 120], ['reboot', 30_000, 30]]) {
+  test(`TCG begrenzt den SSH-Verbindungsaufbau von ${remoteCommand} auf sein bestehendes Prozessbudget`, () => {
     const result = invoke(['control', remoteCommand], 'ready');
     assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.calls.length, remoteCommand === 'reconfigure-ssh' ? 2 : 1);
     assert.equal(result.calls[0].command, remoteCommand);
     assert.equal(result.calls[0].timeout, timeout);
-    assert.equal(result.calls[0].connect, 5);
+    assert.equal(result.calls[0].connect, connect);
   });
 }
 
