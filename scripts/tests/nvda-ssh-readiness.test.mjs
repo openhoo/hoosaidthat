@@ -114,6 +114,14 @@ function invoke(command, scenario, acceleration = 'tcg') {
         let handshake = scenario === 'slow-banner' ? 30_000 : 100;
         if (scenario === 'slow-sync-banner') handshake = 20_000;
         let dispatch = scenario === 'slow-status' ? 240_000 : 100;
+        if (scenario === 'slow-sync-update' && command.startsWith('update ')) {
+          handshake = 20_000;
+          dispatch = 25_000;
+        }
+        if (scenario === 'slow-sync-update-timeout' && command.startsWith('update ')) {
+          handshake = 20_000;
+          dispatch = 100_001;
+        }
         if (scenario === 'slow-locale' && command.startsWith('locale-')) dispatch = 240_000;
         if (scenario === 'unavailable') handshake = Infinity;
         if (handshake > connect * 1000) {
@@ -154,29 +162,58 @@ function invoke(command, scenario, acceleration = 'tcg') {
   }
 }
 
-test('TCG-Synchronisierung wartet auf einen SSH-Banner über fünf Sekunden innerhalb ihrer bestehenden Budgets', () => {
+test('TCG-Synchronisierung bestätigt sieben reale Payloads nach insgesamt 45 Sekunden SSH-Handschlag und Update-Dispatch', t => {
+  const result = invoke(['sync'], 'slow-sync-update');
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(result.calls.map(call => call.command.startsWith('update ') ? 'update' : call.command),
+    ['update', 'reconfigure-ssh', 'status']);
+  assert.equal(result.calls[0].timeout, 120_000);
+  assert.equal(result.calls[0].connect, 120);
+  const updateElapsedMs = result.calls[1].started - result.calls[0].started;
+  assert.equal(updateElapsedMs, 45_000);
+  const acknowledgements = result.stdout.split(/\r?\n/).flatMap(line => {
+    try { return [JSON.parse(line)]; } catch { return []; }
+  }).filter(value => value.command === 'update');
+  assert.equal(acknowledgements.length, 1);
+  const acknowledgement = acknowledgements[0];
+  assert.equal(acknowledgement.schema, 'hoosaidthat.nvda-ssh-control');
+  assert.equal(acknowledgement.version, 1);
+  assert.equal(acknowledgement.status, 'ready');
+  assert.equal(acknowledgement.files, 7);
+  assert.equal(acknowledgement.payloadGeneration, result.calls[0].command.slice('update '.length));
+  assert.equal(result.fetches, 0);
+  t.diagnostic(JSON.stringify({ fixture: 'lokale CLI mit simulierter SSH-Zeit',
+    updateElapsedMs, calls: result.calls, acknowledgement, fetches: result.fetches }));
+});
+
+test('TCG-Synchronisierung wartet auf einen SSH-Banner über fünf Sekunden innerhalb ihrer begrenzten Budgets', () => {
   const result = invoke(['sync'], 'slow-sync-banner');
   assert.equal(result.status, 0, result.stderr);
   assert.deepEqual(result.calls.map(call => call.command.startsWith('update ') ? 'update' : call.command),
     ['update', 'reconfigure-ssh', 'status']);
   assert.deepEqual(result.calls.map(({ timeout, connect }) => ({ timeout, connect })), [
-    { timeout: 30_000, connect: 30 },
+    { timeout: 120_000, connect: 120 },
     { timeout: 120_000, connect: 120 },
     { timeout: 900_000, connect: 120 },
   ]);
   assert.equal(result.fetches, 0);
 });
 
-test('TCG-Synchronisierung beendet einen lokalen SSH-Prozess-Timeout nach 30 Sekunden ohne Folgeaufruf', () => {
-  const result = invoke(['sync'], 'process-timeout');
+test('TCG-Synchronisierung beendet einen langsamen Update-Aufruf nach 120 Sekunden ohne Folgeaufruf', t => {
+  const result = invoke(['sync'], 'slow-sync-update-timeout');
   assert.equal(result.status, 1);
   assert.equal(result.calls.length, 1, result.stderr);
   assert.match(result.calls[0].command, /^update [a-f0-9]{64}$/);
-  assert.equal(result.calls[0].timeout, 30_000);
-  assert.equal(result.calls[0].connect, 30);
-  assert.equal(result.now, 30_000);
+  assert.equal(result.calls[0].timeout, 120_000);
+  assert.equal(result.calls[0].connect, 120);
+  assert.equal(result.now, 120_000);
+  assert.equal(result.fetches, 0);
+  assert.equal(result.stdout, '');
+  assert.match(result.stderr, /timed out after 120000 ms/);
   assert.match(result.stderr, /remote process may still be running/i);
   assert.match(result.stderr, /refusing overlapping retries/i);
+  t.diagnostic(JSON.stringify({ fixture: 'lokale CLI mit simulierter SSH-Zeit',
+    elapsedMs: result.now, calls: result.calls, acknowledgement: false, fetches: result.fetches }));
 });
 
 test('TCG-Status wartet auf einen langsamen SSH-Banner', () => {
@@ -273,6 +310,21 @@ for (const acceleration of ['kvm', 'auto', null]) {
       { timeout: 15_000, connect: 5 },
     ]);
     assert.equal(result.fetches, 0);
+  });
+  test(`${acceleration || 'ohne Modus'} beendet den Update-Aufruf weiterhin nach 30 Sekunden ohne Folgeaufruf`, t => {
+    const result = invoke(['sync'], 'process-timeout', acceleration);
+    assert.equal(result.status, 1);
+    assert.equal(result.calls.length, 1, result.stderr);
+    assert.match(result.calls[0].command, /^update [a-f0-9]{64}$/);
+    assert.equal(result.calls[0].timeout, 30_000);
+    assert.equal(result.calls[0].connect, 5);
+    assert.equal(result.now, 30_000);
+    assert.equal(result.stdout, '');
+    assert.equal(result.fetches, 0);
+    assert.match(result.stderr, /timed out after 30000 ms/);
+    assert.match(result.stderr, /refusing overlapping retries/i);
+    t.diagnostic(JSON.stringify({ fixture: 'lokale CLI mit simulierter SSH-Zeit',
+      acceleration, elapsedMs: result.now, calls: result.calls, acknowledgement: false }));
   });
 }
 

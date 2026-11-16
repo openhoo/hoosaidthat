@@ -516,7 +516,11 @@ function runSshControl(remoteCommand) {
 
 function runSshCommand(remoteCommand, expectedCommand) {
   pinGuestHostKey();
-  const timeout = sshTimeoutMs(remoteCommand, remoteCommand === 'reconfigure-ssh' ? 120_000 : 30_000);
+  const defaultTimeout = remoteCommand === 'reconfigure-ssh' ||
+    (expectedCommand === 'update' && process.env.HST_NVDA_ACCELERATION === 'tcg')
+    ? 120_000
+    : 30_000;
+  const timeout = sshTimeoutMs(remoteCommand, defaultTimeout);
   const result = spawnSync('ssh', sshArguments(remoteCommand, timeout), {
     encoding: 'utf8',
     timeout,
