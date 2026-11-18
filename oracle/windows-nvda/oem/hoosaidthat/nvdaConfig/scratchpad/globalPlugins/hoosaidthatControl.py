@@ -754,6 +754,12 @@ def configure_session(locale, keyboard_layout):
             )
         config.conf["keyboard"]["keyboardLayout"] = keyboard_layout
         config.conf["keyboard"]["NVDAModifierKeys"] = 7
+        # A click or live region in the previous test can leave NVDA displaying
+        # its timed message instead of the new document. Restore the main
+        # buffer without redrawing the previous test's content. New focus and
+        # navigation continue to produce NVDA's own pre_writeCells events.
+        if braille.handler.buffer is braille.handler.messageBuffer:
+            braille.handler._dismissMessage(shouldUpdate=False)
 
     call_on_main(apply_configuration)
     with STATE.lock:
