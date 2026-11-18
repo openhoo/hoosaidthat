@@ -332,6 +332,16 @@ actionsTest(
         `${action} completed evidence`,
       ).toBe(true);
       assertSemanticOutput(action, observation.speech, observation.braille);
+      if (action === "braillePreviousLine" || action === "brailleNextLine") {
+        const target = action === "braillePreviousLine" ? "Alpha beta" : "Omega last";
+        expect(observation.brailleEvents.map(frame => frame.text.trim()), action).toContain(target);
+        await expect.poll(() => page.evaluate(() => {
+          const selection = getSelection();
+          const editor = document.getElementById("brailleLines");
+          if (editor !== document.activeElement || !selection?.isCollapsed || !editor?.contains(selection.anchorNode)) return null;
+          return [selection.anchorNode?.textContent, selection.anchorOffset];
+        }), { message: `${action} must move the editable caret to the start of the target line` }).toEqual([target, 0]);
+      }
       if (action === "previousFocusable") {
         await expect(
           page.getByRole("button", { name: "Details action" }),
@@ -745,12 +755,38 @@ async function prepareAction(
   } else if (action === "stopSpeech" || action === "pauseSpeech") {
     await screenReader.documentStart();
     await screenReader.act("sayAll");
+  } else if (action === "braillePreviousLine" || action === "brailleNextLine") {
+    // Chromium on Windows can expose all textarea newlines as one NVDA
+    // reading unit. Distinct editable blocks give the native commands a
+    // previous and a next line, independent of a cursor-blink redraw.
+    await page.locator("body").evaluate(body => {
+      const editor = document.createElement("div");
+      editor.id = "brailleLines";
+      editor.contentEditable = "true";
+      editor.setAttribute("role", "textbox");
+      editor.setAttribute("aria-multiline", "true");
+      editor.setAttribute("aria-label", "Braille line navigation");
+      for (const text of ["Alpha beta", "Gamma delta", "Omega last"]) {
+        const line = document.createElement("div");
+        line.textContent = text;
+        editor.append(line);
+      }
+      body.append(editor);
+    });
+    await screenReader.observe("Focus middle braille line", async () => {
+      await page.locator("#brailleLines").evaluate(editor => {
+        (editor as HTMLElement).focus();
+        getSelection()!.collapse(editor.children[1]!.firstChild, 4);
+      });
+    }, "focus");
+    expect(await page.evaluate(() => {
+      const selection = getSelection();
+      return [document.activeElement?.id, selection?.anchorNode?.textContent, selection?.anchorOffset];
+    })).toEqual(["brailleLines", "Gamma delta", 4]);
   } else if (
     [
       "braillePanBack",
       "braillePanForward",
-      "braillePreviousLine",
-      "brailleNextLine",
       "brailleRoute",
       "brailleToggleTether",
       "brailleReportFormatting",
@@ -1245,8 +1281,8 @@ const semanticExpectations = new Map<ScreenReaderAction, RegExp>([
   ["cycleSpeechMode", /Speech mode|Sprachmodus/iu],
   ["braillePanBack", /Review text|Alpha beta|Gamma delta/iu],
   ["braillePanForward", /Review text|Alpha beta|Gamma delta|Omega last/iu],
-  ["braillePreviousLine", /Alpha beta|Gamma delta|Review text/iu],
-  ["brailleNextLine", /Gamma delta|Omega last|Review text/iu],
+  ["braillePreviousLine", /Alpha beta/u],
+  ["brailleNextLine", /Omega last/u],
   ["brailleRoute", /Review text|Alpha beta|Gamma delta|G/u],
   ["brailleToggleTether", /Braille tethered|Braille-Darstellung gekoppelt/iu],
   ["brailleReportFormatting", /(?:font|Schrift|bold|Fett|24)/iu],
