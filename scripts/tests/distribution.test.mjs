@@ -85,7 +85,7 @@ test('published Windows parity uses built package and forces the NVDA adapter', 
         if (program === 'ssh') {
           const command = args.at(-1);
           if (command.startsWith('locale-')) locale = command.slice(7);
-          return { status: 0, stdout: JSON.stringify({ schema: 'hoosaidthat.nvda-ssh-control', version: 1, command, status: 'ready', ready: true, runtimeFresh: true, runtime: { locale } }), stderr: '' };
+          return { status: 0, stdout: JSON.stringify({ schema: 'hoosaidthat.nvda-ssh-control', version: 1, command, status: 'ready', ready: true, runtimeFresh: true, runtime: { locale, chromePid: 33, nvdaPid: locale === 'en-US' ? 44 : 55 } }), stderr: '' };
         }
         assert.equal(program, process.execPath);
         assert.ok(args[args.indexOf('--config') + 1].endsWith('/dist/oracle/parity/playwright.config.js'));

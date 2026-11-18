@@ -245,6 +245,7 @@ function Get-RuntimeStatus {
         catch { $runtimeFresh = $false }
     }
     $effectiveReady = $runtime -and $runtime.ready -eq $true -and $runtimeFresh -and
+        $null -ne $runtime.PSObject.Properties['nvdaPid'] -and $null -ne $runtime.PSObject.Properties['chromePid'] -and
         $processes.nvdaPids -contains $runtime.nvdaPid -and $processes.chromePids -contains $runtime.chromePid
     return [ordered]@{
         schema = 'hoosaidthat.nvda-ssh-control'
