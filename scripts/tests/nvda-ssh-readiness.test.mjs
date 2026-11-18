@@ -128,6 +128,13 @@ function invoke(command, scenario, acceleration = 'tcg') {
         const connect = Number(args.find(value => value.startsWith('ConnectTimeout=')).split('=')[1]);
         calls.push({ command, timeout: options.timeout, connect, started: now });
         const payload = { schema: 'hoosaidthat.nvda-ssh-control', version: 1, command, status: 'ready', ready: true, runtimeFresh: true, runtime: { locale } };
+        if (scenario.startsWith('console-') && now < (scenario === 'console-locked' ? Infinity : 150_000)) {
+          const account = scenario === 'console-occupied' ? 'ORACLE\\\\other' : null;
+          const lockState = scenario === 'console-unknown' ? 'unknown' : 'locked';
+          Object.assign(payload, { ready: false, runtimeFresh: false, task: { state: 'Ready' },
+            processes: { nvdaPids: [], chromePids: [] }, sessionDiagnostics: { error: null,
+              sessions: [{ sessionId: 1, station: 'Console', protocol: 'console', connectionState: 'connected', lockState, account }] } });
+        }
         if (locale === 'de-DE' && scenario === 'locale-stale') payload.runtimeFresh = false;
         if (locale === 'de-DE' && scenario === 'locale-mismatch') payload.runtime.locale = 'en-US';
         if (command.startsWith('update ')) {
@@ -278,6 +285,9 @@ function invoke(command, scenario, acceleration = 'tcg') {
       }
       globalThis.fetch = async (url, options) => {
         fetches += 1;
+        if (scenario.startsWith('console-') && now < (scenario === 'console-locked' ? Infinity : scenario === 'console-recovers' ? 68_000 : 150_000)) {
+          throw new Error('ECONNREFUSED');
+        }
         if (scenario.startsWith('http-')) return simulatedHttp(url, options);
         clearTimeout(signalTimers.get(options?.signal));
         if (scenario === 'fetch-exhausts-deadline' && fetches === 1) now += 45 * 60_000;
@@ -289,6 +299,7 @@ function invoke(command, scenario, acceleration = 'tcg') {
         httpRequests, httpOverlaps, httpActive, httpMaxActive })));
     `);
     const env = { ...process.env, HST_NVDA_RUNTIME_ROOT: runtimeRoot };
+    if (scenario.startsWith('console-')) env.HST_NVDA_QUALIFICATION = '1';
     if (acceleration === null) delete env.HST_NVDA_ACCELERATION;
     else env.HST_NVDA_ACCELERATION = acceleration;
     const result = spawnSync(process.execPath, ['--import', pathToFileURL(preload).href, resolve(packageRoot, 'scripts/nvda-windows.mjs'), ...command], {
@@ -303,6 +314,25 @@ function invoke(command, scenario, acceleration = 'tcg') {
   } finally {
     rmSync(temporary, { recursive: true, force: true });
   }
+}
+
+test('Retained KVM guest reports a persistently locked sign-in screen before the boot deadline', () => {
+  const r = invoke(['wait'], 'console-locked', 'kvm');
+  assert.equal(r.status, 78, r.stderr);
+  assert.match(r.stderr, /sign in to the HstOracle guest/i);
+  assert.equal(r.playwrightCalls, 0);
+  assert.deepEqual(r.calls.map(c => c.command), ['status', 'status', 'status']);
+  assert.ok(r.calls[0].started >= 45_000 && r.now < 150_000, JSON.stringify(r.calls));
+});
+
+for (const scenario of ['console-recovers', 'console-unknown', 'console-occupied']) {
+  test(`Retained guest can finish boot with ${scenario}`, () => {
+    const r = invoke(['wait'], scenario, 'kvm');
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /oracle ready/);
+    assert.ok(r.calls.length > 1);
+    assert.ok(r.calls.every(c => c.command === 'status'));
+  });
 }
 
 test('TCG-Synchronisierung bestätigt sieben reale Payloads nach insgesamt 45 Sekunden SSH-Handschlag und Update-Dispatch', t => {

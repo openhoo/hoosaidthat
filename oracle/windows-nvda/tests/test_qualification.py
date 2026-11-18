@@ -58,6 +58,27 @@ class Qualification(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'sequence'):
             q.progress(self.root, None)
 
+    def test_locked_guest_records_sign_in_and_shuts_down_without_a_test(self):
+        owner = {'container': self.c['container']}
+        calls = []
+        def cli(args, **kwargs):
+            calls.append(args[2:])
+            return q.subprocess.CompletedProcess(args, 78 if args[2:] == ['wait'] else 0)
+        with (patch.object(q, 'source', return_value={'hoovda': 'c' * 40}),
+              patch.object(q.subprocess, 'check_output', return_value=json.dumps(
+                  {'pinned': 'c' * 40, 'upstream': 'd' * 40, 'tree': 'e' * 40})),
+              patch.object(q, 'identity', return_value=(owner, 'exited', 0)),
+              patch.object(q, 'checked') as engine, patch.object(q.subprocess, 'run', cli),
+              patch.object(q, 'poweroff', return_value='guest SSH') as shutdown,
+              contextlib.redirect_stdout(io.StringIO())):
+            self.assertEqual(q.run(self.c, 'locked', None), 1)
+        self.assertEqual(calls, [['doctor'], ['wait']])
+        engine.assert_called_once_with(['podman', 'start', owner['container']])
+        shutdown.assert_called_once()
+        r = q.status(self.c, 'locked')
+        self.assertEqual((r['failureCode'], r['failurePhase'], r['testResult'], r['passedBlocks'], r['shutdown']),
+                         ('guest-sign-in-required', 'readiness', 'not run', 0, 'confirmed'))
+
     def test_recovery_does_not_interrupt_a_live_or_newer_owner(self):
         root = self.root/'qualification'
         q.write_json(root/'current.json', {'attempt': 'newer'})

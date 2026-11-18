@@ -201,7 +201,7 @@ switch (command) {
 }
 } catch (error) {
   console.error(error instanceof Error ? error.message : String(error));
-  process.exitCode = 1;
+  process.exitCode = error?.code === 'HST_GUEST_SIGN_IN' ? 78 : 1;
 }
 
 async function doctor() {
@@ -335,6 +335,23 @@ function compose(arguments_) {
   );
 }
 
+// A locked session alone is normal during boot. Only diagnose an unoccupied,
+// locked console when the prepared interactive task and both apps are idle.
+function lockedSignInSession(status) {
+  if (status?.ready !== false || status.runtimeFresh !== false || status.task?.state !== 'Ready') return null;
+  const diagnostics = status.sessionDiagnostics;
+  if (diagnostics?.error !== null || !Array.isArray(diagnostics.sessions)) return null;
+  const apps = [status.processes?.nvdaPids, status.processes?.chromePids];
+  if (!apps.every(pids => Array.isArray(pids) && pids.length === 0)) return null;
+  const desktops = diagnostics.sessions.filter(s => Number.isInteger(s?.sessionId) && s.sessionId > 0 &&
+    ['active', 'connected'].includes(s.connectionState));
+  if (desktops.length !== 1) return null;
+  const [session] = desktops;
+  const consoleLocked = session.protocol === 'console' && typeof session.station === 'string' &&
+    session.station.toLowerCase() === 'console' && session.lockState === 'locked';
+  return consoleLocked && (session.account === null || session.account === '') ? session.sessionId : null;
+}
+
 async function waitUntilReady(expectedLocale) {
   requireInitialized();
   const token = readControlToken();
@@ -343,6 +360,10 @@ async function waitUntilReady(expectedLocale) {
   let lastError = 'not started';
   let oracleId = process.env.HST_NVDA_CONTAINER_ID;
   let sessionResets = 0;
+  const checkSignIn = process.env.HST_NVDA_QUALIFICATION === '1' && process.env.HST_NVDA_ACCELERATION === 'kvm';
+  let nextSessionProbe = Date.now() + 45_000;
+  let lockedSession = null;
+  let lockedCount = 0;
   while (Date.now() < deadline) {
     oracleId = requireRunningOracle('podman', deadline, oracleId).id;
     const statusFiles = [
@@ -370,6 +391,7 @@ async function waitUntilReady(expectedLocale) {
       lastPhases = phaseSummary;
       console.log(phaseSummary);
     }
+    let endpointsReady = false;
     try {
       const [health, version] = await probeHttpReadiness(token, deadline);
       if (
@@ -379,6 +401,9 @@ async function waitUntilReady(expectedLocale) {
         health.ready === true &&
         typeof version.webSocketDebuggerUrl === 'string'
       ) {
+        endpointsReady = true;
+        lockedSession = null;
+        lockedCount = 0;
         const ssh = trySshControl('status', deadline);
         if (ssh.status === 255 && /connection reset|broken pipe/i.test(ssh.stderr ?? '')) {
           if (++sessionResets >= 3) {
@@ -401,6 +426,16 @@ async function waitUntilReady(expectedLocale) {
       if (error?.code === 'HST_SSH_TIMEOUT' || error?.code === 'HST_SSH_RESET') throw error;
       sessionResets = 0;
       lastError = error instanceof Error ? error.message : String(error);
+    }
+    if (checkSignIn && !endpointsReady && Date.now() >= nextSessionProbe && Date.now() < deadline) {
+      const ssh = trySshControl('status', deadline);
+      nextSessionProbe = Date.now() + 30_000;
+      const session = ssh.status === 0 ? lockedSignInSession(ssh.payload) : null;
+      lockedCount = session === null ? 0 : session === lockedSession ? lockedCount + 1 : 1;
+      lockedSession = session;
+      if (lockedCount === 3) {
+        throw Object.assign(new Error('Windows is waiting at the locked console with no user signed in. Sign in to the HstOracle guest before qualification.'), { code: 'HST_GUEST_SIGN_IN' });
+      }
     }
     const remaining = deadline - Date.now();
     if (remaining > 0) {
