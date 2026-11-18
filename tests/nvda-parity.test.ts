@@ -131,7 +131,6 @@ test('Windows SSH control is key-only, pinned, forced, and allowlisted', () => {
   assert.match(host, /reconfigure-ssh/);
   assert.match(host, /locale-en-US/);
   assert.match(host, /locale-de-DE/);
-  assert.match(host, /\/run\/shm\/qemu\.pid/);
   assert.match(host, /writeBigUInt64BE/);
   assert.match(host, /readBoundedJsonResponse/);
   assert.match(host, /const parityActionShards = chunk\(parityActions, 24\)/);

@@ -1,0 +1,248 @@
+--- a/scripts/nvda-windows.mjs
++++ b/scripts/nvda-windows.mjs
+@@ -26,6 +26,8 @@
+ import { Worker } from 'node:worker_threads';
+ import { acquireOracleLease, assertOracleStorage, isOracleReady, resolveContainerEngine } from '../oracle/windows-nvda/host.mjs';
+ import { resolveWinhooRuntime } from '../oracle/windows-nvda/winhoo.mjs';
++
++import { readOracleContainer, readQemuState, requireRunningOracle } from '../oracle/windows-nvda/engine-state.mjs';
+
+ const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+ const invocationRoot = process.cwd();
+@@ -112,6 +114,8 @@
+ const command = process.argv[2] ?? 'status';
+ let releaseLease;
+ let managedStarted = false;
++let ownedContainerId;
++let cleanupDeferred;
+ let childCommand;
+ const managed = command === 'serve' || command === 'run';
+ const ownerGeneration = randomBytes(16).toString('hex');
+@@ -140,6 +144,14 @@
+   releaseLease = await acquireOracleLease();
+ }
+ switch (command) {
++  case 'preflight': {
++    const saved = tryReadBoundedFile(enginePath, 32)?.trim();
++    const engine = saved ?? process.env.HST_NVDA_ENGINE ?? 'auto';
++    if (!['docker', 'podman', 'auto'].includes(engine)) throw new Error('Invalid NVDA engine');
++    // A saved engine owns the retained disk. Never fall back to another daemon.
++    console.log(JSON.stringify(readOracleContainer(engine === 'auto' ? containerEngine() : engine)));
++    break;
++  }
+   case 'doctor':
+     await doctor();
+     break;
+@@ -168,6 +180,7 @@
+     progress(`Starting Windows with ${containerEngine()} and ${accelerationMode().toUpperCase()}`);
+     await startOwnerHeartbeat();
+     startContainer();
++    ownedContainerId = requireRunningOracle(containerEngine(), readyDeadline).id;
+     await bootstrapThroughGuestAgent();
+     progress('Waiting for Windows installation and key-only OpenSSH control');
+     await waitUntilSshReady();
+@@ -231,16 +244,21 @@
+     break;
+   default:
+     throw new Error(
+-      'usage: nvda-windows.mjs doctor|init|up|wait|status|control <command>|wait-ssh|sync|parity|parity-cell <locale> <layout>|run -- <command> [arguments]|down',
++      'usage: nvda-windows.mjs preflight|doctor|init|up|wait|status|control <command>|wait-ssh|sync|parity|parity-cell <locale> <layout>|run -- <command> [arguments]|down',
+     );
+ }
+ } catch (error) {
+-  if (managedStarted) progress(`Setup failed; shutting down Windows: ${error instanceof Error ? error.message : String(error)}`);
++  if (error?.code === 'HST_NVDA_ENGINE_UNKNOWN') cleanupDeferred = error.message;
+   console.error(error instanceof Error ? error.message : String(error));
+   if (!lifetime.signal.aborted || !process.exitCode) process.exitCode = 1;
+ } finally {
+   if (managedStarted) {
+     try {
++      // A changed or unreadable owner must not receive guest keys, stop or down.
++      if (cleanupDeferred || !ownedContainerId) {
++        throw new Error(cleanupDeferred || 'started container identity was not confirmed');
++      }
++      requireRunningOracle(containerEngine(), Infinity, ownedContainerId);
+       // A test console can veto a plain ACPI power-button event. Once guest
+       // SSH exists, request Windows' own timed shutdown first; its existing
+       // shutdown command closes the dedicated guest's test applications.
+@@ -256,10 +274,19 @@
+       }
+       // WinHoo budgets ten minutes for TCG shutdown and two minutes for KVM.
+       // Never use force removal on a Windows disk that may still be mounted.
+-      compose(['stop']);
+-      if (process.env.HST_NVDA_KEEP_CONTAINER !== '1') compose(['down']);
++      const beforeStop = readOracleContainer(containerEngine());
++      if (beforeStop.id !== ownedContainerId) throw new Error('owned container changed during shutdown');
++      if (beforeStop.state === 'running') compose(['stop']);
++      else if (!['exited', 'stopped'].includes(beforeStop.state)) throw new Error(`unexpected state: ${beforeStop.state}`);
++      if (process.env.HST_NVDA_KEEP_CONTAINER !== '1') {
++        const stopped = readOracleContainer(containerEngine());
++        if (stopped.id !== ownedContainerId || !['exited', 'stopped'].includes(stopped.state)) {
++          throw new Error('owned container was not confirmed stopped');
++        }
++        compose(['down']);
++      }
+     } catch (error) {
+-      console.error(`NVDA cleanup failed: ${error.message}`);
++      console.error(`NVDA cleanup deferred; verify the owned container before recovery: ${error.message}`);
+       process.exitCode = 1;
+     }
+   }
+@@ -318,7 +345,8 @@
+   const availableKb = process.platform === 'linux'
+     ? Number(/^MemAvailable:\s+(\d+)\s+kB$/m.exec(readFileSync('/proc/meminfo', 'utf8'))?.[1] ?? 0)
+     : totalmem() / 1024;
+-  const running = oracleContainerRunning() && oracleQemuRunning();
++  const container = readOracleContainer(containerEngine());
++  const running = container.state === 'running' && readQemuState(containerEngine(), container.id) === 'running';
+   // macOS reclaims caches and compressed memory. Check the daemon's actual VM
+   // budget below instead of treating host free pages as its hard memory limit.
+   const minimumMemoryGiB = running ? 1 : 10;
+@@ -341,7 +369,7 @@
+   if (availableBytes < minimumDiskBytes) {
+     failures.push(`less than ${minimumDiskBytes / 1024 ** 3} GiB disk available`);
+   }
+-  if (!oracleContainerRunning()) {
++  if (container.state !== 'running') {
+     const occupied = await occupiedPorts(ports);
+     if (occupied.length > 0)
+       failures.push(`required loopback ports occupied: ${occupied.join(', ')}`);
+@@ -403,13 +431,14 @@
+
+ function startContainer() {
+   lifetime.signal.throwIfAborted();
+-  const running = oracleContainerRunning();
++  const current = readOracleContainer(containerEngine());
++  if (!['running', 'absent', 'exited', 'stopped', 'created', 'configured'].includes(current.state)) {
++    throw new Error(`NVDA container is ${current.state}; inspect it before starting Windows`);
++  }
++  const running = current.state === 'running';
+   if (requireWinhooDesktop().buildImage && !running) compose(['build']);
+-  // Missing QEMU is normal during download and ISO preparation. Only restart
+-  // a running container if Dockur recorded an actual completed guest shutdown.
+-  const ended = running && !oracleQemuRunning() && spawnSync(containerEngine(),
+-    ['exec', 'hoosaidthat-nvda-oracle', 'test', '-f', '/run/shm/qemu.end'],
+-    { encoding: 'utf8', timeout: 5_000 }).status === 0;
++  const ended = running && readQemuState(containerEngine(), current.id) === 'ended';
++  if (running) requireRunningOracle(containerEngine(), Infinity, current.id);
+   compose(ended ? ['restart'] : ['up', '--detach']);
+ }
+
+@@ -670,10 +699,15 @@
+ }
+
+ function assertAttachedStorage() {
++  const current = readOracleContainer(containerEngine());
++  if (ownedContainerId && current.id !== ownedContainerId) {
++    throw Object.assign(new Error('owned container identity changed'), { code: 'HST_NVDA_ENGINE_UNKNOWN' });
++  }
++  if (current.state === 'absent') return;
+   const result = spawnSync(containerEngine(),
+-    ['inspect', '--format', '{{json .Mounts}}', 'hoosaidthat-nvda-oracle'],
+-    { encoding: 'utf8', timeout: 10_000, maxBuffer: 64 * 1024 });
+-  if (result.status !== 0) return;
++    ['inspect', '--format', '{{json .Mounts}}', current.id],
++    { encoding: 'utf8', timeout: 5_000, maxBuffer: 64 * 1024 });
++  if (result.status !== 0) throw Object.assign(new Error('Cannot confirm owned NVDA storage mounts'), { code: 'HST_NVDA_ENGINE_UNKNOWN' });
+   assertOracleStorage(JSON.parse(result.stdout), { legacyBind, stateRoot, sharedRoot, volumeName });
+ }
+
+@@ -791,12 +825,9 @@
+
+ function status() {
+   console.log(`engine=${containerEngine()} acceleration=${accelerationMode()} storage=${legacyBind ? stateRoot : volumeName}`);
+-  const probe = spawnSync(
+-    containerEngine(),
+-    ['inspect', '--format', '{{.State.Status}}', 'hoosaidthat-nvda-oracle'],
+-    { encoding: 'utf8' },
+-  );
+-  console.log(probe.status === 0 ? probe.stdout.trim() : 'container absent');
++  const { state } = readOracleContainer(containerEngine());
++  console.log(`container ${state}`);
++  if (state !== 'running') return;
+   for (const name of ['winhoo-tools-status.json', 'oem-status.json', 'ssh-status.json', 'runtime-status.json']) {
+     const path = join(sharedRoot, 'bootstrap', name);
+     try {
+@@ -805,7 +836,7 @@
+       if (!isFileError(error, 'ENOENT')) throw error;
+     }
+   }
+-  if (probe.status === 0 && existsSync(environmentPath) && existsSync(sshPrivateKeyPath)) {
++  if (existsSync(environmentPath) && existsSync(sshPrivateKeyPath)) {
+     const guest = trySshControl('status');
+     if (guest.status === 0) process.stdout.write(`guest: ${guest.stdout.trim()}\n`);
+     else
+@@ -1074,15 +1105,11 @@
+   if (Number(disk.bavail) * Number(disk.bsize) < 8 * 1024 ** 3) {
+     throw new Error('NVDA Windows storage fell below 8 GiB free; readiness aborted to protect the retained guest disk.');
+   }
+-  if (!oracleContainerRunning()) {
+-    const logs = spawnSync(containerEngine(), ['logs', '--tail', '20', 'hoosaidthat-nvda-oracle'],
+-      { encoding: 'utf8', timeout: 5_000, maxBuffer: 64 * 1024 });
+-    throw new Error(`NVDA Windows container stopped before readiness:\n${(logs.stdout + logs.stderr).slice(-8 * 1024)}`);
+-  }
++  const current = requireRunningOracle(containerEngine(), readyDeadline ?? Infinity, ownedContainerId);
+   // On macOS the daemon's Linux filesystem can fill before the host volume.
+   // Inspect the actual retained Windows storage, including named volumes.
+   const storage = spawnSync(containerEngine(),
+-    ['exec', 'hoosaidthat-nvda-oracle', 'stat', '-f', '-c', '%a %S', '/storage'],
++    ['exec', current.id, 'stat', '-f', '-c', '%a %S', '/storage'],
+     { encoding: 'utf8', timeout: 5_000, maxBuffer: 4096 });
+   const dimensions = /^(\d+) (\d+)\s*$/u.exec(storage.stdout ?? '');
+   const available = dimensions ? Number(dimensions[1]) * Number(dimensions[2]) : NaN;
+@@ -1141,7 +1168,6 @@
+
+ async function runParityMatrix() {
+   requireInitialized();
+-  await waitUntilReady();
+   if (existsSync(join(projectRoot, 'tsconfig.build.json'))) {
+     execFileSync('npm', ['run', 'build'], { cwd: projectRoot, stdio: 'inherit' });
+   }
+@@ -1176,15 +1202,7 @@
+   const token = options.token ?? readControlToken();
+   console.log(`NVDA parity ${locale}/${keyboardLayout}`);
+   runSshControl(`locale-${locale}`);
+-  await waitUntilReady();
+-  const localeStatus = runSshControl('status');
+-  if (
+-    localeStatus.ready !== true ||
+-    localeStatus.runtime?.locale !== locale ||
+-    localeStatus.runtimeFresh !== true
+-  ) {
+-    throw new Error(`NVDA runtime locale did not become ready for ${locale}`);
+-  }
++  await waitUntilReady(locale);
+   const inheritedSpecializedRun =
+     Boolean(process.env.HOOSAIDTHAT_NVDA_PARITY_ACTIONS?.trim()) ||
+     process.env.HOOSAIDTHAT_NVDA_PARITY_SETTINGS === '1' ||
+@@ -1277,30 +1295,6 @@
+   return occupied;
+ }
+
+-function oracleContainerRunning() {
+-  const probe = spawnSync(
+-    containerEngine(),
+-    ['inspect', '--format', '{{.State.Running}}', 'hoosaidthat-nvda-oracle'],
+-    { encoding: 'utf8', timeout: 5_000 },
+-  );
+-  return probe.status === 0 && probe.stdout.trim() === 'true';
+-}
+-
+-function oracleQemuRunning() {
+-  const probe = spawnSync(
+-    containerEngine(),
+-    [
+-      'exec',
+-      'hoosaidthat-nvda-oracle',
+-      'sh',
+-      '-lc',
+-      'test -s /run/shm/qemu.pid && kill -0 "$(cat /run/shm/qemu.pid)" 2>/dev/null',
+-    ],
+-    { encoding: 'utf8', timeout: 5_000 },
+-  );
+-  return probe.status === 0;
+-}
+-
+ function readBoundedFile(path, maximumBytes) {
+   if (!Number.isSafeInteger(maximumBytes) || maximumBytes < 1) {
+     throw new Error('maximumBytes must be a positive safe integer');

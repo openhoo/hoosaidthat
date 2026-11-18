@@ -4,6 +4,19 @@ Dedicated real-NVDA parity oracle. Not npm runtime and not a Windows product
 dependency. Normal Orca/HooVDA tests remain Linux containers. This VM provides
 the reference traces used to prove the declared `nvda-web-2026.1.1` profile.
 
+## Check the engine
+
+`node scripts/nvda-windows.mjs preflight` (installed CLI: `hoosaidthat-nvda-windows preflight`)
+prints the exact Podman container ID and state as JSON. It needs no running guest
+or Playwright installation. A responsive engine with no oracle returns
+`{"id":null,"state":"absent"}`; an unreachable engine or an uncertain result
+exits nonzero within a five-second probe. No guest is started or stopped.
+`up` reuses a running or booting QEMU and restarts it only after the guest has
+recorded a completed shutdown. Parity checks authenticated runtime and browser
+readiness after each locale change and uses that same fresh locale status.
+The separate managed WinHoo controller is covered in
+[the workstation adapter instructions](../../contrib/winhoo/README.md).
+
 ## Start
 
 ```bash
