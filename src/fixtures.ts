@@ -9,6 +9,7 @@ import {
 import { HttpScreenReaderClient } from './client.js';
 import { isRuntimeBootstrapURL, RUNTIME_KEEP_ALIVE_URL } from './bootstrap.js';
 import { androidContextFactory, type ScreenReaderContextFactory } from './android-context.js';
+import { fitNvdaWindow } from './nvda-window.js';
 import { ScreenReaderRuntime } from './runtime.js';
 import { ScreenReaderSession } from './session.js';
 import {
@@ -143,6 +144,7 @@ export const test = base.extend<ScreenReaderFixtures & NativeContextFixtures, Sc
     const page = existing ?? (screenReaderResolvedOptions.screenReader === 'talkback'
       ? await context.newPage() : context.pages()[0] ?? await context.newPage());
     await page.bringToFront();
+    if (screenReaderResolvedOptions.screenReader === 'nvda') await fitNvdaWindow(page);
     const keepAlive = keepAlivePages.get(browser);
     if (keepAlive && keepAlive !== page) {
       await keepAlive.close();

@@ -50,6 +50,43 @@ test("coverage manifest exactly covers advertised profile", async ({
   );
 });
 
+// Each Playwright context opens a native Chrome window. On Windows successive
+// windows can cascade below the display, even when the DOM target is visible.
+test.describe("NVDA window placement", () => {
+  test.skip(!coreOnly || process.env.HOOSAIDTHAT_PARITY_ADAPTER !== "nvda", "native NVDA core check");
+
+  test.beforeEach(async ({ context }) => {
+    // Seed the context before HooSaidThat's page fixture adopts its first page.
+    const seed = await context.newPage();
+    const work = await seed.evaluate(() => {
+      const display = screen as Screen & { availLeft: number; availTop: number };
+      return { left: display.availLeft, top: display.availTop, width: display.availWidth, height: display.availHeight };
+    });
+    const cdp = await context.newCDPSession(seed);
+    try {
+      const { windowId, bounds } = await cdp.send("Browser.getWindowForTarget");
+      if (bounds.windowState !== "normal") {
+        await cdp.send("Browser.setWindowBounds", { windowId, bounds: { windowState: "normal" } });
+      }
+      await cdp.send("Browser.setWindowBounds", {
+        windowId,
+        bounds: { left: work.left, top: work.top + Math.floor(work.height / 2), width: work.width, height: work.height },
+      });
+      await expect.poll(() => seed.evaluate(() => screenY + outerHeight))
+        .toBeGreaterThan(work.top + work.height);
+    } finally {
+      await cdp.detach();
+    }
+  });
+
+  test("a native mouse click reaches the button after Chrome opens partly off screen", async ({ page, screenReader }) => {
+    await installFixture(page);
+    await prepareAction(page, screenReader, "leftMouseClick");
+    await screenReader.act("leftMouseClick");
+    await expect(page.locator("#live")).toHaveText("Parity mouse clicked");
+  });
+});
+
 coreTest(
   "reference profile presents core speech, braille, details, table, and live-region behavior",
   async ({ page, screenReader }) => {
