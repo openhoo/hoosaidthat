@@ -97,6 +97,14 @@ for (const [scenario, expected] of [
     const r = cli(['up'], scenario);
     assert.equal(r.status, 0, r.stderr);
     assert.deepEqual(r.actions, expected);
+    const probes = r.calls.filter(([program, command]) => program === 'podman' && command === 'exec');
+    if (['running', 'booting', 'ended'].includes(scenario)) {
+      assert.equal(probes.length, 1);
+      assert.deepEqual(probes[0].slice(0, -1), ['podman', 'exec', 'a'.repeat(64), 'sh', '-c']);
+      assert.match(probes[0].at(-1), /\/run\/shm\/qemu\.pid/);
+    } else {
+      assert.deepEqual(probes, []);
+    }
   });
 }
 test('failed QEMU inspection cannot cause a restart', () => {
