@@ -277,12 +277,15 @@ actionsTest(
     const executed = new Set<ScreenReaderAction>();
 
     for (const action of selectedActions) {
-      await installFixture(page);
+      if (action === "toggleNativeSelection") await openSelectionDocument(page);
+      else await installFixture(page);
       await screenReader.returnToPage();
       // Review commands operate on the focused editor. Replacing the page
       // can leave NVDA on a menu; toggling that menu into browse mode tests
       // an unrelated control before the editor has even received focus.
-      if (!reviewActions.has(action)) await screenReader.ensureBrowseMode();
+      if (!reviewActions.has(action) && action !== "toggleNativeSelection") {
+        await screenReader.ensureBrowseMode();
+      }
       const beforeFormat = action === "brailleReportFormatting" ? await screenReader.checkpoint() : undefined;
       await prepareAction(page, screenReader, action);
       let formatCell: number | undefined;
@@ -401,7 +404,10 @@ actionsTest(
         await screenReader.act("toggleSingleLetterNavigation");
       }
       if (action === "toggleNativeSelection") {
-        await screenReader.act("toggleNativeSelection");
+        const reset = await screenReader.act("toggleNativeSelection");
+        expect(reset.timedOut).toBe(false);
+        expect(reset.speech).toMatch(/Native app selection mode disabled|Nativer Auswahlmodus deaktiviert/iu);
+        await page.goto("about:blank");
       }
       if (action === "leftMouseLock" || action === "rightMouseLock") {
         await screenReader.act(action);
@@ -626,6 +632,19 @@ async function prepareAction(
       screenReader,
       page.getByRole("button", { name: "Details action" }),
     );
+  } else if (action === "toggleNativeSelection") {
+    const start = page.getByRole("link", { name: "Selection document start" });
+    await screenReader.observe("Focus the selection document", () => start.focus(), "focus");
+    await expect(start).toBeFocused();
+    await expect.poll(async () => {
+      const { focus } = await screenReader.state();
+      return [focus.browserWindowActive, focus.webContentFocused, focus.name];
+    }, { message: "native focus must reach the new top-level selection document" })
+      .toEqual([true, true, "Selection document start"]);
+    await screenReader.ensureBrowseMode();
+    await screenReader.documentStart();
+    const heading = await screenReader.nextHeading();
+    expect(heading.speech).toContain("Selectable text sample");
   } else if (action === "reportTextSelection") {
     await screenReader.observe("Select text in entry", async () => {
       await page.getByLabel("Parity entry").selectText();
@@ -967,6 +986,20 @@ async function prepareAction(
   } else {
     await screenReader.documentStart();
   }
+}
+
+// Replacing a page with setContent can leave NVDA attached to the virtual
+// buffer of an embedded document. Native selection needs a live top-level
+// text selection provider. Navigation creates one without network access.
+async function openSelectionDocument(page: Parameters<typeof installFixture>[0]) {
+  const url = "https://parity.test/native-selection";
+  await page.route(url, route => route.fulfill({
+    contentType: "text/html; charset=utf-8",
+    body: '<!doctype html><html lang="en"><title>Native selection fixture</title><main>' +
+      '<a href="#sample">Selection document start</a>' +
+      '<h1 id="sample">Selectable text sample</h1><p>Plain text for selection.</p></main></html>',
+  }), { times: 1 });
+  await page.goto(url);
 }
 
 async function installFixture(
