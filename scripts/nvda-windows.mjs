@@ -8,6 +8,7 @@ import {
   existsSync,
   fstatSync,
   mkdirSync,
+  mkdtempSync,
   openSync,
   readFileSync,
   readSync,
@@ -96,6 +97,14 @@ if (
   throw new Error('NVDA parity coverage must contain exactly 190 unique action identifiers');
 }
 const parityActionShards = chunk(parityActions, 24);
+const parityBlocks = new Map([
+  ['core', { HOOSAIDTHAT_NVDA_PARITY_CORE: '1' }],
+  ...parityActionShards.map((actions, i) => [
+    `actions-${String(i + 1).padStart(2, '0')}`,
+    { HOOSAIDTHAT_NVDA_PARITY_ACTIONS: actions.join(',') },
+  ]),
+  ['settings', { HOOSAIDTHAT_NVDA_PARITY_SETTINGS: '1' }],
+]);
 
 const command = process.argv[2] ?? 'status';
 
@@ -163,6 +172,14 @@ switch (command) {
   case 'parity-cell':
     await runParityCell(process.argv[3], process.argv[4]);
     break;
+  case 'parity-shard': {
+    const [, , , locale, layout, shard, ...extra] = process.argv;
+    if (extra.length || !parityBlocks.has(shard)) {
+      throw new Error(`parity-shard requires a locale, layout and one of: ${[...parityBlocks.keys()].join(', ')}`);
+    }
+    await runParityCell(locale, layout, { shard });
+    break;
+  }
   case 'down':
     requireInitialized();
     compose(['down']);
@@ -170,7 +187,7 @@ switch (command) {
     break;
   default:
     throw new Error(
-      'usage: nvda-windows.mjs preflight|doctor|init|up|wait|status|control <command>|wait-ssh|sync|parity|parity-cell <locale> <layout>|down',
+      'usage: nvda-windows.mjs preflight|doctor|init|up|wait|status|control <command>|wait-ssh|sync|parity|parity-cell <locale> <layout>|parity-shard <locale> <layout> <shard>|down',
     );
 }
 } catch (error) {
@@ -770,29 +787,23 @@ async function runParityCell(locale, keyboardLayout, options = {}) {
   console.log(`NVDA parity ${locale}/${keyboardLayout}`);
   runSshControl(`locale-${locale}`);
   await waitUntilReady(locale);
+  if (options.shard) {
+    const root = join(invocationRoot, 'test-results');
+    mkdirSync(root, { recursive: true });
+    const output = mkdtempSync(join(root, `nvda-replay-${locale.toLowerCase()}-${keyboardLayout}-${options.shard}-`));
+    console.log(`Diagnostic replay evidence: ${output}`);
+    runParityInvocation(locale, keyboardLayout, token, options.shard, parityBlocks.get(options.shard), output);
+    return;
+  }
   const inheritedSpecializedRun =
     Boolean(process.env.HOOSAIDTHAT_NVDA_PARITY_ACTIONS?.trim()) ||
     process.env.HOOSAIDTHAT_NVDA_PARITY_SETTINGS === '1' ||
     process.env.HOOSAIDTHAT_NVDA_PARITY_ARTIFACTS === '1' ||
     process.env.HOOSAIDTHAT_NVDA_PARITY_CORE === '1';
   if (options.fullSharded || !inheritedSpecializedRun) {
-    runParityInvocation(locale, keyboardLayout, token, 'core', {
-      HOOSAIDTHAT_NVDA_PARITY_CORE: '1',
-    });
-    for (let index = 0; index < parityActionShards.length; index += 1) {
-      runParityInvocation(
-        locale,
-        keyboardLayout,
-        token,
-        `actions-${String(index + 1).padStart(2, '0')}`,
-        {
-          HOOSAIDTHAT_NVDA_PARITY_ACTIONS: parityActionShards[index].join(','),
-        },
-      );
+    for (const [name, env] of parityBlocks) {
+      runParityInvocation(locale, keyboardLayout, token, name, env);
     }
-    runParityInvocation(locale, keyboardLayout, token, 'settings', {
-      HOOSAIDTHAT_NVDA_PARITY_SETTINGS: '1',
-    });
     return;
   }
   runParityInvocation(locale, keyboardLayout, token, 'specialized', {
@@ -803,7 +814,10 @@ async function runParityCell(locale, keyboardLayout, options = {}) {
   });
 }
 
-function runParityInvocation(locale, keyboardLayout, token, label, overrides = {}) {
+function runParityInvocation(locale, keyboardLayout, token, label, overrides = {}, output) {
+  const name = `${locale}/${keyboardLayout}/${label}`;
+  const started = performance.now();
+  console.log(`Starting NVDA parity ${name}`);
   const result = spawnSync(
     process.execPath,
     [
@@ -813,7 +827,7 @@ function runParityInvocation(locale, keyboardLayout, token, label, overrides = {
       parityConfig,
       '--reporter=line',
       '--output',
-      join(
+      output ?? join(
         invocationRoot,
         'test-results',
         `nvda-${locale.toLowerCase()}-${keyboardLayout}-${label}`,
@@ -837,8 +851,13 @@ function runParityInvocation(locale, keyboardLayout, token, label, overrides = {
     },
   );
   if (result.status !== 0) {
-    throw new Error(`NVDA parity failed for ${locale}/${keyboardLayout}/${label}`);
+    const replay = parityBlocks.has(label)
+      ? `\nReplay: hoosaidthat-nvda-windows parity-shard ${locale} ${keyboardLayout} ${label}`
+      : '';
+    const reason = result.error?.message ?? result.signal ?? `exit ${result.status}`;
+    throw new Error(`NVDA parity failed for ${name} (${reason})${replay}`);
   }
+  console.log(`Passed NVDA parity ${name} in ${((performance.now() - started) / 1_000).toFixed(1)}s`);
 }
 
 function chunk(values, size) {
