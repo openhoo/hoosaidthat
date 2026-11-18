@@ -112,6 +112,7 @@
     "nvda:windows:sync": "node scripts/nvda-windows.mjs sync",
     "nvda:windows:parity": "node scripts/nvda-windows.mjs parity",
     "nvda:windows:parity-cell": "node scripts/nvda-windows.mjs parity-cell",
+    "nvda:windows:parity-shard": "node scripts/nvda-windows.mjs parity-shard",
     "nvda:windows:down": "node scripts/nvda-windows.mjs down",
     "test:e2e:report": "npm run build && SCREEN_READER=hoovda SCREEN_READER_WEB_REPORT=on playwright test --config examples/basic/playwright.config.ts --grep \"annotated website report\"",
     "test:report-viewer": "node scripts/verify-web-report.mjs",

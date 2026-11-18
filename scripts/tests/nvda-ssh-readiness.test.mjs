@@ -66,6 +66,7 @@ function invoke(command, scenario, acceleration = 'tcg') {
       const scenario = ${JSON.stringify(scenario)};
       const calls = [];
       let playwrightCalls = 0;
+      const runs = [];
       let now = 0;
       let fetches = 0;
       let locale = 'en-US';
@@ -112,6 +113,9 @@ function invoke(command, scenario, acceleration = 'tcg') {
           assert.ok(args.includes('--config'));
           assert.equal(options.env.HOOSAIDTHAT_PARITY_ADAPTER, 'nvda');
           playwrightCalls += 1;
+          runs.push({ output: args[args.indexOf('--output') + 1],
+            actions: options.env.HOOSAIDTHAT_NVDA_PARITY_ACTIONS,
+            core: options.env.HOOSAIDTHAT_NVDA_PARITY_CORE, settings: options.env.HOOSAIDTHAT_NVDA_PARITY_SETTINGS });
           return { status: 0, stdout: '', stderr: '' };
         }
         if (program === 'podman') {
@@ -279,7 +283,7 @@ function invoke(command, scenario, acceleration = 'tcg') {
           ? { protocolVersion: '2.0', screenReader: 'nvda', version: '2026.1.1', ready: true }
           : { webSocketDebuggerUrl: 'ws://127.0.0.1/devtools/browser/fixture' }));
       };
-      process.on('exit', () => writeFileSync(${JSON.stringify(receiptPath)}, JSON.stringify({ calls, now, fetches, playwrightCalls,
+      process.on('exit', () => writeFileSync(${JSON.stringify(receiptPath)}, JSON.stringify({ calls, now, fetches, playwrightCalls, runs,
         httpRequests, httpOverlaps, httpActive, httpMaxActive })));
     `);
     const env = { ...process.env, HST_NVDA_RUNTIME_ROOT: runtimeRoot };
@@ -419,6 +423,27 @@ test('the matrix reuses each validated locale receipt without skipping any shard
   assert.deepEqual(r.calls.map(c => c.command), ['en-US', 'en-US', 'de-DE', 'de-DE']
     .flatMap(locale => ['status', `locale-${locale}`, 'status']));
   assert.equal(r.playwrightCalls, 40);
+});
+
+test('replay selects the exact final action block and preserves normal matrix evidence', () => {
+  const r = invoke(['parity-shard', 'de-DE', 'laptop', 'actions-08'], 'ready');
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.calls.map(c => c.command), ['status', 'locale-de-DE', 'status']);
+  assert.equal(r.playwrightCalls, 1);
+  const actions = Object.values(JSON.parse(readFileSync(resolve(root, 'oracle/parity/coverage.json'))).scenarios).flat();
+  assert.deepEqual(r.runs[0].actions.split(','), actions.slice(168));
+  assert.equal(r.runs[0].settings, '');
+  assert.equal(r.runs[0].core, '');
+  assert.match(r.runs[0].output, /nvda-replay-de-de-laptop-actions-08-[a-zA-Z0-9]+$/);
+});
+
+test('an unknown replay block fails before polling Windows or starting Playwright', () => {
+  const r = invoke(['parity-shard', 'de-DE', 'laptop', 'actions-09'], 'ready');
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /core.*actions-01.*actions-08.*settings/);
+  assert.deepEqual(r.calls, []);
+  assert.equal(r.fetches, 0);
+  assert.equal(r.playwrightCalls, 0);
 });
 
 for (const [command, deadline] of [[['wait-ssh'], 20 * 60_000], [['wait'], 45 * 60_000]]) {

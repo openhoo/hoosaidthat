@@ -141,6 +141,19 @@ It carries no source object, geometry, atomicity, relevance, or busy-state
 metadata. Protection comes from the observed focus and any known object-handler
 context; retained protected braille messages stay scrubbed on later redraws.
 
+The matrix prints the locale, keyboard layout and block as each block starts.
+To repeat a failed block on the running VM, copy the replay command from the
+failure, or use the source checkout:
+
+```sh
+npm run nvda:windows:parity-shard -- en-US desktop actions-01
+```
+
+The command verifies the requested NVDA process locale and runs just `core`,
+`actions-01` through `actions-08`, or `settings`. Each replay writes to a new
+`test-results/nvda-replay-*` directory. Use `nvda:windows:parity` for release
+qualification; it always runs all forty blocks.
+
 For a focused developer probe, first select the matching process locale, then
 limit the semantic action loop. The release-grade matrix always clears this
 subset variable:
