@@ -25,7 +25,7 @@ port is needed; leave the Windows firewall rules for public networks in place.
 ```sh
 node scripts/nvda-windows.mjs winhoo provision --desktop "$desktop" --cache "$media" --evidence "$evidence/provision-01"
 node scripts/nvda-windows.mjs winhoo run --desktop "$desktop" --mode core --cache "$media" --evidence "$evidence/core-01"
-node scripts/nvda-windows.mjs winhoo run --desktop "$desktop" --mode actions-03 --cache "$media" --evidence "$evidence/actions-03-01"
+node scripts/nvda-windows.mjs winhoo run --desktop "$desktop" --mode actions-08 --locale en-US --layout laptop --cache "$media" --evidence "$evidence/laptop-08-01"
 node scripts/nvda-windows.mjs winhoo run --desktop "$desktop" --mode matrix --candidate "$(git rev-parse HEAD)" --cache "$media" --evidence "$evidence/matrix-01"
 ```
 
@@ -37,6 +37,9 @@ traces remain in that guest attempt's evidence directory. A completed matrix
 requires the same source and active guest bytes before and after, 40 passed
 blocks with zero test retries, and confirmed guest shutdown. A readiness
 probe, a diagnostic shard or two partial matrices cannot satisfy that gate.
+Any core, actions-01 through actions-08 or settings block can be replayed
+with its original language and keyboard layout. A failed matrix receipt
+counts only its report-verified prefix and remains failed.
 
 ## Check the engine
 

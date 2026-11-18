@@ -19,7 +19,8 @@ from winhoo_bundle import bundle
 HERE = Path(__file__).resolve().parent
 CLI = HERE.parents[1] / 'scripts/nvda-windows.mjs'
 LOCK = json.loads((HERE / 'runtime-lock.json').read_text())
-TASKS = ('core', 'actions-03', 'matrix')
+BLOCKS = ('core', *(f'actions-{n:02d}' for n in range(1,9)), 'settings')
+TASKS = (*BLOCKS, 'matrix')
 RUNTIME_FILES = ('bootstrap.html', 'launch-local.vbs', 'ssh-dispatch.ps1', 'start-runtime.ps1',
                  'nvdaConfig/scratchpad/globalPlugins/hoosaidthatControl.py')
 
@@ -129,22 +130,33 @@ $hashes | ConvertTo-Json -Compress
     command(a,'exec','--file',HERE/'winhoo-install.ps1','--timeout',420,timeout=435)
 
 
-def evidence(folder, mode):
+def evidence(folder, mode, locale='en-US', layout='desktop', *, partial=False):
     blocks = [json.loads(line) for line in (folder/'blocks.jsonl').read_text().splitlines()]
     dims = [(locale,layout) for locale in ('en-US','de-DE') for layout in ('desktop','laptop')]
-    labels = ['core',*[f'actions-{n:02d}' for n in range(1,9)],'settings']
-    expected = [(loc,layout,b) for loc,layout in dims for b in labels] if mode == 'matrix' else [('en-US','desktop',mode)]
-    if [(r['locale'],r['layout'],r['block'],r['state']) for r in blocks] != [
-        (*identity, state) for identity in expected for state in ('running','passed')]:
+    expected = [(loc,keys,b) for loc,keys in dims for b in BLOCKS] if mode == 'matrix' else [(locale,layout,mode)]
+    actual = [(r['locale'],r['layout'],r['block'],r['state']) for r in blocks]
+    planned = [(*identity, state) for identity in expected for state in ('running','passed')]
+    if partial and actual and actual[-1][-1] == 'failed':
+        if len(actual) < 2 or len(actual) % 2 or actual[-1][:-1] != actual[-2][:-1] or actual[-2][-1] != 'running':
+            raise RuntimeError('Unexpected failed native block')
+        actual = actual[:-1]
+    if actual != (planned[:len(actual)] if partial else planned):
         raise RuntimeError('Incomplete, repeated, or out-of-order native evidence')
-    for identity, block in zip(expected, blocks[1::2]):
+    passed = len(actual) // 2
+    for identity, block in zip(expected[:passed], blocks[1::2]):
         report = json.loads((folder/'reports'/('-'.join(identity)+'.json')).read_text(encoding='utf-8-sig'))
         stats = report['stats']
         if (stats.get('flaky') != 0 or stats.get('unexpected') != 0 or
             stats.get('expected') != block.get('selected') or
             not isinstance(stats.get('expected'),int) or stats['expected'] < (4 if identity[2]=='core' else 2)):
             raise RuntimeError('Playwright report and block outcome disagree')
-    return len(expected)
+    return passed
+
+
+class FailedGuestRun(RuntimeError):
+    def __init__(self, passed):
+        self.passed = passed
+        super().__init__(f'Guest parity failed after {passed} verified blocks; see run.log and reports for this attempt')
 
 
 def guest_parity(a, root, binding, folder):
@@ -155,9 +167,11 @@ def guest_parity(a, root, binding, folder):
         digest = sha(artifact)
         command(a,'put',artifact,'hst-'+attempt+'.zip','--timeout',150,timeout=165)
     info = {'attempt':attempt,'bundle':digest,'owner':binding['uuid'],'mode':a.mode}
+    if a.mode != 'matrix':
+        info.update(locale=a.locale,layout=a.layout)
     save(folder/'guest-input.json',info)
     script = '& {\n' + (HERE/'winhoo-run.ps1').read_text() + '\n} ' + ' '.join(
-        (attempt,digest,a.mode,binding['uuid'])) + '\nexit $LASTEXITCODE'
+        (attempt,digest,a.mode,binding['uuid'],a.locale,a.layout)) + '\nexit $LASTEXITCODE'
     budget = 8*3600 if a.mode == 'matrix' else 20*60
     with (folder/'run.log').open('x') as log:
         code = command(a,'exec','--stdin','--timeout',budget,timeout=budget+15,
@@ -178,9 +192,11 @@ def guest_parity(a, root, binding, folder):
                     import shutil
                     shutil.copyfileobj(source,f)
     result = json.loads((folder/'guest.json').read_text(encoding='utf-8-sig'))
-    if any(result.get(k) != v for k,v in info.items()) or result.get('exitCode') != 0 or code:
-        raise RuntimeError('Guest parity failed; see run.log and reports for this attempt')
-    return evidence(folder,a.mode)
+    if any(result.get(k) != v for k,v in info.items()):
+        raise RuntimeError('Guest report belongs to a different attempt, input or desktop')
+    if result.get('exitCode') != 0 or code:
+        raise FailedGuestRun(evidence(folder,a.mode,a.locale,a.layout,partial=True) if (folder/'blocks.jsonl').is_file() else 0)
+    return evidence(folder,a.mode,a.locale,a.layout)
 
 
 def main(a):
@@ -230,6 +246,8 @@ def main(a):
                     raise RuntimeError('Qualification inputs changed during the attempt')
             receipt['state'] = 'tested'
         except BaseException as ex:
+            if isinstance(ex, FailedGuestRun):
+                receipt['passedBlocks'] = ex.passed
             receipt['state'] = 'failed'
             receipt['error'] = str(ex)
             raise
@@ -264,8 +282,16 @@ if __name__ == '__main__':
             cmd.add_argument('--candidate',help='Exact clean Git commit (required for matrix)')
             cmd.add_argument('--cache',type=Path,help='Verified runner tool cache (default: media beside the desktop)')
             cmd.add_argument('--mode',choices=TASKS,required=True)
+            cmd.add_argument('--locale',choices=('en-US','de-DE'),help='Diagnostic block language')
+            cmd.add_argument('--layout',choices=('desktop','laptop'),help='Diagnostic block keyboard layout')
     try:
-        main(p.parse_args())
+        args = p.parse_args()
+        if args.operation == 'run':
+            if args.mode == 'matrix' and (args.locale or args.layout):
+                p.error('A full matrix includes every locale and layout; use a block for a diagnostic replay')
+            args.locale = args.locale or 'en-US'
+            args.layout = args.layout or 'desktop'
+        main(args)
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as ex:
         print('winhoo qualification:', ex, file=sys.stderr)
         sys.exit(1)

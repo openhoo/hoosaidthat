@@ -272,14 +272,27 @@ coreTest(
 
 actionsTest(
   "every declared web-profile command executes through selected adapter",
-  async ({ page, screenReader }) => {
+  async ({ page, screenReader, screenReaderClient }) => {
     const executed = new Set<ScreenReaderAction>();
 
     for (const action of selectedActions) {
       await installFixture(page);
       await screenReader.returnToPage();
       await screenReader.ensureBrowseMode();
+      const beforeFormat = action === "brailleReportFormatting" ? await screenReader.checkpoint() : undefined;
       await prepareAction(page, screenReader, action);
+      let formatCell: number | undefined;
+      if (beforeFormat !== undefined) {
+        // NVDA may still be displaying the previous tether announcement even
+        // after speaking the new focus. A formatting request needs a text cell.
+        await expect.poll(async () => {
+          const { events } = await screenReaderClient.readEvents(beforeFormat, { timeoutMs: 400, quietMs: 80 });
+          const frame = events.filter(event => event.kind === "braille").at(-1);
+          formatCell = frame && frame.text.includes("Gamma delta") &&
+            frame.cursor >= 0 && frame.cursor < frame.cells.length ? frame.cursor : undefined;
+          return formatCell;
+        }, { timeout: 12_000, message: "the braille display must show the focused review text and its cursor" }).toBeDefined();
+      }
       const observation =
         action === "returnToPage"
           ? await verifiedReturnToPage(screenReader)
@@ -288,7 +301,7 @@ actionsTest(
             : action === "brailleRoute"
               ? await screenReader.brailleRoute(0)
               : action === "brailleReportFormatting"
-                ? await screenReader.brailleFormatting(0)
+                ? await screenReader.brailleFormatting(formatCell!)
                 : await screenReader.act(action);
       expect(observation.timedOut, action).toBe(false);
       expect(

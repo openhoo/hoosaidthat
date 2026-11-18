@@ -1,8 +1,10 @@
 # Called once by WinHoo via a pinned, authenticated session to the dedicated guest.
 param([ValidatePattern('^[a-f0-9]{32}$')][string]$Attempt,
       [ValidatePattern('^[a-f0-9]{64}$')][string]$BundleHash,
-      [ValidateSet('core','actions-03','matrix')][string]$Mode,
-      [ValidatePattern('^[a-f0-9-]{36}$')][string]$Owner)
+      [ValidatePattern('^(core|actions-0[1-8]|settings|matrix)$')][string]$Mode,
+      [ValidatePattern('^[a-f0-9-]{36}$')][string]$Owner,
+      [ValidateSet('en-US','de-DE')][string]$Locale,
+      [ValidateSet('desktop','laptop')][string]$Layout)
 $ErrorActionPreference='Stop'
 $ProgressPreference='SilentlyContinue'
 $root='C:\ProgramData\HooSaidThat'
@@ -30,13 +32,14 @@ try {
         if ($Mode -eq 'matrix') {
             & "$work\node.exe" "$work\package\scripts\nvda-windows.mjs" parity
         } else {
-            & "$work\node.exe" "$work\package\scripts\nvda-windows.mjs" parity-shard en-US desktop $Mode
+            & "$work\node.exe" "$work\package\scripts\nvda-windows.mjs" parity-shard $Locale $Layout $Mode
         }
         $code=$LASTEXITCODE
     } finally { Pop-Location }
 } catch { $err=$_.Exception.Message }
 finally {
     $i=@{attempt=$Attempt;owner=$Owner;bundle=$BundleHash;mode=$Mode;exitCode=$code;error=$err}
+    if ($Mode -ne 'matrix') { $i.locale=$Locale; $i.layout=$Layout }
     [IO.File]::WriteAllText("$evidence\guest.json",($i|ConvertTo-Json -Compress))
     $out=Join-Path $env:USERPROFILE "hst-$Attempt-reports.zip"
     $summary=Join-Path $work 'summary'

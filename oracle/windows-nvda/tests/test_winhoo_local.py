@@ -45,3 +45,21 @@ class GuestRunnerTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError,'disagree'): runner.evidence(root,'core')
             path.write_text(text+text)
             with self.assertRaisesRegex(RuntimeError,'repeated'): runner.evidence(root,'core')
+
+    def test_failure_counts_only_verified_passed_prefix_and_replay_checks_its_layout(self):
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d); (root/'reports').mkdir()
+            def record(block, state, **extra):
+                return {'locale':'en-US','layout':'desktop','block':block,'state':state,**extra}
+            records=[record('core','running'),record('core','passed',selected=4),
+                     record('actions-01','running'),record('actions-01','failed')]
+            file=root/'blocks.jsonl'
+            file.write_text(''.join(json.dumps(r)+'\n' for r in records))
+            stats={'expected':4,'flaky':0,'unexpected':0}
+            (root/'reports/en-US-desktop-core.json').write_text(json.dumps({'stats':stats}))
+            self.assertEqual(runner.evidence(root,'matrix',partial=True),1)
+            with self.assertRaisesRegex(RuntimeError,'Incomplete'):runner.evidence(root,'matrix')
+            file.write_text(''.join(json.dumps({**r,'layout':'laptop'})+'\n' for r in records[:2]))
+            (root/'reports/en-US-laptop-core.json').write_text(json.dumps({'stats':stats}))
+            self.assertEqual(runner.evidence(root,'core','en-US','laptop'),1)
+            with self.assertRaisesRegex(RuntimeError,'Incomplete'):runner.evidence(root,'core','en-US','desktop')
