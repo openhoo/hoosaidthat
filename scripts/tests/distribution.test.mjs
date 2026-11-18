@@ -59,6 +59,7 @@ test('published Windows parity uses built package and forces the NVDA adapter', 
       mkdirSync(resolve(packageRoot, path), { recursive: true });
     }
     cpSync(resolve(root, 'scripts/nvda-windows.mjs'), resolve(packageRoot, 'scripts/nvda-windows.mjs'));
+    cpSync(resolve(root, 'oracle/windows-nvda/engine-state.mjs'), resolve(packageRoot, 'oracle/windows-nvda/engine-state.mjs'));
     cpSync(resolve(root, 'oracle/parity/coverage.json'), resolve(packageRoot, 'oracle/parity/coverage.json'));
     writeFileSync(resolve(packageRoot, 'node_modules/@playwright/test/package.json'), JSON.stringify({ exports: { './cli': './cli.cjs' } }));
     writeFileSync(resolve(packageRoot, 'node_modules/@playwright/test/cli.cjs'), '');
@@ -75,6 +76,10 @@ test('published Windows parity uses built package and forces the NVDA adapter', 
       let invocations = 0;
       childProcess.execFileSync = () => { throw new Error('published package tried to rebuild missing source'); };
       childProcess.spawnSync = (program, args, options) => {
+        if (program === 'podman') {
+          assert.equal(args[0], 'ps');
+          return { status: 0, stdout: 'a'.repeat(64) + '	' + 'hoosaidthat-nvda-oracle' + '	running', stderr: '' };
+        }
         if (program === 'ssh') {
           const command = args.at(-1);
           if (command.startsWith('locale-')) locale = command.slice(7);

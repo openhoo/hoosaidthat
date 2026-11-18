@@ -26,10 +26,11 @@ function invoke(command, scenario, acceleration = 'tcg') {
     const packageRoot = resolve(temporary, 'package');
     const runtimeRoot = resolve(temporary, 'runtime');
     const receiptPath = resolve(temporary, 'calls.json');
-    for (const path of ['scripts', 'oracle/parity', 'node_modules/@playwright/test']) {
+    for (const path of ['scripts', 'oracle/parity', 'oracle/windows-nvda', 'node_modules/@playwright/test']) {
       mkdirSync(resolve(packageRoot, path), { recursive: true });
     }
     cpSync(resolve(root, 'scripts/nvda-windows.mjs'), resolve(packageRoot, 'scripts/nvda-windows.mjs'));
+    cpSync(resolve(root, 'oracle/windows-nvda/engine-state.mjs'), resolve(packageRoot, 'oracle/windows-nvda/engine-state.mjs'));
     cpSync(resolve(root, 'oracle/parity/coverage.json'), resolve(packageRoot, 'oracle/parity/coverage.json'));
     const generationHash = createHash('sha256');
     const payloadEntries = payloadFiles.map(name => {
@@ -114,8 +115,8 @@ function invoke(command, scenario, acceleration = 'tcg') {
           return { status: 0, stdout: '', stderr: '' };
         }
         if (program === 'podman') {
-          assert.equal(args[0], 'inspect');
-          return { status: 0, stdout: 'running', stderr: '' };
+          assert.equal(args[0], 'ps');
+          return { status: 0, stdout: 'a'.repeat(64) + '\t' + 'hoosaidthat-nvda-oracle' + '\trunning', stderr: '' };
         }
         assert.equal(program, 'ssh', 'the test must never run another executable');
         const command = args.at(-1);
@@ -123,6 +124,8 @@ function invoke(command, scenario, acceleration = 'tcg') {
         const connect = Number(args.find(value => value.startsWith('ConnectTimeout=')).split('=')[1]);
         calls.push({ command, timeout: options.timeout, connect, started: now });
         const payload = { schema: 'hoosaidthat.nvda-ssh-control', version: 1, command, status: 'ready', ready: true, runtimeFresh: true, runtime: { locale } };
+        if (locale === 'de-DE' && scenario === 'locale-stale') payload.runtimeFresh = false;
+        if (locale === 'de-DE' && scenario === 'locale-mismatch') payload.runtime.locale = 'en-US';
         if (command.startsWith('update ')) {
           const expectedGeneration = ${JSON.stringify(payloadGeneration)};
           assert.equal(command, 'update ' + expectedGeneration);
@@ -395,10 +398,27 @@ for (const remoteCommand of ['start', 'stop', 'restart', 'locale-en-US', 'locale
 test('TCG-Parity-Cell wartet vor der erneuten Readiness auf die langsame Locale-Antwort', () => {
   const result = invoke(['parity-cell', 'de-DE', 'laptop'], 'slow-locale');
   assert.equal(result.status, 0, result.stderr);
-  assert.deepEqual(result.calls.map(call => call.command), ['status', 'locale-de-DE', 'status', 'status']);
+  assert.deepEqual(result.calls.map(call => call.command), ['status', 'locale-de-DE', 'status']);
   assert.equal(result.calls[1].timeout, 900_000);
   assert.equal(result.calls[1].connect, 120);
   assert.equal(result.playwrightCalls, 10);
+});
+
+for (const scenario of ['locale-stale', 'locale-mismatch']) {
+  test(`Parity starts no browser work for ${scenario}`, () => {
+    const r = invoke(['parity-cell', 'de-DE', 'laptop'], scenario);
+    assert.equal(r.status, 1);
+    assert.equal(r.playwrightCalls, 0);
+    assert.match(r.stderr, /locale|fresh/i);
+  });
+}
+
+test('the matrix reuses each validated locale receipt without skipping any shard', () => {
+  const r = invoke(['parity'], 'ready');
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.calls.map(c => c.command), ['en-US', 'en-US', 'de-DE', 'de-DE']
+    .flatMap(locale => ['status', `locale-${locale}`, 'status']));
+  assert.equal(r.playwrightCalls, 40);
 });
 
 for (const [command, deadline] of [[['wait-ssh'], 20 * 60_000], [['wait'], 45 * 60_000]]) {

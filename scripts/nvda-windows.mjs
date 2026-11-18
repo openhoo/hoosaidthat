@@ -22,10 +22,11 @@ import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { readOracleContainer, readQemuState, requireRunningOracle } from '../oracle/windows-nvda/engine-state.mjs';
+
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const invocationRoot = process.cwd();
 const require = createRequire(import.meta.url);
-const playwrightCLI = require.resolve('@playwright/test/cli');
 const parityConfig = join(
   projectRoot,
   existsSync(join(projectRoot, 'tsconfig.build.json'))
@@ -100,6 +101,9 @@ const command = process.argv[2] ?? 'status';
 
 try {
 switch (command) {
+  case 'preflight':
+    console.log(JSON.stringify(readOracleContainer('podman')));
+    break;
   case 'doctor':
     await doctor();
     break;
@@ -111,10 +115,21 @@ switch (command) {
   case 'up':
     await doctor();
     {
-      const containerWasRunning = oracleContainerRunning();
-      const qemuWasRunning = containerWasRunning && oracleQemuRunning();
-      initialize();
-      compose(containerWasRunning && !qemuWasRunning ? ['restart'] : ['up', '--detach']);
+      const { state, id } = readOracleContainer('podman');
+      if (state === 'running') {
+        const guest = readQemuState('podman', id);
+        if (guest !== 'ended') {
+          console.log(`NVDA oracle already active (QEMU: ${guest}).`);
+          break;
+        }
+        requireRunningOracle('podman', Infinity, id);
+        compose(['restart']);
+      } else if (['absent', 'created', 'configured', 'exited', 'stopped'].includes(state)) {
+        initialize();
+        compose(['up', '--detach']);
+      } else {
+        throw new Error(`NVDA container is ${state}; inspect it before starting Windows`);
+      }
     }
     console.log('NVDA oracle VM started; run `npm run nvda:windows:wait`.');
     break;
@@ -128,8 +143,9 @@ switch (command) {
     requireInitialized();
     {
       const remoteCommand = process.argv[3] ?? 'status';
+      const owner = remoteCommand === 'shutdown' ? requireRunningOracle('podman') : undefined;
       runSshControl(remoteCommand);
-      if (remoteCommand === 'shutdown') await finalizeGuestShutdown();
+      if (owner) await finalizeGuestShutdown(owner.id);
       if (remoteCommand === 'reconfigure-ssh') await waitAfterSshReconfigure();
     }
     break;
@@ -154,7 +170,7 @@ switch (command) {
     break;
   default:
     throw new Error(
-      'usage: nvda-windows.mjs doctor|init|up|wait|status|control <command>|wait-ssh|sync|parity|parity-cell <locale> <layout>|down',
+      'usage: nvda-windows.mjs preflight|doctor|init|up|wait|status|control <command>|wait-ssh|sync|parity|parity-cell <locale> <layout>|down',
     );
 }
 } catch (error) {
@@ -166,6 +182,7 @@ async function doctor() {
   if (process.platform !== 'linux') {
     throw new Error('NVDA VM doctor failed: host must be Linux with KVM and Podman Compose');
   }
+  const container = readOracleContainer('podman');
   const failures = [];
   if (!existsSync('/dev/kvm')) failures.push('/dev/kvm missing');
   if (!existsSync('/dev/net/tun')) failures.push('/dev/net/tun missing');
@@ -189,7 +206,7 @@ async function doctor() {
   if (availableBytes < minimumDiskBytes) {
     failures.push(`less than ${minimumDiskBytes / 1024 ** 3} GiB disk available`);
   }
-  if (!oracleContainerRunning()) {
+  if (container.state !== 'running') {
     const occupied = await occupiedPorts(ports);
     if (occupied.length > 0)
       failures.push(`required loopback ports occupied: ${occupied.join(', ')}`);
@@ -292,13 +309,15 @@ function compose(arguments_) {
   );
 }
 
-async function waitUntilReady() {
+async function waitUntilReady(expectedLocale) {
   requireInitialized();
   const token = readControlToken();
   const deadline = Date.now() + 45 * 60_000;
   let lastPhases = '';
   let lastError = 'not started';
+  let oracleId;
   while (Date.now() < deadline) {
+    oracleId = requireRunningOracle('podman', deadline, oracleId).id;
     const statusFiles = [
       join(sharedRoot, 'bootstrap', 'oem-status.json'),
       join(sharedRoot, 'bootstrap', 'runtime-status.json'),
@@ -334,13 +353,14 @@ async function waitUntilReady() {
         typeof version.webSocketDebuggerUrl === 'string'
       ) {
         const ssh = trySshControl('status', deadline);
-        if (ssh.status === 0) {
+        if (ssh.status === 0 && ssh.payload.ready === true && ssh.payload.runtimeFresh === true &&
+            (expectedLocale === undefined || ssh.payload.runtime?.locale === expectedLocale)) {
           console.log(
             'NVDA 2026.1.1 oracle ready: SSH 127.0.0.1:2224, control 127.0.0.1:3002, CDP 127.0.0.1:9224.',
           );
           return;
         }
-        lastError = `SSH control unavailable: ${(ssh.stderr || ssh.error?.message || `exit ${ssh.status}`).trim()}`;
+        lastError = ssh.status === 0 ? `guest status is stale or locale does not match ${expectedLocale ?? 'the current session'}` : `SSH control unavailable: ${(ssh.stderr || ssh.error?.message || `exit ${ssh.status}`).trim()}`;
       } else {
         lastError = 'readiness payload invalid';
       }
@@ -406,12 +426,9 @@ async function readHttpReadinessResponse(responsePromise, label, controller) {
 }
 
 function status() {
-  const probe = spawnSync(
-    'podman',
-    ['inspect', '--format', '{{.State.Status}}', 'hoosaidthat-nvda-oracle'],
-    { encoding: 'utf8' },
-  );
-  console.log(probe.status === 0 ? probe.stdout.trim() : 'container absent');
+  const { state } = readOracleContainer('podman');
+  console.log(`container ${state}`);
+  if (state !== 'running') return;
   for (const name of ['oem-status.json', 'ssh-status.json', 'runtime-status.json']) {
     const path = join(sharedRoot, 'bootstrap', name);
     try {
@@ -420,7 +437,7 @@ function status() {
       if (!isFileError(error, 'ENOENT')) throw error;
     }
   }
-  if (probe.status === 0 && existsSync(environmentPath) && existsSync(sshPrivateKeyPath)) {
+  if (existsSync(environmentPath) && existsSync(sshPrivateKeyPath)) {
     const guest = trySshControl('status');
     if (guest.status === 0) process.stdout.write(`guest: ${guest.stdout.trim()}\n`);
     else
@@ -529,7 +546,7 @@ function trySshControl(remoteCommand, deadline = Infinity) {
   rejectSshProcessTimeout(result, remoteCommand, timeout);
   if (result.status === 0) {
     try {
-      validateSshPayload(result.stdout, remoteCommand);
+      return { ...result, payload: validateSshPayload(result.stdout, remoteCommand) };
     } catch (error) {
       return { ...result, status: 1, error };
     }
@@ -667,7 +684,9 @@ async function syncControlPayload() {
 async function waitUntilSshReady() {
   const deadline = Date.now() + 20 * 60_000;
   let lastError = 'not started';
+  let oracleId;
   while (Date.now() < deadline) {
+    oracleId = requireRunningOracle('podman', deadline, oracleId).id;
     const result = trySshControl('status', deadline);
     if (result.status === 0) {
       process.stdout.write(result.stdout);
@@ -683,26 +702,24 @@ async function waitUntilSshReady() {
   throw new Error(`NVDA SSH control did not become ready in 20 minutes: ${lastError}`);
 }
 
-async function finalizeGuestShutdown() {
+async function finalizeGuestShutdown(expectedId) {
   await new Promise((resolvePromise) => setTimeout(resolvePromise, 12_000));
   const deadline = Date.now() + 90_000;
   while (Date.now() < deadline) {
-    const qemu = spawnSync(
-      'podman',
-      [
-        'exec',
-        'hoosaidthat-nvda-oracle',
-        'sh',
-        '-lc',
-        'test -s /run/shm/qemu.pid && kill -0 "$(cat /run/shm/qemu.pid)" 2>/dev/null',
-      ],
-      { encoding: 'utf8' },
-    );
-    if (qemu.status !== 0) break;
+    const { state, id } = readOracleContainer('podman', deadline);
+    if (state === 'absent') return;
+    if (id !== expectedId) throw new Error('NVDA container changed during guest shutdown');
+    if (state === 'exited' || state === 'stopped') return;
+    if (state !== 'running') throw new Error(`Cannot confirm guest shutdown: NVDA container is ${state}`);
+    if (readQemuState('podman', id, deadline) === 'ended') {
+      requireRunningOracle('podman', deadline, expectedId);
+      compose(['stop']);
+      console.log('NVDA oracle VM shut down; persistent state retained.');
+      return;
+    }
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 2_000));
   }
-  compose(['stop']);
-  console.log('NVDA oracle VM shut down; persistent state retained.');
+  throw new Error('Guest shutdown was not confirmed before the deadline');
 }
 
 async function waitAfterSshReconfigure() {
@@ -718,7 +735,6 @@ function requireInitialized() {
 
 async function runParityMatrix() {
   requireInitialized();
-  await waitUntilReady();
   if (existsSync(join(projectRoot, 'tsconfig.build.json'))) {
     execFileSync('npm', ['run', 'build'], { cwd: projectRoot, stdio: 'inherit' });
   }
@@ -753,15 +769,7 @@ async function runParityCell(locale, keyboardLayout, options = {}) {
   const token = options.token ?? readControlToken();
   console.log(`NVDA parity ${locale}/${keyboardLayout}`);
   runSshControl(`locale-${locale}`);
-  await waitUntilReady();
-  const localeStatus = runSshControl('status');
-  if (
-    localeStatus.ready !== true ||
-    localeStatus.runtime?.locale !== locale ||
-    localeStatus.runtimeFresh !== true
-  ) {
-    throw new Error(`NVDA runtime locale did not become ready for ${locale}`);
-  }
+  await waitUntilReady(locale);
   const inheritedSpecializedRun =
     Boolean(process.env.HOOSAIDTHAT_NVDA_PARITY_ACTIONS?.trim()) ||
     process.env.HOOSAIDTHAT_NVDA_PARITY_SETTINGS === '1' ||
@@ -799,7 +807,7 @@ function runParityInvocation(locale, keyboardLayout, token, label, overrides = {
   const result = spawnSync(
     process.execPath,
     [
-      playwrightCLI,
+      require.resolve('@playwright/test/cli'),
       'test',
       '--config',
       parityConfig,
@@ -852,30 +860,6 @@ async function occupiedPorts(candidates) {
     if (!available) occupied.push(port);
   }
   return occupied;
-}
-
-function oracleContainerRunning() {
-  const probe = spawnSync(
-    'podman',
-    ['inspect', '--format', '{{.State.Running}}', 'hoosaidthat-nvda-oracle'],
-    { encoding: 'utf8' },
-  );
-  return probe.status === 0 && probe.stdout.trim() === 'true';
-}
-
-function oracleQemuRunning() {
-  const probe = spawnSync(
-    'podman',
-    [
-      'exec',
-      'hoosaidthat-nvda-oracle',
-      'sh',
-      '-lc',
-      'test -s /run/shm/qemu.pid && kill -0 "$(cat /run/shm/qemu.pid)" 2>/dev/null',
-    ],
-    { encoding: 'utf8' },
-  );
-  return probe.status === 0;
 }
 
 function readBoundedFile(path, maximumBytes) {
