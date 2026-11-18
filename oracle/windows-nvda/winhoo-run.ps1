@@ -25,10 +25,13 @@ try {
     $env:PLAYWRIGHT_BROWSERS_PATH=Join-Path $work 'browsers'
     $env:CI='1'
     $env:PATH="$work;$env:PATH"
-    $argv = if ($Mode -eq 'matrix') { @('parity') } else { @('parity-shard','en-US','desktop',$Mode) }
     Push-Location $evidence
     try {
-        & "$work\node.exe" "$work\package\scripts\nvda-windows.mjs" @argv
+        if ($Mode -eq 'matrix') {
+            & "$work\node.exe" "$work\package\scripts\nvda-windows.mjs" parity
+        } else {
+            & "$work\node.exe" "$work\package\scripts\nvda-windows.mjs" parity-shard en-US desktop $Mode
+        }
         $code=$LASTEXITCODE
     } finally { Pop-Location }
 } catch { $err=$_.Exception.Message }
