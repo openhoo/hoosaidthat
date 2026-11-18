@@ -24,23 +24,24 @@ jobs:
       - run: npm test
       - run: npm run typecheck
       - run: npx playwright install ffmpeg
-      - run: npm run nvda:windows:doctor
-      - run: npm run nvda:windows:up
-      - run: npm run nvda:windows:wait
-      - run: npm run nvda:windows:sync
-      - run: npm run nvda:windows:control -- restart
-      - run: npm run nvda:windows:wait
-      - run: npm run nvda:windows:parity
-      - name: Capture guest diagnostics on failure
-        if: failure()
-        run: npm run nvda:windows:control -- logs || true
+      - name: Qualify the retained Windows oracle
+        id: oracle
+        env:
+          HST_NVDA_CONTAINER_ID: ${{ vars.NVDA_ORACLE_CONTAINER_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          attempt="ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          printf 'evidence=%s/qualification/%s\n' "${HST_NVDA_RUNTIME_ROOT:-$HOME/VMs/hoosaidthat-nvda}" "$attempt" >> "$GITHUB_OUTPUT"
+          npm run nvda:windows:qualification -- run --candidate "$GITHUB_SHA" --attempt "$attempt"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        if: always()
+        if: always() && steps.oracle.outputs.evidence != ''
         with:
           name: real-nvda-playwright-evidence
-          path: test-results
-          if-no-files-found: ignore
+          # Private operator logs and credentials are never uploaded.
+          path: |
+            ${{ steps.oracle.outputs.evidence }}/test-results
+            ${{ steps.oracle.outputs.evidence }}/blocks.jsonl
+            ${{ steps.oracle.outputs.evidence }}/receipt.json
+          if-no-files-found: warn
           retention-days: 30
-      - name: Stop licensed Windows oracle
-        if: always()
-        run: npm run nvda:windows:control -- shutdown || npm run nvda:windows:down || true

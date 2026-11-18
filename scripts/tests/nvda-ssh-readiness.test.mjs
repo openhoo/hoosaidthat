@@ -143,6 +143,8 @@ function invoke(command, scenario, acceleration = 'tcg') {
           Object.assign(payload, { command: 'update', payloadGeneration: expectedGeneration, files: manifest.files.length });
         }
         if (scenario === 'invalid-json') return { status: 0, stdout: '{broken', stderr: '' };
+        if (scenario === 'reset-session' || (scenario === 'recover-session' && calls.length === 1))
+          return { status: 255, stdout: '', stderr: 'Read from remote host 127.0.0.1: Connection reset by peer; client_loop: send disconnect: Broken pipe' };
         if (scenario === 'wrong-command' || scenario === 'http-invalid-ssh') return { status: 0, stdout: JSON.stringify({ ...payload, command: 'other' }), stderr: '' };
         if (scenario === 'process-timeout') {
           now += options.timeout;
@@ -423,6 +425,21 @@ test('the matrix reuses each validated locale receipt without skipping any shard
   assert.deepEqual(r.calls.map(c => c.command), ['en-US', 'en-US', 'de-DE', 'de-DE']
     .flatMap(locale => ['status', `locale-${locale}`, 'status']));
   assert.equal(r.playwrightCalls, 40);
+});
+
+test('live NVDA and CDP with repeated SSH resets stop before Playwright or the boot deadline', () => {
+  const r = invoke(['parity-shard', 'en-US', 'desktop', 'actions-08'], 'reset-session', 'kvm');
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /NVDA and Chrome are ready.*SSH.*reset/i);
+  assert.equal(r.calls.length, 3);
+  assert.ok(r.now <= 15_000);
+  assert.equal(r.playwrightCalls, 0);
+});
+
+test('one reset during startup recovers and still requires a valid SSH status', () => {
+  const r = invoke(['wait'], 'recover-session', 'kvm');
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.calls.length, 2);
 });
 
 test('replay selects the exact final action block and preserves normal matrix evidence', () => {

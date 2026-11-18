@@ -2,6 +2,7 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
 import {
+  appendFileSync,
   chmodSync,
   closeSync,
   constants as fsConstants,
@@ -110,6 +111,14 @@ const command = process.argv[2] ?? 'status';
 
 try {
 switch (command) {
+  case 'qualification': {
+    const worker = spawnSync('python3', [join(deploymentRoot, 'qualification.py'), ...process.argv.slice(3)], {
+      stdio: 'inherit', env: { ...process.env, HST_QUAL_NODE: process.execPath },
+    });
+    if (worker.error) throw worker.error;
+    process.exitCode = worker.status ?? 1;
+    break;
+  }
   case 'preflight':
     console.log(JSON.stringify(readOracleContainer('podman')));
     break;
@@ -187,7 +196,7 @@ switch (command) {
     break;
   default:
     throw new Error(
-      'usage: nvda-windows.mjs preflight|doctor|init|up|wait|status|control <command>|wait-ssh|sync|parity|parity-cell <locale> <layout>|parity-shard <locale> <layout> <shard>|down',
+      'usage: nvda-windows.mjs qualification <prepare|run|start|status|recover>|preflight|doctor|init|up|wait|status|control <command>|wait-ssh|sync|parity|parity-cell <locale> <layout>|parity-shard <locale> <layout> <shard>|down',
     );
 }
 } catch (error) {
@@ -332,7 +341,8 @@ async function waitUntilReady(expectedLocale) {
   const deadline = Date.now() + 45 * 60_000;
   let lastPhases = '';
   let lastError = 'not started';
-  let oracleId;
+  let oracleId = process.env.HST_NVDA_CONTAINER_ID;
+  let sessionResets = 0;
   while (Date.now() < deadline) {
     oracleId = requireRunningOracle('podman', deadline, oracleId).id;
     const statusFiles = [
@@ -370,6 +380,11 @@ async function waitUntilReady(expectedLocale) {
         typeof version.webSocketDebuggerUrl === 'string'
       ) {
         const ssh = trySshControl('status', deadline);
+        if (ssh.status === 255 && /connection reset|broken pipe/i.test(ssh.stderr ?? '')) {
+          if (++sessionResets >= 3) {
+            throw Object.assign(new Error('NVDA and Chrome are ready, but the SSH control session repeatedly reset. Inspect the guest SSH service and retry; parity has not been authorized.'), { code: 'HST_SSH_RESET' });
+          }
+        } else sessionResets = 0;
         if (ssh.status === 0 && ssh.payload.ready === true && ssh.payload.runtimeFresh === true &&
             (expectedLocale === undefined || ssh.payload.runtime?.locale === expectedLocale)) {
           console.log(
@@ -379,10 +394,12 @@ async function waitUntilReady(expectedLocale) {
         }
         lastError = ssh.status === 0 ? `guest status is stale or locale does not match ${expectedLocale ?? 'the current session'}` : `SSH control unavailable: ${(ssh.stderr || ssh.error?.message || `exit ${ssh.status}`).trim()}`;
       } else {
+        sessionResets = 0;
         lastError = 'readiness payload invalid';
       }
     } catch (error) {
-      if (error?.code === 'HST_SSH_TIMEOUT') throw error;
+      if (error?.code === 'HST_SSH_TIMEOUT' || error?.code === 'HST_SSH_RESET') throw error;
+      sessionResets = 0;
       lastError = error instanceof Error ? error.message : String(error);
     }
     const remaining = deadline - Date.now();
@@ -579,6 +596,7 @@ function runSshControl(remoteCommand) {
 }
 
 function runSshCommand(remoteCommand, expectedCommand) {
+  if (process.env.HST_NVDA_CONTAINER_ID) requireRunningOracle('podman', Infinity, process.env.HST_NVDA_CONTAINER_ID);
   pinGuestHostKey();
   const defaultTimeout = remoteCommand === 'reconfigure-ssh' ||
     (expectedCommand === 'update' && process.env.HST_NVDA_ACCELERATION === 'tcg')
@@ -701,7 +719,7 @@ async function syncControlPayload() {
 async function waitUntilSshReady() {
   const deadline = Date.now() + 20 * 60_000;
   let lastError = 'not started';
-  let oracleId;
+  let oracleId = process.env.HST_NVDA_CONTAINER_ID;
   while (Date.now() < deadline) {
     oracleId = requireRunningOracle('podman', deadline, oracleId).id;
     const result = trySshControl('status', deadline);
@@ -817,6 +835,18 @@ async function runParityCell(locale, keyboardLayout, options = {}) {
 function runParityInvocation(locale, keyboardLayout, token, label, overrides = {}, output) {
   const name = `${locale}/${keyboardLayout}/${label}`;
   const started = performance.now();
+  if (process.env.HST_NVDA_CONTAINER_ID) requireRunningOracle('podman', Infinity, process.env.HST_NVDA_CONTAINER_ID);
+  const qualification = process.env.HST_NVDA_QUALIFICATION === '1';
+  const report = join(invocationRoot, 'reports', `${locale}-${keyboardLayout}-${label}.json`);
+  if (qualification) mkdirSync(dirname(report), { recursive: true, mode: 0o700 });
+  function record(state, counts = {}) {
+    if (qualification) {
+      appendFileSync(join(invocationRoot, 'blocks.jsonl'), JSON.stringify({
+        time: new Date().toISOString(), locale, layout: keyboardLayout, block: label, state, ...counts,
+      }) + '\n', { mode: 0o600 });
+    }
+  }
+  record('running');
   console.log(`Starting NVDA parity ${name}`);
   const result = spawnSync(
     process.execPath,
@@ -825,7 +855,7 @@ function runParityInvocation(locale, keyboardLayout, token, label, overrides = {
       'test',
       '--config',
       parityConfig,
-      '--reporter=line',
+      ...(qualification ? ['--reporter=line,json', '--retries=0'] : ['--reporter=line']),
       '--output',
       output ?? join(
         invocationRoot,
@@ -847,15 +877,31 @@ function runParityInvocation(locale, keyboardLayout, token, label, overrides = {
         HOOSAIDTHAT_NVDA_PARITY_ARTIFACTS: '',
         HOOSAIDTHAT_NVDA_PARITY_CORE: '',
         ...overrides,
+        ...(qualification && { PLAYWRIGHT_JSON_OUTPUT_FILE: report }),
       },
     },
   );
   if (result.status !== 0) {
+    record('failed');
     const replay = parityBlocks.has(label)
       ? `\nReplay: hoosaidthat-nvda-windows parity-shard ${locale} ${keyboardLayout} ${label}`
       : '';
     const reason = result.error?.message ?? result.signal ?? `exit ${result.status}`;
     throw new Error(`NVDA parity failed for ${name} (${reason})${replay}`);
+  }
+  if (qualification) {
+    try {
+      const { stats } = JSON.parse(readFileSync(report, 'utf8'));
+      const required = label === 'core' ? 4 : 2;
+      if (!Number.isInteger(stats.expected) || stats.expected < required || stats.flaky !== 0 ||
+          stats.unexpected !== 0 || !Number.isInteger(stats.skipped) || stats.skipped < 0) {
+        throw new Error(`expected at least ${required} selected passing tests, without retries`);
+      }
+      record('passed', { selected: stats.expected, skipped: stats.skipped });
+    } catch (error) {
+      record('failed');
+      throw new Error(`Missing or incomplete Playwright evidence for ${name}: ${error.message}`);
+    }
   }
   console.log(`Passed NVDA parity ${name} in ${((performance.now() - started) / 1_000).toFixed(1)}s`);
 }
