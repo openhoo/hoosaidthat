@@ -14,6 +14,7 @@ const coverage = JSON.parse(
   pinnedBackendBoundaries: Array<{ actions: ScreenReaderAction[] }>;
 };
 const coveredActions = new Set(Object.values(coverage.scenarios).flat());
+const reviewActions = new Set(coverage.scenarios["review-cursor"]);
 const pinnedBackendBoundaries = new Set(
   coverage.pinnedBackendBoundaries.flatMap(({ actions }) => actions),
 );
@@ -272,14 +273,30 @@ coreTest(
 
 actionsTest(
   "every declared web-profile command executes through selected adapter",
-  async ({ page, screenReader }) => {
+  async ({ page, screenReader, screenReaderClient }) => {
     const executed = new Set<ScreenReaderAction>();
 
     for (const action of selectedActions) {
       await installFixture(page);
       await screenReader.returnToPage();
-      await screenReader.ensureBrowseMode();
+      // Review commands operate on the focused editor. Replacing the page
+      // can leave NVDA on a menu; toggling that menu into browse mode tests
+      // an unrelated control before the editor has even received focus.
+      if (!reviewActions.has(action)) await screenReader.ensureBrowseMode();
+      const beforeFormat = action === "brailleReportFormatting" ? await screenReader.checkpoint() : undefined;
       await prepareAction(page, screenReader, action);
+      let formatCell: number | undefined;
+      if (beforeFormat !== undefined) {
+        // NVDA may still be displaying the previous tether announcement even
+        // after speaking the new focus. A formatting request needs a text cell.
+        await expect.poll(async () => {
+          const { events } = await screenReaderClient.readEvents(beforeFormat, { timeoutMs: 400, quietMs: 80 });
+          const frame = events.filter(event => event.kind === "braille").at(-1);
+          formatCell = frame && frame.text.includes("Gamma delta") &&
+            frame.cursor >= 0 && frame.cursor < frame.cells.length ? frame.cursor : undefined;
+          return formatCell;
+        }, { timeout: 12_000, message: "the braille display must show the focused review text and its cursor" }).toBeDefined();
+      }
       const observation =
         action === "returnToPage"
           ? await verifiedReturnToPage(screenReader)
@@ -288,7 +305,7 @@ actionsTest(
             : action === "brailleRoute"
               ? await screenReader.brailleRoute(0)
               : action === "brailleReportFormatting"
-                ? await screenReader.brailleFormatting(0)
+                ? await screenReader.brailleFormatting(formatCell!)
                 : await screenReader.act(action);
       expect(observation.timedOut, action).toBe(false);
       expect(
@@ -319,6 +336,16 @@ actionsTest(
         `${action} completed evidence`,
       ).toBe(true);
       assertSemanticOutput(action, observation.speech, observation.braille);
+      if (action === "braillePreviousLine" || action === "brailleNextLine") {
+        const target = action === "braillePreviousLine" ? "Alpha beta" : "Omega last";
+        expect(observation.brailleEvents.map(frame => frame.text.trim()), action).toContain(target);
+        await expect.poll(() => page.evaluate(() => {
+          const selection = getSelection();
+          const editor = document.getElementById("brailleLines");
+          if (editor !== document.activeElement || !selection?.isCollapsed || !editor?.contains(selection.anchorNode)) return null;
+          return [selection.anchorNode?.textContent, selection.anchorOffset];
+        }), { message: `${action} must move the editable caret to the start of the target line` }).toEqual([target, 0]);
+      }
       if (action === "previousFocusable") {
         await expect(
           page.getByRole("button", { name: "Details action" }),
@@ -732,12 +759,38 @@ async function prepareAction(
   } else if (action === "stopSpeech" || action === "pauseSpeech") {
     await screenReader.documentStart();
     await screenReader.act("sayAll");
+  } else if (action === "braillePreviousLine" || action === "brailleNextLine") {
+    // Chromium on Windows can expose all textarea newlines as one NVDA
+    // reading unit. Distinct editable blocks give the native commands a
+    // previous and a next line, independent of a cursor-blink redraw.
+    await page.locator("body").evaluate(body => {
+      const editor = document.createElement("div");
+      editor.id = "brailleLines";
+      editor.contentEditable = "true";
+      editor.setAttribute("role", "textbox");
+      editor.setAttribute("aria-multiline", "true");
+      editor.setAttribute("aria-label", "Braille line navigation");
+      for (const text of ["Alpha beta", "Gamma delta", "Omega last"]) {
+        const line = document.createElement("div");
+        line.textContent = text;
+        editor.append(line);
+      }
+      body.append(editor);
+    });
+    await screenReader.observe("Focus middle braille line", async () => {
+      await page.locator("#brailleLines").evaluate(editor => {
+        (editor as HTMLElement).focus();
+        getSelection()!.collapse(editor.children[1]!.firstChild, 4);
+      });
+    }, "focus");
+    expect(await page.evaluate(() => {
+      const selection = getSelection();
+      return [document.activeElement?.id, selection?.anchorNode?.textContent, selection?.anchorOffset];
+    })).toEqual(["brailleLines", "Gamma delta", 4]);
   } else if (
     [
       "braillePanBack",
       "braillePanForward",
-      "braillePreviousLine",
-      "brailleNextLine",
       "brailleRoute",
       "brailleToggleTether",
       "brailleReportFormatting",
@@ -755,11 +808,7 @@ async function prepareAction(
     );
     if (action === "braillePanBack")
       await screenReader.act("braillePanForward");
-  } else if (
-    action.startsWith("review") ||
-    action.endsWith("Review") ||
-    action.includes("Review")
-  ) {
+  } else if (reviewActions.has(action)) {
     const reviewText = page.locator("#reviewText");
     let start = 11;
     let end = 11;
@@ -782,6 +831,12 @@ async function prepareAction(
       async () => reviewText.focus(),
       "focus",
     );
+    await expect(reviewText).toBeFocused();
+    await expect.poll(async () => {
+      const { focus } = await screenReader.state();
+      return [focus.browserWindowActive, focus.webContentFocused, focus.name];
+    }, { message: "review commands require native focus on the named editor" })
+      .toEqual([true, true, "Review text"]);
     if (
       action === "copyToReviewPosition" ||
       action === "moveToReviewCopyStart"
@@ -1232,8 +1287,8 @@ const semanticExpectations = new Map<ScreenReaderAction, RegExp>([
   ["cycleSpeechMode", /Speech mode|Sprachmodus/iu],
   ["braillePanBack", /Review text|Alpha beta|Gamma delta/iu],
   ["braillePanForward", /Review text|Alpha beta|Gamma delta|Omega last/iu],
-  ["braillePreviousLine", /Alpha beta|Gamma delta|Review text/iu],
-  ["brailleNextLine", /Gamma delta|Omega last|Review text/iu],
+  ["braillePreviousLine", /Alpha beta/u],
+  ["brailleNextLine", /Omega last/u],
   ["brailleRoute", /Review text|Alpha beta|Gamma delta|G/u],
   ["brailleToggleTether", /Braille tethered|Braille-Darstellung gekoppelt/iu],
   ["brailleReportFormatting", /(?:font|Schrift|bold|Fett|24)/iu],

@@ -61,6 +61,7 @@ test('published Windows parity uses built package and forces the NVDA adapter', 
     }
     cpSync(resolve(root, 'scripts/nvda-windows.mjs'), resolve(packageRoot, 'scripts/nvda-windows.mjs'));
     cpSync(resolve(root, 'oracle/windows-nvda/engine-state.mjs'), resolve(packageRoot, 'oracle/windows-nvda/engine-state.mjs'));
+    cpSync(resolve(root, 'oracle/windows-nvda/winhoo-local.mjs'), resolve(packageRoot, 'oracle/windows-nvda/winhoo-local.mjs'));
     cpSync(resolve(root, 'oracle/parity/coverage.json'), resolve(packageRoot, 'oracle/parity/coverage.json'));
     writeFileSync(resolve(packageRoot, 'node_modules/@playwright/test/package.json'), JSON.stringify({ exports: { './cli': './cli.cjs' } }));
     writeFileSync(resolve(packageRoot, 'node_modules/@playwright/test/cli.cjs'), '');
@@ -84,7 +85,7 @@ test('published Windows parity uses built package and forces the NVDA adapter', 
         if (program === 'ssh') {
           const command = args.at(-1);
           if (command.startsWith('locale-')) locale = command.slice(7);
-          return { status: 0, stdout: JSON.stringify({ schema: 'hoosaidthat.nvda-ssh-control', version: 1, command, status: 'ready', ready: true, runtimeFresh: true, runtime: { locale } }), stderr: '' };
+          return { status: 0, stdout: JSON.stringify({ schema: 'hoosaidthat.nvda-ssh-control', version: 1, command, status: 'ready', ready: true, runtimeFresh: true, runtime: { locale, chromePid: 33, nvdaPid: locale === 'en-US' ? 44 : 55 } }), stderr: '' };
         }
         assert.equal(program, process.execPath);
         assert.ok(args[args.indexOf('--config') + 1].endsWith('/dist/oracle/parity/playwright.config.js'));

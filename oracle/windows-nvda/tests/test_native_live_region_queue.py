@@ -301,7 +301,7 @@ class NativeLiveRegionQueueTests(unittest.TestCase):
         self.hooks.remove_native_live_region_capture()
         self.assertIs(self.queue_handler.queueFunction, self.original_queue_function)
 
-    def load_registered_plugin(self, fail_proxy=False):
+    def load_registered_plugin(self, fail_proxy=False, local_only=False, retained_local=False):
         """Run the shipped constructor and teardown with inert I/O surfaces."""
         class Extension:
             def __init__(extension):
@@ -323,6 +323,8 @@ class NativeLiveRegionQueueTests(unittest.TestCase):
         proxy = mock.Mock()
         self.namespace.update(
             re=re,
+            os=SimpleNamespace(environ={"HST_NVDA_LOCAL_ONLY":"1"} if local_only else {},
+                               path=SimpleNamespace(isfile=lambda _:retained_local)),
             globalPluginHandler=SimpleNamespace(GlobalPlugin=object),
             core=SimpleNamespace(postNvdaStartup=extensions[4]),
             TOKEN_PATH="inert-test-token",
@@ -344,6 +346,16 @@ class NativeLiveRegionQueueTests(unittest.TestCase):
         with mock.patch("builtins.open", mock.mock_open(read_data="test-control-token-" + "x" * 32)):
             self.hooks = self.namespace["GlobalPlugin"]()
         return extensions, server, proxy
+
+    def test_guest_native_servers_bind_only_loopback(self):
+        self.load_registered_plugin(local_only=True)
+        self.assertEqual(self.namespace["ThreadingHTTPServer"].call_args.args[0],("127.0.0.1",3000))
+        self.assertEqual(self.namespace["ThreadingTCPServer"].call_args.args[0],("127.0.0.1",9222))
+
+    def test_uiaccess_relaunch_keeps_local_bind_without_environment(self):
+        self.load_registered_plugin(retained_local=True)
+        self.assertEqual(self.namespace["ThreadingHTTPServer"].call_args.args[0],("127.0.0.1",3000))
+        self.assertEqual(self.namespace["ThreadingTCPServer"].call_args.args[0],("127.0.0.1",9222))
 
     def test_shipped_constructor_registers_capture_and_termination_restores_shared_hooks(self):
         extensions, server, proxy = self.load_registered_plugin()

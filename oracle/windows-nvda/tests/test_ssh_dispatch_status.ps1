@@ -37,6 +37,8 @@ function Write-FixtureHeartbeat([string]$Path, [string]$Generation, [int]$AgeSec
     $heartbeat = [ordered]@{
         generatedUtc = [DateTimeOffset]::UtcNow.AddSeconds($AgeSeconds).ToString('o')
         ready = $true
+        nvdaPid = 101
+        chromePid = 202
         fixtureGeneration = $Generation
     }
     [IO.File]::WriteAllText($Path, ($heartbeat | ConvertTo-Json -Compress), [Text.UTF8Encoding]::new($false))
@@ -66,6 +68,7 @@ function Invoke-StatusCase([hashtable]$Case, [scriptblock]$Definition, [string]$
             error = $null
         }
     }
+    if ($Case.ContainsKey('OtherReader')) { $state.Processes.nvdaPids = @(111) }
     Write-FixtureHeartbeat $FixturePath 'before-diagnostics' -60
 
     function Get-ScheduledTask {
@@ -114,7 +117,8 @@ function Invoke-StatusCase([hashtable]$Case, [scriptblock]$Definition, [string]$
         }
         $expectedGeneration = if ($Case.RefreshBy) { 'after-' + $Case.RefreshBy } else { 'before-diagnostics' }
         if ($result.runtime.fixtureGeneration -cne $expectedGeneration) { $failures.Add('Die zuletzt geschriebene Heartbeat-Generation wurde nicht gelesen') }
-        if ($result.runtimeFresh -ne $Case.ExpectedFresh -or $result.ready -ne $Case.ExpectedFresh) { $failures.Add('Freshness oder Readiness stimmt nicht') }
+        $expectedReady = $Case.ExpectedFresh -and -not $Case.ContainsKey('OtherReader')
+        if ($result.runtimeFresh -ne $Case.ExpectedFresh -or $result.ready -ne $expectedReady) { $failures.Add('Freshness oder Readiness stimmt nicht') }
         if (($result.Keys -join ',') -cne 'schema,version,command,generatedUtc,ready,runtimeFresh,task,processes,sessionDiagnostics,runtime') {
             $failures.Add('Statusfelder wurden veraendert')
         }
@@ -140,7 +144,8 @@ function Invoke-StatusCase([hashtable]$Case, [scriptblock]$Definition, [string]$
 $cases = @(
     @{ Name = 'Heartbeat aus der Prozessdiagnose wird frisch gelesen'; RefreshBy = 'processes'; ExpectedFresh = $true },
     @{ Name = 'Heartbeat aus der Sessiondiagnose wird frisch gelesen'; RefreshBy = 'sessions'; ExpectedFresh = $true },
-    @{ Name = 'Alter Heartbeat bleibt trotz vorhandener Prozesse nicht bereit'; RefreshBy = ''; ExpectedFresh = $false }
+    @{ Name = 'Alter Heartbeat bleibt trotz vorhandener Prozesse nicht bereit'; RefreshBy = ''; ExpectedFresh = $false },
+    @{ Name = 'Eine andere NVDA-PID bestaetigt den frischen Heartbeat nicht'; RefreshBy = 'sessions'; ExpectedFresh = $true; OtherReader = $true }
 )
 $fixtureRoot = Join-Path $PSScriptRoot ('status-fixtures-' + [guid]::NewGuid().ToString('N'))
 $results = [Collections.Generic.List[object]]::new()

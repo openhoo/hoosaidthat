@@ -4,6 +4,47 @@ Dedicated real-NVDA parity oracle. Not npm runtime and not a Windows product
 dependency. Normal Orca/HooVDA tests remain Linux containers. This VM provides
 the reference traces used to prove the declared `nvda-web-2026.1.1` profile.
 
+## Local Mac with WinHoo
+
+Use a dedicated Windows 11 ARM64 desktop on Apple Silicon. The Windows install,
+console login and SSH transport belong to WinHoo. The NVDA test process,
+Chrome and Playwright all run inside that guest. Only its authenticated SSH
+port is needed; leave the Windows firewall rules for public networks in place.
+
+1. Install WinHoo with the `desktop archive --output` command. Follow
+   its local desktop guide, using `--account HstOracle`. Keep the same private
+   VM directory across runs. No container engine or second computer is required.
+2. Place the NVDA installer and Chrome archive listed in `runtime-lock.json`
+   in a local cache. Provisioning verifies their sizes and SHA-256 hashes and
+   reuses matching bytes already in the guest. Set `HST_WINHOO_BIN` to the
+   installed CLI path if it is not on PATH.
+3. Give every attempt a new evidence directory. First run the core and
+   actions-03 diagnostics. For the complete matrix use a clean checkout of the
+   signed candidate with the locked build dependencies installed.
+
+```sh
+node scripts/nvda-windows.mjs winhoo provision --desktop "$desktop" --cache "$media" --evidence "$evidence/provision-01"
+node scripts/nvda-windows.mjs winhoo run --desktop "$desktop" --mode core --cache "$media" --evidence "$evidence/core-01"
+node scripts/nvda-windows.mjs winhoo run --desktop "$desktop" --mode actions-08 --locale en-US --layout laptop --cache "$media" --evidence "$evidence/laptop-08-01"
+node scripts/nvda-windows.mjs winhoo run --desktop "$desktop" --mode matrix --candidate "$(git rev-parse HEAD)" --cache "$media" --evidence "$evidence/matrix-01"
+```
+
+The controller verifies the active guest scripts, builds the parity suite and
+ships it with integrity-checked Playwright packages, ARM64 Node and Windows
+FFmpeg. Each invocation owns a unique guest directory. The host retrieves the
+guest identity, report JSON and ordered block records over WinHoo. On a failed
+block it also downloads the original trace, video and reader events in
+`failed-block.zip` before shutdown, with the guest digest in
+`failure-archive.json`. If collection fails, that file records the error and
+the original results stay on the guest for WinHoo's `collect --from-directory`.
+Keep these files private until reviewed. A completed matrix
+requires the same source and active guest bytes before and after, 40 passed
+blocks with zero test retries, and confirmed guest shutdown. A readiness
+probe, a diagnostic shard or two partial matrices cannot satisfy that gate.
+Any core, actions-01 through actions-08 or settings block can be replayed
+with its original language and keyboard layout. A failed matrix receipt
+counts only its report-verified prefix and remains failed.
+
 ## Check the engine
 
 `node scripts/nvda-windows.mjs preflight` (installed CLI: `hoosaidthat-nvda-windows preflight`)

@@ -56,7 +56,7 @@ authentication, network, and malformed responses stop the release. Stable npm
 versions use the explicit `latest` dist-tag; prereleases use `next`.
 
 Before tagging, run the [owned Windows qualification](../oracle/windows-nvda/README.md#run-and-observe-a-qualification)
-against the exact candidate. Use `qualification start` on a retained WSL2
+against the exact candidate. On an Apple Silicon Mac, use the [guest-local WinHoo runner](../oracle/windows-nvda/README.md#local-mac-with-winhoo) with `--mode matrix --candidate <full-commit>`. It records installed guest hashes, the 40 block results and confirmed VM shutdown. Alternatively, use `qualification start` on a retained WSL2
 workstation or `.github/workflows/nvda-oracle.yml` on the self-hosted Linux/KVM
 runner. For the workflow, configure the repository variable
 `NVDA_ORACLE_CONTAINER_ID` with the full ID of the stopped licensed container.

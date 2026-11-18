@@ -18,8 +18,10 @@ const screenReaderOptions =
     ? {
         screenReader: 'nvda' as const,
         runtime: 'external' as const,
-        controlEndpoint: 'http://127.0.0.1:3002',
-        cdpEndpoint: 'http://127.0.0.1:9224',
+        controlEndpoint: process.env.HST_WINHOO_GUEST && process.platform === 'win32'
+          ? 'http://127.0.0.1:3000' : 'http://127.0.0.1:3002',
+        cdpEndpoint: process.env.HST_WINHOO_GUEST && process.platform === 'win32'
+          ? 'http://127.0.0.1:9223' : 'http://127.0.0.1:9224',
         controlToken: controlToken!,
       }
     : {
