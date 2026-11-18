@@ -14,6 +14,7 @@ const coverage = JSON.parse(
   pinnedBackendBoundaries: Array<{ actions: ScreenReaderAction[] }>;
 };
 const coveredActions = new Set(Object.values(coverage.scenarios).flat());
+const reviewActions = new Set(coverage.scenarios["review-cursor"]);
 const pinnedBackendBoundaries = new Set(
   coverage.pinnedBackendBoundaries.flatMap(({ actions }) => actions),
 );
@@ -278,7 +279,10 @@ actionsTest(
     for (const action of selectedActions) {
       await installFixture(page);
       await screenReader.returnToPage();
-      await screenReader.ensureBrowseMode();
+      // Review commands operate on the focused editor. Replacing the page
+      // can leave NVDA on a menu; toggling that menu into browse mode tests
+      // an unrelated control before the editor has even received focus.
+      if (!reviewActions.has(action)) await screenReader.ensureBrowseMode();
       const beforeFormat = action === "brailleReportFormatting" ? await screenReader.checkpoint() : undefined;
       await prepareAction(page, screenReader, action);
       let formatCell: number | undefined;
@@ -804,11 +808,7 @@ async function prepareAction(
     );
     if (action === "braillePanBack")
       await screenReader.act("braillePanForward");
-  } else if (
-    action.startsWith("review") ||
-    action.endsWith("Review") ||
-    action.includes("Review")
-  ) {
+  } else if (reviewActions.has(action)) {
     const reviewText = page.locator("#reviewText");
     let start = 11;
     let end = 11;
@@ -831,6 +831,12 @@ async function prepareAction(
       async () => reviewText.focus(),
       "focus",
     );
+    await expect(reviewText).toBeFocused();
+    await expect.poll(async () => {
+      const { focus } = await screenReader.state();
+      return [focus.browserWindowActive, focus.webContentFocused, focus.name];
+    }, { message: "review commands require native focus on the named editor" })
+      .toEqual([true, true, "Review text"]);
     if (
       action === "copyToReviewPosition" ||
       action === "moveToReviewCopyStart"

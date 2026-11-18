@@ -17,11 +17,12 @@ function section(startMarker: string, endMarker: string, includeEnd = false): st
 }
 
 const parity = runInNewContext([
+  section('const reviewActions = ', ';', true),
   section('async function focusFixture(', 'async function prepareAction('),
   section('async function prepareAction(', 'async function installFixture('),
   section('const semanticExpectations = new Map(', '\n]);', true),
   '({ focusFixture, prepareAction, semanticExpectations })',
-].join('\n')) as {
+].join('\n'), { coverage: JSON.parse(readFileSync(resolve('oracle/parity/coverage.json'), 'utf8')) }) as {
   focusFixture(screenReader: unknown, locator: unknown, label?: string): Promise<unknown>;
   prepareAction(page: unknown, screenReader: unknown, action: string): Promise<void>;
   semanticExpectations: Map<string, RegExp>;
