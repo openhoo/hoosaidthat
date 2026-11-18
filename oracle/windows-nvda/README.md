@@ -83,6 +83,15 @@ power-button request; an unknown engine, changed host key or unconfirmed
 shutdown is an error. Recovery never promotes partial evidence to a pass.
 Use a fresh attempt ID for another full run.
 
+For a prepared KVM guest, the controller also checks the authenticated Windows
+session when NVDA or Chrome is unreachable. After 45 seconds of startup it
+checks at most once every 30 seconds. Three consecutive reports of the same
+locked, unoccupied console with an idle runtime task and neither app running
+end the wait with `failureCode: guest-sign-in-required`. The controller then
+shuts down its guest. Prepare the HstOracle interactive login before starting
+a fresh attempt. Unknown session data or a transient boot screen cannot produce
+this diagnosis; a successful login still requires the normal live checks.
+
 Attempts live under `<runtime>/qualification/<attempt>`. `receipt.json` records
 the exact HooSaidThat commit and tree, HooVDA pin and upstream tree. Before
 boot, the controller compares the pinned engine source to upstream main;

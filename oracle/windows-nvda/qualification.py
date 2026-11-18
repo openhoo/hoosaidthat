@@ -189,7 +189,11 @@ def run(c, attempt, replay):
             def step(phase, args, out):
                 save(phase=phase)
                 print(f'{now()} {phase}', file=out, flush=True)
-                if ctl(args, out):
+                code = ctl(args, out)
+                if code == 78:
+                    save(failureCode='guest-sign-in-required')
+                    raise RuntimeError(f'{phase}: sign in to the HstOracle guest; Windows is waiting at the locked console')
+                if code:
                     with log.open('rb') as src:
                         src.seek(max(0, log.stat().st_size - 4096))
                         if b'NVDA and Chrome are ready, but the SSH control session repeatedly reset' in src.read():
