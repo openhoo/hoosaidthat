@@ -244,7 +244,8 @@ function Get-RuntimeStatus {
         }
         catch { $runtimeFresh = $false }
     }
-    $effectiveReady = $runtime -and $runtime.ready -eq $true -and $runtimeFresh -and $processes.nvdaPids.Count -gt 0 -and $processes.chromePids.Count -gt 0
+    $effectiveReady = $runtime -and $runtime.ready -eq $true -and $runtimeFresh -and
+        $processes.nvdaPids -contains $runtime.nvdaPid -and $processes.chromePids -contains $runtime.chromePid
     return [ordered]@{
         schema = 'hoosaidthat.nvda-ssh-control'
         version = 1
@@ -266,7 +267,7 @@ function Get-RuntimeStatus {
 function Stop-OwnedRuntime {
     # Task Scheduler can stop the launcher while its child still owns the
     # interactive desktop. Let the supervisor leave its loop before recycling
-    # either application or changing the runtime language.
+    # either application on explicit stop or restart.
     $stop = $null
     try { $stop = [Threading.EventWaitHandle]::OpenExisting('Global\HooSaidThatNvdaOracleStop') }
     catch [Threading.WaitHandleCannotBeOpenedException] { }
@@ -460,10 +461,11 @@ try {
         { $_ -cin @('locale-en-US', 'locale-de-DE') } {
             $locale = $Command.Substring('locale-'.Length)
             Set-RuntimeLocale $locale
-            Stop-OwnedRuntime
-            Start-Sleep -Seconds 1
-            Start-ScheduledTask -TaskName $TaskName -ErrorAction Stop
-            Start-Sleep -Seconds 1
+            # A running supervisor applies the atomic request to its own NVDA
+            # process. Keep Chrome, its windows and the active desktop intact.
+            if ((Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop).State -ne 'Running') {
+                Start-ScheduledTask -TaskName $TaskName -ErrorAction Stop
+            }
             $result = Get-RuntimeStatus
             $result['command'] = $Command
             $result['locale'] = $locale

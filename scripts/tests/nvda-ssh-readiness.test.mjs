@@ -128,7 +128,9 @@ function invoke(command, scenario, acceleration = 'tcg') {
         if (command.startsWith('locale-')) locale = command.slice(7);
         const connect = Number(args.find(value => value.startsWith('ConnectTimeout=')).split('=')[1]);
         calls.push({ command, timeout: options.timeout, connect, started: now });
-        const payload = { schema: 'hoosaidthat.nvda-ssh-control', version: 1, command, status: 'ready', ready: true, runtimeFresh: true, runtime: { locale } };
+        const payload = { schema: 'hoosaidthat.nvda-ssh-control', version: 1, command, status: 'ready', ready: true, runtimeFresh: true,
+          runtime: { locale, nvdaPid: locale === 'en-US' || scenario === 'reader-unchanged' ? 42 : 56,
+            chromePid: locale === 'de-DE' && scenario === 'browser-replaced' ? 88 : 72 } };
         if (scenario.startsWith('console-') && now < (scenario === 'console-locked' ? Infinity : 150_000)) {
           const account = scenario === 'console-occupied' ? 'ORACLE\\\\other' : null;
           const lockState = scenario === 'console-unknown' ? 'unknown' : 'locked';
@@ -453,10 +455,18 @@ for (const scenario of ['locale-stale', 'locale-mismatch']) {
 test('the matrix reuses each validated locale receipt without skipping any shard', () => {
   const r = invoke(['parity'], 'ready');
   assert.equal(r.status, 0, r.stderr);
-  assert.deepEqual(r.calls.map(c => c.command), ['en-US', 'en-US', 'de-DE', 'de-DE']
-    .flatMap(locale => ['status', `locale-${locale}`, 'status']));
+  assert.deepEqual(r.calls.map(c => c.command), ['status', 'status', 'status', 'locale-de-DE', 'status', 'status']);
   assert.equal(r.playwrightCalls, 40);
 });
+
+for (const failure of ['reader-unchanged','browser-replaced']) {
+  test(`a locale change with ${failure} cannot send native keys`, () => {
+    const r = invoke(['parity-shard', 'de-DE', 'desktop','core'], failure);
+    assert.equal(r.status, 1);
+    assert.equal(r.playwrightCalls, 0);
+    assert.match(r.stderr, /preserve Chrome and replace NVDA/);
+  });
+}
 
 test('live NVDA and CDP with repeated SSH resets stop before Playwright or the boot deadline', () => {
   const r = invoke(['parity-shard', 'en-US', 'desktop', 'actions-08'], 'reset-session', 'kvm');

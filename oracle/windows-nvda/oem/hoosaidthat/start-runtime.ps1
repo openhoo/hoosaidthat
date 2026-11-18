@@ -45,15 +45,19 @@ function Write-AtomicJson([string]$Path, $Value) {
     }
 }
 
-function Start-Nvda {
-    if (-not (Test-Path -LiteralPath $Nvda -PathType Leaf)) { throw 'NVDA executable missing' }
+function Get-RequestedLocale {
     $locale = if (Test-Path -LiteralPath $RuntimeLocalePath -PathType Leaf) {
         [System.IO.File]::ReadAllText($RuntimeLocalePath).Trim()
     } else {
         'en-US'
     }
     if ($locale -cnotin @('en-US', 'de-DE')) { throw 'runtime locale file is invalid' }
-    $nvdaLanguage = if ($locale -ceq 'de-DE') { 'de' } else { 'en' }
+    return $locale
+}
+
+function Start-Nvda([string]$Locale) {
+    if (-not (Test-Path -LiteralPath $Nvda -PathType Leaf)) { throw 'NVDA executable missing' }
+    $nvdaLanguage = if ($Locale -ceq 'de-DE') { 'de' } else { 'en' }
     $env:HST_NVDA_TOKEN_FILE = 'C:\ProgramData\HooSaidThat\control-token'
     $env:HST_NVDA_CONTROL_PORT = '3000'
     if (Test-Path -LiteralPath 'C:\ProgramData\HooSaidThat\winhoo-owner.json') {
@@ -110,12 +114,7 @@ function Start-Chrome {
 
 try {
     [System.IO.Directory]::CreateDirectory($Shared) | Out-Null
-    $runtimeLocale = if (Test-Path -LiteralPath $RuntimeLocalePath -PathType Leaf) {
-        [System.IO.File]::ReadAllText($RuntimeLocalePath).Trim()
-    } else {
-        'en-US'
-    }
-    if ($runtimeLocale -cnotin @('en-US', 'de-DE')) { throw 'runtime locale file is invalid' }
+    $runtimeLocale = Get-RequestedLocale
     Get-CimInstance -ClassName Win32_Process -ErrorAction SilentlyContinue | Where-Object {
         $_.ExecutablePath -and $_.ExecutablePath.Equals($Nvda, [StringComparison]::OrdinalIgnoreCase)
     } | ForEach-Object {
@@ -125,10 +124,22 @@ try {
         $_.Path -and $_.Path.StartsWith('C:\HooSaidThat\', [StringComparison]::OrdinalIgnoreCase)
     } | Stop-Process -Force -ErrorAction SilentlyContinue
     Start-Sleep -Seconds 2
-    $nvdaProcess = Start-Nvda
+    $nvdaProcess = Start-Nvda $runtimeLocale
     $chromeProcess = Start-Chrome
     while (-not $RuntimeStop.WaitOne(0)) {
-        if ($nvdaProcess.HasExited) { $nvdaProcess = Start-Nvda }
+        $requested = Get-RequestedLocale
+        if ($requested -cne $runtimeLocale) {
+            # Closing the foreground browser hands native keyboard input to
+            # Explorer. Only the reader needs a new language.
+            if (-not $nvdaProcess.HasExited) {
+                $nvdaProcess.Kill()
+                if (-not $nvdaProcess.WaitForExit(12000)) { throw 'Previous reader did not exit on language change' }
+            }
+            $nvdaProcess = Start-Nvda $requested
+            $runtimeLocale = $requested
+        } elseif ($nvdaProcess.HasExited) {
+            $nvdaProcess = Start-Nvda $runtimeLocale
+        }
         if ($chromeProcess.HasExited) { $chromeProcess = Start-Chrome }
         Write-AtomicJson $StatusPath ([ordered]@{
             schema = 'hoosaidthat.nvda-runtime-status'

@@ -17,6 +17,21 @@ import winhoo_bundle
 
 
 class GuestRunnerTests(unittest.TestCase):
+    def test_failure_archive_can_only_read_the_selected_attempt_and_block(self):
+        attempt='d'*32
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d); (root/'reports').mkdir()
+            (root/'blocks.jsonl').write_text(json.dumps({'locale':'de-DE','layout':'desktop','block':'core','state':'failed'}))
+            report=root/'reports/de-DE-desktop-core.json'
+            def path(value,mode):
+                out=f'C:/ProgramData/HooSaidThat/attempts/{attempt}/evidence/test-results/{value}'
+                report.write_text(json.dumps({'config':{'projects':[{'outputDir':out}]}}))
+                return runner.failed_output(root,attempt,mode)
+            self.assertTrue(path('nvda-de-de-desktop-core','matrix').endswith('nvda-de-de-desktop-core'))
+            self.assertTrue(path('nvda-replay-de-de-desktop-core-A1c456','core').endswith('A1c456'))
+            for other in ('../secrets','nvda-en-us-desktop-core','nvda-replay-de-de-desktop-core-123456'):
+                with self.subTest(other=other), self.assertRaises(ValueError): path(other,'matrix')
+
     def test_locked_guest_packages_match_development_lock(self):
         lock = json.loads((ROOT.parents[1]/'package-lock.json').read_text())['packages']
         for name, pin in winhoo_bundle.TOOLS['packages'].items():

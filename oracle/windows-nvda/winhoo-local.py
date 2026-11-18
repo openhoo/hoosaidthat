@@ -5,7 +5,7 @@ import fcntl
 import hashlib
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 import re
 import secrets
 import subprocess
@@ -159,6 +159,26 @@ class FailedGuestRun(RuntimeError):
         super().__init__(f'Guest parity failed after {passed} verified blocks; see run.log and reports for this attempt')
 
 
+def failed_output(folder, attempt, mode):
+    """Accept only the named failed block's output in this attempt."""
+    rows = (folder/'blocks.jsonl').read_text().splitlines()
+    if not rows or (block := json.loads(rows[-1])).get('state') != 'failed':
+        return None
+    loc, keys, label = (block[k] for k in ('locale','layout','block'))
+    if (not re.fullmatch('[a-f0-9]{32}',attempt) or loc not in ('en-US','de-DE')
+            or keys not in ('desktop','laptop') or label not in BLOCKS):
+        raise ValueError('Unrecognized failed block')
+    report=json.loads((folder/'reports'/f'{loc}-{keys}-{label}.json').read_text(encoding='utf-8-sig'))
+    [project]=report['config']['projects']
+    path=PureWindowsPath(project['outputDir'])
+    base=PureWindowsPath('C:/ProgramData/HooSaidThat/attempts')/attempt/'evidence'/'test-results'
+    cell=f'{loc.lower()}-{keys}-{label}'
+    pattern=f'nvda-{cell}' if mode == 'matrix' else f'nvda-replay-{cell}-[A-Za-z0-9]{{6}}'
+    if path.parent != base or not re.fullmatch(pattern,path.name):
+        raise ValueError('Reported output is outside the failed block')
+    return str(base/path.name)
+
+
 def guest_parity(a, root, binding, folder):
     attempt = uuid.uuid4().hex
     with tempfile.TemporaryDirectory(dir=root) as directory:
@@ -195,7 +215,18 @@ def guest_parity(a, root, binding, folder):
     if any(result.get(k) != v for k,v in info.items()):
         raise RuntimeError('Guest report belongs to a different attempt, input or desktop')
     if result.get('exitCode') != 0 or code:
-        raise FailedGuestRun(evidence(folder,a.mode,a.locale,a.layout,partial=True) if (folder/'blocks.jsonl').is_file() else 0)
+        failure = FailedGuestRun(evidence(folder,a.mode,a.locale,a.layout,partial=True) if (folder/'blocks.jsonl').is_file() else 0)
+        if (folder/'blocks.jsonl').is_file():
+            try:
+                source = failed_output(folder,attempt,a.mode)
+                if source:
+                    receipt = command(a,'archive',source,'hst-'+attempt+'-failure.zip','--output',folder/'failed-block.zip',
+                                      '--timeout',180,json_out=True,timeout=195)
+                    save(folder/'failure-archive.json',receipt)
+            except (OSError,ValueError,KeyError,RuntimeError,subprocess.SubprocessError) as ex:
+                # Collection is diagnostic. Preserve the original outcome and its verified prefix.
+                save(folder/'failure-archive.json',{'error':str(ex),'attempt':attempt})
+        raise failure
     return evidence(folder,a.mode,a.locale,a.layout)
 
 

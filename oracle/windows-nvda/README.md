@@ -11,7 +11,7 @@ console login and SSH transport belong to WinHoo. The NVDA test process,
 Chrome and Playwright all run inside that guest. Only its authenticated SSH
 port is needed; leave the Windows firewall rules for public networks in place.
 
-1. Install WinHoo with the `desktop inspect` and `desktop get` commands. Follow
+1. Install WinHoo with the `desktop archive --output` command. Follow
    its local desktop guide, using `--account HstOracle`. Keep the same private
    VM directory across runs. No container engine or second computer is required.
 2. Place the NVDA installer and Chrome archive listed in `runtime-lock.json`
@@ -32,8 +32,12 @@ node scripts/nvda-windows.mjs winhoo run --desktop "$desktop" --mode matrix --ca
 The controller verifies the active guest scripts, builds the parity suite and
 ships it with integrity-checked Playwright packages, ARM64 Node and Windows
 FFmpeg. Each invocation owns a unique guest directory. The host retrieves the
-guest identity, report JSON and ordered block records over WinHoo. Videos and
-traces remain in that guest attempt's evidence directory. A completed matrix
+guest identity, report JSON and ordered block records over WinHoo. On a failed
+block it also downloads the original trace, video and reader events in
+`failed-block.zip` before shutdown, with the guest digest in
+`failure-archive.json`. If collection fails, that file records the error and
+the original results stay on the guest for WinHoo's `collect --from-directory`.
+Keep these files private until reviewed. A completed matrix
 requires the same source and active guest bytes before and after, 40 passed
 blocks with zero test retries, and confirmed guest shutdown. A readiness
 probe, a diagnostic shard or two partial matrices cannot satisfy that gate.

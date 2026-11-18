@@ -380,7 +380,7 @@ async function waitUntilReady(expectedLocale) {
           }
           if (r.status === 0 && r.payload.ready && r.payload.runtimeFresh &&
               typeof r.payload.runtime?.locale === 'string' &&
-              (!expectedLocale || r.payload.runtime.locale === expectedLocale)) return r.payload.runtime.locale;
+              (!expectedLocale || r.payload.runtime.locale === expectedLocale)) return r.payload.runtime;
           reason = 'Guest runtime is stale or its interactive locale differs';
         } else reason = 'Chrome or NVDA version/readiness mismatch';
       } catch (error) {
@@ -448,11 +448,12 @@ async function waitUntilReady(expectedLocale) {
           }
         } else sessionResets = 0;
         if (ssh.status === 0 && ssh.payload.ready === true && ssh.payload.runtimeFresh === true &&
-            (expectedLocale === undefined || ssh.payload.runtime?.locale === expectedLocale)) {
+            typeof ssh.payload.runtime?.locale === 'string' &&
+            (expectedLocale === undefined || ssh.payload.runtime.locale === expectedLocale)) {
           console.log(
             'NVDA 2026.1.1 oracle ready: SSH 127.0.0.1:2224, control 127.0.0.1:3002, CDP 127.0.0.1:9224.',
           );
-          return;
+          return ssh.payload.runtime;
         }
         lastError = ssh.status === 0 ? `guest status is stale or locale does not match ${expectedLocale ?? 'the current session'}` : `SSH control unavailable: ${(ssh.stderr || ssh.error?.message || `exit ${ssh.status}`).trim()}`;
       } else {
@@ -866,7 +867,7 @@ async function runParityCell(locale, keyboardLayout, options = {}) {
     throw new Error('parity-cell requires locale en-US|de-DE and layout desktop|laptop');
   }
   requireInitialized();
-  const activeLocale = await waitUntilReady();
+  const active = await waitUntilReady();
   if (options.build !== false && existsSync(join(projectRoot, 'tsconfig.build.json'))) {
     execFileSync('npm', ['run', 'build'], {
       cwd: projectRoot,
@@ -875,9 +876,14 @@ async function runParityCell(locale, keyboardLayout, options = {}) {
   }
   const token = options.token ?? readControlToken();
   console.log(`NVDA parity ${locale}/${keyboardLayout}`);
-  if (activeLocale !== locale) {
+  if (active.locale !== locale) {
     runSshControl(`locale-${locale}`);
-    await waitUntilReady(locale);
+    const changed = await waitUntilReady(locale);
+    if (![active, changed].every(s => [s.chromePid,s.nvdaPid].every(pid => Number.isInteger(pid) && pid > 0)) ||
+        active.chromePid !== changed.chromePid || active.nvdaPid === changed.nvdaPid) {
+      throw new Error('A runtime language change must preserve Chrome and replace NVDA before sending native keys');
+    }
+    console.log(`NVDA locale ${active.locale} -> ${locale}; Chrome PID ${changed.chromePid}, NVDA PID ${active.nvdaPid} -> ${changed.nvdaPid}`);
   }
   if (options.shard) {
     const root = join(invocationRoot, 'test-results');
