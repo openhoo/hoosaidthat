@@ -109,7 +109,7 @@ def invoke_from_http(function):
 def load_runtime():
     tree = ast.parse(PLUGIN_PATH.read_text(encoding="utf-8"))
     required = {
-        "OracleState", "call_on_main", "current_state", "object_is_protected", "execute_action",
+        "OracleState", "call_on_main", "current_state", "object_is_protected", "execute_action", "configure_session",
     }
     selected = [
         node for node in tree.body
@@ -190,6 +190,28 @@ class StateExecutionTests(unittest.TestCase):
 
     def tearDown(self):
         self.assertEqual(self.probe.wrong_thread, [])
+
+    def test_next_session_releases_the_previous_braille_message_on_the_main_thread(self):
+        display = SimpleNamespace(mainBuffer=object(), messageBuffer=object())
+        display.buffer = display.messageBuffer
+        updates = []
+        def dismiss(shouldUpdate=True):
+            self.probe.read("braille.dismiss", None)
+            # A redraw here could expose the previous test's main buffer.
+            updates.append(shouldUpdate)
+            display.buffer = display.mainBuffer
+        display._dismissMessage = dismiss
+        self.namespace.update(
+            languageHandler=SimpleNamespace(getLanguage=lambda: "en", normalizeLanguage=lambda v: v),
+            config=SimpleNamespace(conf={"keyboard": {}}),
+            braille=SimpleNamespace(handler=display),
+        )
+        start = lambda: invoke_from_http(lambda: self.namespace["configure_session"]("en-US", "desktop"))
+        start()
+        self.assertIs(display.buffer, display.mainBuffer)
+        start()
+        self.assertEqual(updates, [False])
+        self.assertEqual(self.namespace["STATE"].events, [])
 
     def native_object(self, label):
         return NativeObject(
