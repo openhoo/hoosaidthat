@@ -134,6 +134,13 @@ is real NVDA presentation evidence, not acoustic output or lived-experience
 proof. Gesture delivery uses NVDA's official system-test emulation path and is
 reported as `emulated`, never mislabeled as a physical keyboard event.
 
+Windows can open consecutive Chrome test windows progressively farther down
+the screen. HooSaidThat fits a normal NVDA test window inside its monitor's
+work area before the test starts, preserving its size whenever it fits. This
+keeps visible page controls reachable by NVDA's mouse commands. The native
+core test starts with a displaced window and checks that NVDA actually clicks
+the fixture button.
+
 Live-region semantics use the object handler or the exact native IA2 report
 callback's queued presentation call. The latter retains reported politeness and
 processed speech across queue delay, without matching unrelated earlier speech.
