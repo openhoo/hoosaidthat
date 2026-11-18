@@ -25,10 +25,10 @@ if ($Request.operation -eq 'status') {
     exit 0
 }
 if ($Request.operation -notin @('start', 'recover')) { throw 'Unknown qualification request' }
-# Paths are validated by the launcher. Quote every native Windows argument, including spaces.
+# WSL parses raw Windows switches before the Linux argv. Quoted switches become Linux commands.
 $workerMode = if ($Request.operation -eq 'recover') { '_recover' } else { '_run' }
 $argv = @($prefix) + @($workerMode, $Request.payload)
-$arguments = ($argv | ForEach-Object { '"' + $_ + '"' }) -join ' '
+$arguments = ($argv | ForEach-Object { if ($_ -match '\s') { '"' + $_ + '"' } else { $_ } }) -join ' '
 $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent()
 $user = $identity.Name
 function Same-Principal([string]$name) {

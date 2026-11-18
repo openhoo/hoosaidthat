@@ -329,8 +329,8 @@ def windows(c, operation, attempt, replay):
             'user': c.get('user'), 'worker': worker, 'payload': payload}
     # Only this installed script is executed. No workstation paths or user-supplied strings
     # are interpolated into PowerShell source. Use stdin to avoid cmd.exe's 8191-byte limit.
-    stub = "$ErrorActionPreference='Stop';try{$v=[Console]::In.ReadToEnd()|ConvertFrom-Json;& ([ScriptBlock]::Create($v.script)) $v.request;exit $LASTEXITCODE}catch{[Console]::Error.WriteLine($_.Exception.Message);exit 1}"
-    cmd = 'powershell.exe -NoLogo -NoProfile -NonInteractive -EncodedCommand ' + base64.b64encode(stub.encode('utf-16le')).decode()
+    stub = "$ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue';try{$v=[Console]::In.ReadToEnd()|ConvertFrom-Json;& ([ScriptBlock]::Create($v.script)) $v.request;exit $LASTEXITCODE}catch{[Console]::Error.WriteLine($_.Exception.Message);exit 1}"
+    cmd = 'powershell.exe -NoLogo -NoProfile -NonInteractive -OutputFormat Text -EncodedCommand ' + base64.b64encode(stub.encode('utf-16le')).decode()
     ssh = ['ssh', '-T', '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes', '-o', 'ConnectTimeout=7']
     if c.get('sshConfig'):
         ssh += ['-F', c['sshConfig']]
