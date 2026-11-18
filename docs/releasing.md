@@ -55,13 +55,17 @@ before promotion. Only explicit registry not-found responses count as absence;
 authentication, network, and malformed responses stop the release. Stable npm
 versions use the explicit `latest` dist-tag; prereleases use `next`.
 
-Before tagging, run `.github/workflows/nvda-oracle.yml` for the exact candidate
-commit on a trusted self-hosted runner labeled `linux`, `x64`, `kvm`, and
-`nvda-oracle`, or run `npm run nvda:windows:parity` on the operator workstation.
-That separate gate owns the persistent licensed Windows VM, selects and attests
-each real-NVDA process locale, executes the complete four-cell 190-action
-semantic matrix plus settings and core behavior gates, uploads only Playwright
-evidence, and shuts the guest down.
+Before tagging, run the [owned Windows qualification](../oracle/windows-nvda/README.md#run-and-observe-a-qualification)
+against the exact candidate. Use `qualification start` on a retained WSL2
+workstation or `.github/workflows/nvda-oracle.yml` on the self-hosted Linux/KVM
+runner. For the workflow, configure the repository variable
+`NVDA_ORACLE_CONTAINER_ID` with the full ID of the stopped licensed container.
+Require one matrix receipt with all 40 blocks (190 actions per locale/layout,
+core and settings), zero retries, and confirmed guest shutdown. A diagnostic
+replay or a green HooVDA image CI job is a separate result.
+The qualification and release compare the HooVDA pin to the source tree on
+upstream main, so a merge with identical bytes is accepted and new engine
+changes must be reviewed before publication.
 GitHub-hosted release jobs intentionally do not install or redistribute Windows
 or NVDA.
 

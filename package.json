@@ -58,6 +58,7 @@
     "!oracle/**/__pycache__",
     "!oracle/**/*.pyc",
     "scripts/hoovda-parity.mjs",
+    "scripts/check-hoovda-source.mjs",
     "scripts/nvda-windows.mjs",
     "scripts/verify-web-report.mjs",
     "README.md",
@@ -127,7 +128,9 @@
     "voiceover:macos:init": "node scripts/voiceover-macos.mjs init",
     "voiceover:macos:run": "node scripts/voiceover-macos.mjs run",
     "voiceover:macos:status": "node scripts/voiceover-macos.mjs status",
-    "voiceover:macos:stop": "node scripts/voiceover-macos.mjs stop"
+    "voiceover:macos:stop": "node scripts/voiceover-macos.mjs stop",
+    "hoovda:check": "node scripts/check-hoovda-source.mjs",
+    "nvda:windows:qualification": "node scripts/nvda-windows.mjs qualification"
   },
   "peerDependencies": {
     "@playwright/test": ">=1.62.1 <1.65.0"

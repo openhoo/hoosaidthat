@@ -17,6 +17,81 @@ readiness after each locale change and uses that same fresh locale status.
 The separate managed WinHoo controller is covered in
 [the workstation adapter instructions](../../contrib/winhoo/README.md).
 
+## Run and observe a qualification
+
+Prepare the licensed guest once with the low-level commands below. Shut it down
+with `control shutdown` and retain the container. Read its full ID with
+`preflight`. The qualification controller takes exclusive ownership of a
+**stopped** guest, checks its storage and shared mounts, and records the disk
+identity. An active guest, different container, changed disk or busy lease
+stops the new attempt. Do not run manual guest commands during an attempt.
+
+On Linux with KVM, a clean checkout and installed locked dependencies:
+
+```sh
+npm run nvda:windows:qualification -- run --candidate "$(git rev-parse HEAD)" --container "$ORACLE_ID" --attempt release-1
+```
+
+For a Windows workstation with a prepared WSL2 Linux distribution, save a
+private operator configuration on the controlling machine:
+
+```json
+{
+  "host": "windows-oracle",
+  "distribution": "Oracle",
+  "user": "oracle",
+  "source": "/srv/oracle/src/release-1",
+  "runtime": "/srv/oracle/retained-runtime",
+  "node": "/usr/bin/node",
+  "candidate": "<full HooSaidThat commit SHA>",
+  "container": "<full retained Podman container ID>"
+}
+```
+
+The SSH alias selects the Windows login and identity. An optional absolute
+`sshConfig` selects a dedicated local OpenSSH config. Enroll the Windows host
+key first; host verification and noninteractive key authentication are
+required. Keep the Windows user signed in. The on-demand task uses that user's
+limited interactive token, and the WSL user must own the chosen Podman runtime.
+The observer may disconnect or shut down; the Windows host must stay awake.
+
+```sh
+npx hoosaidthat-nvda-windows qualification prepare --config runner.json
+npx hoosaidthat-nvda-windows qualification start --config runner.json --attempt release-1
+npx hoosaidthat-nvda-windows qualification status --config runner.json --attempt release-1
+```
+
+`prepare` fetches the exact published Git commit into a fresh directory and
+installs the locked dependencies and Playwright ffmpeg. It does not boot
+Windows. `start` returns once Windows Task Scheduler has accepted the task.
+Repeat `status` from another connection to see the phase, completed block count,
+current block, scheduler state, evidence location and independent test and
+shutdown results. An attempt ID is write-once; failed attempts retain their
+data. `status` without an ID follows the runtime's currently selected attempt.
+Use the same commands from source with `node scripts/nvda-windows.mjs`.
+
+```sh
+npx hoosaidthat-nvda-windows qualification start --config runner.json --attempt diagnose-1 --replay en-US desktop actions-08
+npx hoosaidthat-nvda-windows qualification recover --config runner.json --attempt release-1
+```
+
+A replay gets a fresh attempt and does not count toward the forty release
+blocks. `recover` is for an **interrupted attempt or unconfirmed shutdown**.
+It rechecks the exclusive lease, attempt, container and disk, then asks the
+guest to shut down. A disconnected SSH transport can fall back to one ACPI
+power-button request; an unknown engine, changed host key or unconfirmed
+shutdown is an error. Recovery never promotes partial evidence to a pass.
+Use a fresh attempt ID for another full run.
+
+Attempts live under `<runtime>/qualification/<attempt>`. `receipt.json` records
+the exact HooSaidThat commit and tree, HooVDA pin and upstream tree. Before
+boot, the controller compares the pinned engine source to upstream main;
+`npm run hoovda:check` performs this check separately. Divergence means reviewing
+and qualifying an updated pin. Releases repeat that check. `blocks.jsonl`
+records every block and the number of selected and skipped Playwright cases.
+`test-results/` holds per-block evidence. Keep the full logs and reports
+private. Do not upload the runtime, disk, SSH directory or secrets.
+
 ## Start
 
 ```bash
@@ -158,8 +233,7 @@ npm run nvda:windows:parity-shard -- en-US desktop actions-01
 
 The command verifies the requested NVDA process locale and runs just `core`,
 `actions-01` through `actions-08`, or `settings`. Each replay writes to a new
-`test-results/nvda-replay-*` directory. Use `nvda:windows:parity` for release
-qualification; it always runs all forty blocks.
+`test-results/nvda-replay-*` directory. The qualification controller runs all forty blocks for a release.
 
 For a focused developer probe, first select the matching process locale, then
 limit the semantic action loop. The release-grade matrix always clears this

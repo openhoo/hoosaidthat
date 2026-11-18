@@ -87,6 +87,8 @@ jobs:
             trusted|bootstrap-stage) ;;
             *) echo "Unknown npm publishing mode" >&2; exit 1 ;;
           esac
+      - name: Verify the pinned HooVDA source against upstream main
+        run: npm run hoovda:check
       - name: Verify npm bootstrap identity
         if: inputs.npm_publish_mode == 'bootstrap-stage'
         run: npm whoami
