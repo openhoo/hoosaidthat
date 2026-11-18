@@ -1584,7 +1584,13 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
             self.install_native_live_region_capture()
             core.postNvdaStartup.register(self.on_startup)
             self.registered.append((core.postNvdaStartup, self.on_startup))
-            self.server = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
+            # NVDA can relaunch using UIAccess without the launcher's environment.
+            # The installed desktop marker survives that process handoff.
+            local_only = os.environ.get("HST_NVDA_LOCAL_ONLY") == "1" or os.path.isfile(
+                r"C:\ProgramData\HooSaidThat\winhoo-owner.json"
+            )
+            bind = "127.0.0.1" if local_only else "0.0.0.0"
+            self.server = ThreadingHTTPServer((bind, PORT), Handler)
             self.server.control_token = token
             self.server_thread = threading.Thread(
                 target=self.server.serve_forever,
@@ -1592,7 +1598,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
                 daemon=True,
             )
             self.server_thread.start()
-            self.cdp_proxy = ThreadingTCPServer(("0.0.0.0", 9222), CdpProxyHandler)
+            self.cdp_proxy = ThreadingTCPServer((bind, 9222), CdpProxyHandler)
             self.cdp_proxy_thread = threading.Thread(
                 target=self.cdp_proxy.serve_forever,
                 name="HooSaidThatChromeCDPProxy",

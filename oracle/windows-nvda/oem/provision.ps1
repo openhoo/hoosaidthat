@@ -1,14 +1,14 @@
 [CmdletBinding()]
-param()
+param([switch]$WinHooLocal)
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 
 $Root = 'C:\HooSaidThat'
 $ProgramDataRoot = Join-Path $env:ProgramData 'HooSaidThat'
-$SharedBootstrap = 'Z:\bootstrap'
+$SharedBootstrap = if ($WinHooLocal) { Join-Path $ProgramDataRoot 'bootstrap' } else { 'Z:\bootstrap' }
 $StatusPath = Join-Path $SharedBootstrap 'oem-status.json'
-$TokenSource = 'Z:\secrets\control-token'
+$TokenSource = if ($WinHooLocal) { Join-Path $ProgramDataRoot 'provision-token' } else { 'Z:\secrets\control-token' }
 $TokenDestination = Join-Path $ProgramDataRoot 'control-token'
 $NvdaSpec = [pscustomobject]@{
     Name = 'nvda_2026.1.1.exe'
@@ -96,15 +96,17 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'control token ACL configuration failed' }
 
     Publish-Status 'running' 'configure-openssh'
-    & (Join-Path $Root 'configure-ssh.ps1')
+    if (-not $WinHooLocal) { & (Join-Path $Root 'configure-ssh.ps1') }
 
     Publish-Status 'running' 'configure-time'
     Set-TimeZone -Id 'UTC'
     Set-Service -Name W32Time -StartupType Automatic
     Start-Service -Name W32Time -ErrorAction SilentlyContinue
-    $timeSync = & w32tm.exe /resync /force 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        throw ('Windows time synchronization failed: ' + (($timeSync | Out-String).Trim() -replace '[\r\n]+', ' '))
+    if (-not $WinHooLocal) {
+        $timeSync = & w32tm.exe /resync /force 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            throw ('Windows time synchronization failed: ' + (($timeSync | Out-String).Trim() -replace '[\r\n]+', ' '))
+        }
     }
 
     Publish-Status 'running' 'download-pinned-applications'
@@ -142,8 +144,10 @@ try {
         Get-NetFirewallRule -Name $ruleName -ErrorAction SilentlyContinue |
             Remove-NetFirewallRule -ErrorAction SilentlyContinue
     }
-    New-NetFirewallRule -Name 'HooSaidThat-NVDA-Control' -DisplayName 'HooSaidThat NVDA control' -Direction Inbound -Protocol TCP -LocalPort 3000 -Action Allow -Profile Any | Out-Null
-    New-NetFirewallRule -Name 'HooSaidThat-Chrome-CDP' -DisplayName 'HooSaidThat Chrome CDP' -Direction Inbound -Protocol TCP -LocalPort 9222 -Action Allow -Profile Any | Out-Null
+    if (-not $WinHooLocal) {
+        New-NetFirewallRule -Name 'HooSaidThat-NVDA-Control' -DisplayName 'HooSaidThat NVDA control' -Direction Inbound -Protocol TCP -LocalPort 3000 -Action Allow -Profile Any | Out-Null
+        New-NetFirewallRule -Name 'HooSaidThat-Chrome-CDP' -DisplayName 'HooSaidThat Chrome CDP' -Direction Inbound -Protocol TCP -LocalPort 9222 -Action Allow -Profile Any | Out-Null
+    }
 
     Publish-Status 'running' 'register-runtime'
     $taskName = 'HooSaidThat NVDA Oracle'
@@ -152,13 +156,18 @@ try {
     $action = New-ScheduledTaskAction -Execute 'PowerShell.exe' -Argument (
         '-NoLogo -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "{0}"' -f (Join-Path $Root 'start-runtime.ps1')
     )
+    if ($WinHooLocal) {
+        $action = New-ScheduledTaskAction -Execute "$env:SystemRoot\System32\wscript.exe" -Argument '//B //Nologo C:\HooSaidThat\launch-local.vbs'
+    }
     $trigger = New-ScheduledTaskTrigger -AtLogOn -User 'HstOracle'
     $principal = New-ScheduledTaskPrincipal -UserId 'HstOracle' -LogonType Interactive -RunLevel Highest
     $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
     Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
     $commonStartup = [Environment]::GetFolderPath('CommonStartup')
     if (-not $commonStartup) { throw 'Common Startup directory unavailable' }
-    Copy-Item -LiteralPath (Join-Path $Root 'runtime-startup.cmd') -Destination (Join-Path $commonStartup 'HooSaidThat-NVDA.cmd') -Force
+    if (-not $WinHooLocal) {
+        Copy-Item -LiteralPath (Join-Path $Root 'runtime-startup.cmd') -Destination (Join-Path $commonStartup 'HooSaidThat-NVDA.cmd') -Force
+    }
     Start-ScheduledTask -TaskName $taskName
 
     Publish-Status 'ready' 'complete'

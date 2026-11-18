@@ -6,6 +6,9 @@ $ErrorActionPreference = 'Stop'
 
 $TaskName = 'HooSaidThat NVDA Oracle'
 $RuntimeStatusPath = '\\host.lan\Data\bootstrap\runtime-status.json'
+if (Test-Path -LiteralPath 'C:\ProgramData\HooSaidThat\winhoo-owner.json' -PathType Leaf) {
+    $RuntimeStatusPath = 'C:\ProgramData\HooSaidThat\bootstrap\runtime-status.json'
+}
 $NvdaLogPath = 'C:\ProgramData\HooSaidThat\nvda.log'
 $NvdaExecutable = 'C:\Program Files\NVDA\nvda.exe'
 $ChromeRoot = 'C:\HooSaidThat\browsers\chrome-win64\'
@@ -261,6 +264,24 @@ function Get-RuntimeStatus {
 }
 
 function Stop-OwnedRuntime {
+    # Task Scheduler can stop the launcher while its child still owns the
+    # interactive desktop. Let the supervisor leave its loop before recycling
+    # either application or changing the runtime language.
+    $stop = $null
+    try { $stop = [Threading.EventWaitHandle]::OpenExisting('Global\HooSaidThatNvdaOracleStop') }
+    catch [Threading.WaitHandleCannotBeOpenedException] { }
+    if ($stop) {
+        try {
+            $null = $stop.Set()
+            $owner = [Threading.Mutex]::new($false, 'Global\HooSaidThatNvdaOracle')
+            try {
+                try { $released = $owner.WaitOne(12000) }
+                catch [Threading.AbandonedMutexException] { $released = $true }
+                if (-not $released) { throw 'Interactive supervisor did not stop; refusing an overlapping restart' }
+                $owner.ReleaseMutex()
+            } finally { $owner.Dispose() }
+        } finally { $stop.Dispose() }
+    }
     Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
     Start-Sleep -Milliseconds 500
     $snapshot = Get-ProcessSnapshot

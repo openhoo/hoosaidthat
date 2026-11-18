@@ -26,6 +26,8 @@ import { fileURLToPath } from 'node:url';
 
 import { readOracleContainer, readQemuState, requireRunningOracle } from '../oracle/windows-nvda/engine-state.mjs';
 
+import { localDesktop, localControl, requireDesktop } from '../oracle/windows-nvda/winhoo-local.mjs';
+
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const invocationRoot = process.cwd();
 const require = createRequire(import.meta.url);
@@ -44,7 +46,8 @@ const sharedRoot = join(runtimeRoot, 'shared');
 const secretRoot = join(sharedRoot, 'secrets');
 const sshRoot = join(runtimeRoot, 'ssh');
 const environmentPath = join(runtimeRoot, '.env');
-const tokenPath = join(secretRoot, 'control-token');
+const winhoo = localDesktop();
+const tokenPath = winhoo ? 'C:/ProgramData/HooSaidThat/control-token' : join(secretRoot, 'control-token');
 const sshPrivateKeyPath = join(sshRoot, 'id_ed25519');
 const sshPublicKeyPath = `${sshPrivateKeyPath}.pub`;
 const knownHostsPath = join(sshRoot, 'known_hosts');
@@ -111,6 +114,11 @@ const command = process.argv[2] ?? 'status';
 
 try {
 switch (command) {
+  case 'winhoo': {
+    const result = spawnSync('python3', [join(deploymentRoot, 'winhoo-local.py'), ...process.argv.slice(3)], { stdio: 'inherit' });
+    process.exitCode = result.status ?? 1;
+    break;
+  }
   case 'qualification': {
     const worker = spawnSync('python3', [join(deploymentRoot, 'qualification.py'), ...process.argv.slice(3)], {
       stdio: 'inherit', env: { ...process.env, HST_QUAL_NODE: process.execPath },
@@ -196,7 +204,7 @@ switch (command) {
     break;
   default:
     throw new Error(
-      'usage: nvda-windows.mjs qualification <prepare|run|start|status|recover>|preflight|doctor|init|up|wait|status|control <command>|wait-ssh|sync|parity|parity-cell <locale> <layout>|parity-shard <locale> <layout> <shard>|down',
+      'usage: nvda-windows.mjs winhoo <provision|run>|qualification <prepare|run|start|status|recover>|preflight|doctor|init|up|wait|status|control <command>|wait-ssh|sync|parity|parity-cell <locale> <layout>|parity-shard <locale> <layout> <shard>|down',
     );
 }
 } catch (error) {
@@ -354,6 +362,35 @@ function lockedSignInSession(status) {
 
 async function waitUntilReady(expectedLocale) {
   requireInitialized();
+  if (winhoo) {
+    const deadline = Date.now() + 120_000;
+    let reason = 'Waiting for NVDA and Chrome';
+    while (Date.now() < deadline) {
+      requireDesktop(winhoo);
+      try {
+        const [health, chrome] = await probeHttpReadiness(readControlToken(), deadline);
+        const spec = JSON.parse(readFileSync(join(deploymentRoot, 'runtime-lock.json'), 'utf8'));
+        if (health.ready && health.protocolVersion === '2.0' && health.screenReader === 'nvda' &&
+            health.version === spec.nvda.version && chrome.Browser === 'Chrome/' + spec.chromeForTesting.version &&
+            typeof chrome.webSocketDebuggerUrl === 'string') {
+          const r = trySshControl('status', deadline);
+          if (r.status !== 0) {
+            throw Object.assign(new Error('Windows status command failed: ' +
+              (r.error?.message ?? r.stderr?.trim() ?? 'no diagnostic').slice(0, 450)), {code:'HST_LOCAL_CONTROL'});
+          }
+          if (r.status === 0 && r.payload.ready && r.payload.runtimeFresh &&
+              typeof r.payload.runtime?.locale === 'string' &&
+              (!expectedLocale || r.payload.runtime.locale === expectedLocale)) return r.payload.runtime.locale;
+          reason = 'Guest runtime is stale or its interactive locale differs';
+        } else reason = 'Chrome or NVDA version/readiness mismatch';
+      } catch (error) {
+        if (error.code === 'HST_SSH_TIMEOUT' || error.code === 'HST_LOCAL_CONTROL') throw error;
+        reason = error.message;
+      }
+      await new Promise((done) => setTimeout(done, 1000));
+    }
+    throw new Error('WinHoo screen reader readiness timed out: ' + reason);
+  }
   const token = readControlToken();
   const deadline = Date.now() + 45 * 60_000;
   let lastPhases = '';
@@ -459,7 +496,7 @@ async function probeHttpReadiness(token, deadline) {
   const probes = [];
   try {
     probes.push(readHttpReadinessResponse(
-      fetch('http://127.0.0.1:3002/v2/health', {
+      fetch(winhoo ? 'http://127.0.0.1:3000/v2/health' : 'http://127.0.0.1:3002/v2/health', {
         // The validated secret is intentionally sent only to the fixed host-loopback
         // control endpoint. It never influences request destination or path.
         // codeql[js/file-access-to-http]
@@ -469,7 +506,7 @@ async function probeHttpReadiness(token, deadline) {
       'NVDA-Control-Bereitschaft', controller,
     ));
     probes.push(readHttpReadinessResponse(
-      fetch('http://127.0.0.1:9224/json/version', { signal: controller.signal }),
+      fetch(winhoo ? 'http://127.0.0.1:9223/json/version' : 'http://127.0.0.1:9224/json/version', { signal: controller.signal }),
       'Chrome-CDP-Version', controller,
     ));
     return await Promise.all(probes);
@@ -600,7 +637,7 @@ function rejectSshProcessTimeout(result, remoteCommand, timeoutMs) {
 
 function trySshControl(remoteCommand, deadline = Infinity) {
   try {
-    pinGuestHostKey();
+    if (!winhoo) pinGuestHostKey();
   } catch (error) {
     return { status: 1, stdout: '', stderr: '', error };
   }
@@ -608,7 +645,7 @@ function trySshControl(remoteCommand, deadline = Infinity) {
   if (timeout <= 0) {
     return { status: 1, stdout: '', stderr: '', error: new Error('SSH readiness deadline exhausted') };
   }
-  const result = spawnSync('ssh', sshArguments(remoteCommand, timeout), {
+  const result = winhoo ? localControl(winhoo, remoteCommand, timeout) : spawnSync('ssh', sshArguments(remoteCommand, timeout), {
     encoding: 'utf8',
     timeout,
   });
@@ -632,13 +669,13 @@ function runSshControl(remoteCommand) {
 
 function runSshCommand(remoteCommand, expectedCommand) {
   if (process.env.HST_NVDA_CONTAINER_ID) requireRunningOracle('podman', Infinity, process.env.HST_NVDA_CONTAINER_ID);
-  pinGuestHostKey();
+  if (!winhoo) pinGuestHostKey();
   const defaultTimeout = remoteCommand === 'reconfigure-ssh' ||
     (expectedCommand === 'update' && process.env.HST_NVDA_ACCELERATION === 'tcg')
     ? 120_000
     : 30_000;
   const timeout = sshTimeoutMs(remoteCommand, defaultTimeout);
-  const result = spawnSync('ssh', sshArguments(remoteCommand, timeout), {
+  const result = winhoo ? localControl(winhoo, remoteCommand, timeout) : spawnSync('ssh', sshArguments(remoteCommand, timeout), {
     encoding: 'utf8',
     timeout,
     maxBuffer: 1024 * 1024,
@@ -798,7 +835,7 @@ async function waitAfterSshReconfigure() {
 }
 
 function requireInitialized() {
-  if (!existsSync(environmentPath) || !existsSync(tokenPath)) {
+  if ((!winhoo && !existsSync(environmentPath)) || !existsSync(tokenPath)) {
     throw new Error(`NVDA runtime is not initialized at ${runtimeRoot}; run init first`);
   }
 }
@@ -829,7 +866,7 @@ async function runParityCell(locale, keyboardLayout, options = {}) {
     throw new Error('parity-cell requires locale en-US|de-DE and layout desktop|laptop');
   }
   requireInitialized();
-  await waitUntilReady();
+  const activeLocale = await waitUntilReady();
   if (options.build !== false && existsSync(join(projectRoot, 'tsconfig.build.json'))) {
     execFileSync('npm', ['run', 'build'], {
       cwd: projectRoot,
@@ -838,8 +875,10 @@ async function runParityCell(locale, keyboardLayout, options = {}) {
   }
   const token = options.token ?? readControlToken();
   console.log(`NVDA parity ${locale}/${keyboardLayout}`);
-  runSshControl(`locale-${locale}`);
-  await waitUntilReady(locale);
+  if (activeLocale !== locale) {
+    runSshControl(`locale-${locale}`);
+    await waitUntilReady(locale);
+  }
   if (options.shard) {
     const root = join(invocationRoot, 'test-results');
     mkdirSync(root, { recursive: true });
@@ -871,6 +910,7 @@ function runParityInvocation(locale, keyboardLayout, token, label, overrides = {
   const name = `${locale}/${keyboardLayout}/${label}`;
   const started = performance.now();
   if (process.env.HST_NVDA_CONTAINER_ID) requireRunningOracle('podman', Infinity, process.env.HST_NVDA_CONTAINER_ID);
+  if (winhoo) requireDesktop(winhoo);
   const qualification = process.env.HST_NVDA_QUALIFICATION === '1';
   const report = join(invocationRoot, 'reports', `${locale}-${keyboardLayout}-${label}.json`);
   if (qualification) mkdirSync(dirname(report), { recursive: true, mode: 0o700 });
