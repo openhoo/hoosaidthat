@@ -973,7 +973,7 @@ function runParityInvocation(locale, keyboardLayout, token, label, overrides = {
   if (qualification) {
     try {
       const { stats } = JSON.parse(readFileSync(report, 'utf8'));
-      const required = label === 'core' ? 4 : 2;
+      const required = label === 'core' ? 5 : 2;
       if (!Number.isInteger(stats.expected) || stats.expected < required || stats.flaky !== 0 ||
           stats.unexpected !== 0 || !Number.isInteger(stats.skipped) || stats.skipped < 0) {
         throw new Error(`expected at least ${required} selected passing tests, without retries`);

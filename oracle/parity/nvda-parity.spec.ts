@@ -88,6 +88,28 @@ test.describe("NVDA window placement", () => {
   });
 });
 
+coreTest("a collapsed native select presents changes while focus stays on the control", async ({ page, screenReader }) => {
+  const url = "https://parity.test/select-value";
+  await page.route(url, route => route.fulfill({
+    contentType: "text/html; charset=utf-8",
+    body: '<!doctype html><html lang="en"><title>Language selection</title><main><button>Start</button>' +
+      '<label>Language <select><option value="">Choose</option><option value="en-GB">English</option>' +
+      '<option value="zu">Zulu</option></select></label><button>Continue</button></main></html>',
+  }));
+  await page.goto(url);
+  const choice = page.getByRole("combobox", { name: "Language" });
+  await screenReader.focus(choice);
+  await screenReader.ensureFocusMode();
+  await expect(choice).toHaveValue("");
+  for (const [key, value, name] of [["e", "en-GB", "English"], ["ArrowDown", "zu", "Zulu"]] as const) {
+    const output = await screenReader.observe("Change the selected option", () => page.keyboard.press(key));
+    await expect(choice).toBeFocused();
+    await expect(choice).toHaveValue(value);
+    expect(output.speech).toContain(name);
+    expect(output.braille).toContain(name);
+  }
+});
+
 coreTest(
   "reference profile presents core speech, braille, details, table, and live-region behavior",
   async ({ page, screenReader }) => {

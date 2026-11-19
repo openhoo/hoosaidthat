@@ -44,7 +44,8 @@ test('installed HooVDA parity collects compiled JavaScript with the real Playwri
     assert.equal(result.status, 0, result.stderr);
     assert.match(result.stdout, /nvda-parity\.spec\.js.*every declared web-profile command executes through selected adapter/);
     assert.match(result.stdout, /a native mouse click reaches the button after Chrome opens partly off screen/);
-    assert.match(result.stdout, /Total: 7 tests in 1 file/);
+    assert.match(result.stdout, /a collapsed native select presents changes while focus stays on the control/);
+    assert.match(result.stdout, /Total: 8 tests in 1 file/);
     assert.match(result.stdout, /HooVDA de-DE\/laptop\/actions-8 passed/);
   } finally {
     rmSync(temporary, { recursive: true, force: true });

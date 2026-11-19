@@ -62,13 +62,18 @@ class GuestRunnerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             root=Path(d); (root/'reports').mkdir()
             block={'locale':'en-US','layout':'desktop','block':'core'}
-            records=[{**block,'state':'running'},{**block,'state':'passed','selected':4}]
+            records=[{**block,'state':'running'},{**block,'state':'passed','selected':5}]
             path=root/'blocks.jsonl'; text=''.join(json.dumps(r)+'\n' for r in records); path.write_text(text)
             report=root/'reports/en-US-desktop-core.json'
             with self.assertRaises(FileNotFoundError): runner.evidence(root,'core')
-            stats={'expected':4,'flaky':0,'unexpected':0}
+            stats={'expected':5,'flaky':0,'unexpected':0}
             report.write_text(json.dumps({'stats':stats}))
             self.assertEqual(runner.evidence(root,'core'),1)
+            # Both records agreeing on the former minimum still omits a core case.
+            path.write_text(text.replace('"selected": 5','"selected": 4'))
+            report.write_text(json.dumps({'stats':{**stats,'expected':4}}))
+            with self.assertRaisesRegex(RuntimeError,'disagree'): runner.evidence(root,'core')
+            path.write_text(text)
             report.write_text(json.dumps({'stats':{**stats,'flaky':1}}))
             with self.assertRaisesRegex(RuntimeError,'disagree'): runner.evidence(root,'core')
             path.write_text(text+text)
@@ -79,11 +84,11 @@ class GuestRunnerTests(unittest.TestCase):
             root=Path(d); (root/'reports').mkdir()
             def record(block, state, **extra):
                 return {'locale':'en-US','layout':'desktop','block':block,'state':state,**extra}
-            records=[record('core','running'),record('core','passed',selected=4),
+            records=[record('core','running'),record('core','passed',selected=5),
                      record('actions-01','running'),record('actions-01','failed')]
             file=root/'blocks.jsonl'
             file.write_text(''.join(json.dumps(r)+'\n' for r in records))
-            stats={'expected':4,'flaky':0,'unexpected':0}
+            stats={'expected':5,'flaky':0,'unexpected':0}
             (root/'reports/en-US-desktop-core.json').write_text(json.dumps({'stats':stats}))
             self.assertEqual(runner.evidence(root,'matrix',partial=True),1)
             with self.assertRaisesRegex(RuntimeError,'Incomplete'):runner.evidence(root,'matrix')

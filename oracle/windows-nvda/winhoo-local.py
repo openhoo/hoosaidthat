@@ -148,7 +148,7 @@ def evidence(folder, mode, locale='en-US', layout='desktop', *, partial=False):
         stats = report['stats']
         if (stats.get('flaky') != 0 or stats.get('unexpected') != 0 or
             stats.get('expected') != block.get('selected') or
-            not isinstance(stats.get('expected'),int) or stats['expected'] < (4 if identity[2]=='core' else 2)):
+            not isinstance(stats.get('expected'),int) or stats['expected'] < (5 if identity[2]=='core' else 2)):
             raise RuntimeError('Playwright report and block outcome disagree')
     return passed
 
