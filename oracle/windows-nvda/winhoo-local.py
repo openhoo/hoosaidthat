@@ -39,10 +39,10 @@ def save(path, data):
     temp.replace(path)
 
 
-def command(a, verb, *args, json_out=False, timeout=40, input_text=None, log=None, check=True):
+def command(a, verb, *args, json_out=False, timeout=40, input_text=None, log=None, stderr_log=None, check=True):
     params = [os.environ.get('HST_WINHOO_BIN', 'winhoo'), 'desktop', verb, str(a.desktop), *map(str,args)]
     completed = subprocess.run(params, check=check, timeout=timeout, stdout=subprocess.PIPE if json_out else log,
-                               stderr=subprocess.STDOUT if log else None, input=input_text,
+                               stderr=subprocess.STDOUT if log else stderr_log, input=input_text,
                                stdin=subprocess.DEVNULL if input_text is None else None, text=True)
     if json_out:
         return json.loads(completed.stdout)
@@ -179,8 +179,18 @@ def failed_output(folder, attempt, mode):
     return str(base/path.name)
 
 
-def focus_browser(a, binding, console):
-    browser = command(a,'exec','--file',HERE/'winhoo-browser.ps1','--timeout',100,json_out=True,timeout=110)
+def focus_browser(a, binding, console, folder):
+    path = folder/'browser-discovery.log'
+    try:
+        # Leave time beyond the guest's own readiness loop for a cold PowerShell/CIM call.
+        with path.open('x') as log:
+            browser = command(a,'exec','--file',HERE/'winhoo-browser.ps1','--timeout',180,
+                              json_out=True,timeout=195,stderr_log=log)
+    except subprocess.SubprocessError as exc:
+        phases = [line for line in path.read_text(errors='replace').splitlines()
+                  if line.startswith('HST browser: ')]
+        last = phases[-1] if phases else 'guest probe has not reported a phase'
+        raise RuntimeError(f'Chrome discovery failed ({last}); see {path.name}') from exc
     pid, ticks = browser.get('pid'), browser.get('startedTicks')
     if (type(pid) is not int or pid <= 0 or type(ticks) is not int or ticks <= 0 or
             type(browser.get('session')) is not int or browser['session'] != console['id']):
@@ -204,7 +214,7 @@ def guest_parity(a, artifact, binding, folder, console):
     save(folder/'guest-input.json',info)
     # A service-session command will own the guest for the duration of parity.
     # Acquire the foreground before that lock, using this boot's actual CDP owner.
-    save(folder/'browser-focus.json',focus_browser(a,binding,console))
+    save(folder/'browser-focus.json',focus_browser(a,binding,console,folder))
     script = '& {\n' + (HERE/'winhoo-run.ps1').read_text() + '\n} ' + ' '.join(
         (attempt,digest,a.mode,binding['uuid'],a.locale,a.layout)) + '\nexit $LASTEXITCODE'
     budget = 8*3600 if a.mode == 'matrix' else 20*60

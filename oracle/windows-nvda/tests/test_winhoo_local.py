@@ -2,6 +2,7 @@
 import hashlib
 import importlib.util
 import json
+import subprocess
 from pathlib import Path
 import sys
 import tempfile
@@ -37,15 +38,27 @@ class GuestRunnerTests(unittest.TestCase):
     def test_focuses_only_the_discovered_browser_on_the_attested_console(self):
         browser = {'pid': 272, 'startedTicks': 638990000000000000, 'session': 1}
         sample = {'pid': 272, 'session': 1, 'owner': 'vm', 'process': 'chrome', 'method': 'caption-click'}
-        with mock.patch.object(runner,'command',side_effect=[browser,sample]) as cmd:
-            self.assertEqual(runner.focus_browser(None,{'uuid':'vm'},{'id':1}), {**sample,'startedTicks':browser['startedTicks']})
+        with tempfile.TemporaryDirectory() as folder, mock.patch.object(runner,'command',side_effect=[browser,sample]) as cmd:
+            self.assertEqual(runner.focus_browser(None,{'uuid':'vm'},{'id':1},Path(folder)), {**sample,'startedTicks':browser['startedTicks']})
             self.assertEqual(cmd.call_args.args[1:], ('focus-window','--pid',272,'--started-ticks',browser['startedTicks']))
-        with mock.patch.object(runner,'command',return_value={**browser,'session':2}) as cmd:
-            with self.assertRaisesRegex(RuntimeError,'attested Windows console'): runner.focus_browser(None,{'uuid':'vm'},{'id':1})
+        with tempfile.TemporaryDirectory() as folder, mock.patch.object(runner,'command',return_value={**browser,'session':2}) as cmd:
+            with self.assertRaisesRegex(RuntimeError,'attested Windows console'): runner.focus_browser(None,{'uuid':'vm'},{'id':1},Path(folder))
             self.assertEqual(cmd.call_count,1)
         for other in ({'pid':273},{'process':'explorer'},{'owner':'other'},{'method':'requested'}):
-            with self.subTest(other=other),mock.patch.object(runner,'command',side_effect=[browser,{**sample,**other}]):
-                with self.assertRaisesRegex(RuntimeError,'did not confirm'): runner.focus_browser(None,{'uuid':'vm'},{'id':1})
+            with self.subTest(other=other), tempfile.TemporaryDirectory() as folder, mock.patch.object(runner,'command',side_effect=[browser,{**sample,**other}]):
+                with self.assertRaisesRegex(RuntimeError,'did not confirm'): runner.focus_browser(None,{'uuid':'vm'},{'id':1},Path(folder))
+
+    def test_discovery_timeout_keeps_the_last_guest_phase_without_sending_another_command(self):
+        def timeout(*args, stderr_log, **kwargs):
+            stderr_log.write('HST browser: waiting for runtime heartbeat\n')
+            stderr_log.write('HST browser: checking Chrome and its loopback listener\n')
+            stderr_log.write('unrelated transport diagnostic\n')
+            raise subprocess.TimeoutExpired('winhoo desktop exec', 180)
+        with tempfile.TemporaryDirectory() as folder, mock.patch.object(runner,'command',side_effect=timeout) as cmd:
+            with self.assertRaisesRegex(RuntimeError,'checking Chrome and its loopback listener'):
+                runner.focus_browser(None,{'uuid':'vm'},{'id':1},Path(folder))
+            self.assertEqual(cmd.call_count,1)
+            self.assertTrue((Path(folder)/'browser-discovery.log').is_file())
 
     def test_failure_archive_can_only_read_the_selected_attempt_and_block(self):
         attempt='d'*32

@@ -50,6 +50,12 @@ Any core, actions-01 through actions-08 or settings block can be replayed
 with its original language and keyboard layout. A failed matrix receipt
 counts only its report-verified prefix and remains failed.
 
+If a run stops before Playwright starts, look at `browser-discovery.log` in
+that attempt's evidence directory. It records when the guest sees the runtime
+heartbeat, checks Chrome's loopback listener and verifies its process and owner.
+`browser-focus.json` is written only after the foreground window is confirmed.
+A browser startup timeout is not a screen reader assertion failure.
+
 ## Check the engine
 
 `node scripts/nvda-windows.mjs preflight` (installed CLI: `hoosaidthat-nvda-windows preflight`)
