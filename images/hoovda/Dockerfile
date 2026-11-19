@@ -6,7 +6,10 @@ FROM mcr.microsoft.com/playwright:v1.62.1-noble@sha256:c091b21d9fae78c76e85cd435
 ARG DEBIAN_FRONTEND=noninteractive
 USER root
 
-RUN apt-get update \
+# The Playwright amd64 base uses Azure's regional mirror, which is not
+# reachable from every runner. Leave the arm64 ports archive unchanged.
+RUN sed -i 's|http://azure\.archive\.ubuntu\.com/ubuntu/|https://archive.ubuntu.com/ubuntu/|g' /etc/apt/sources.list.d/ubuntu.sources \
+ && apt-get update --error-on=any \
  && apt-get install -y --no-install-recommends \
       at-spi2-core \
       curl \

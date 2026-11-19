@@ -6,7 +6,9 @@ ARG DEBIAN_FRONTEND=noninteractive
 
 USER root
 
-RUN apt-get update \
+# Use the public Ubuntu archive for the Playwright builder on amd64.
+RUN sed -i 's|http://azure\.archive\.ubuntu\.com/ubuntu/|https://archive.ubuntu.com/ubuntu/|g' /etc/apt/sources.list.d/ubuntu.sources \
+ && apt-get update --error-on=any \
  && apt-get install -y --no-install-recommends \
       build-essential \
       ca-certificates \
