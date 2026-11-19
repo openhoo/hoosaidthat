@@ -19,7 +19,7 @@ function requireUnused({ mode = 'trusted', publicResult = { error: { code: 'E404
     writeFileSync(join(bin, 'npm'), `#!/bin/sh
 case "$1" in
   view) printf '%s\\n' "$PUBLIC_RESULT"; exit "$PUBLIC_STATUS" ;;
-  stage) printf 'stage\\n' >> "$STAGE_CALLS"; printf '%s\\n' "$STAGE_RESULT"; exit "$STAGE_STATUS" ;;
+  stage) echo 'private-registry-detail' >&2; printf 'stage\\n' >> "$STAGE_CALLS"; printf '%s\\n' "$STAGE_RESULT"; exit "$STAGE_STATUS" ;;
   *) exit 64 ;;
 esac
 `, { mode: 0o755 });
@@ -58,7 +58,7 @@ test('both modes refuse an existing public npm version', () => {
 });
 
 test('network, authentication, and malformed public responses never count as absence', () => {
-  for (const publicResult of [{ error: { code: 'E401' } }, { error: { code: 'ECONNRESET' } }, [], null]) {
+  for (const publicResult of [{ error: { code: 'E401' } }, { error: { code: 'ECONNRESET' } }, { error: { code: 'E404\n' } }, [], null]) {
     const result = requireUnused({ publicResult });
     assert.notEqual(result.status, 0);
     assert.match(result.stderr, /Cannot prove/);
@@ -76,7 +76,22 @@ test('bootstrap additionally checks staged versions and refuses collisions and i
     assert.notEqual(result.status, 0);
     assert.equal(result.stageCalls, 'stage\n');
   }
-  const unauthenticated = requireUnused({ mode: 'bootstrap-stage', stageStatus: 1, stages: { error: { code: 'E401' } } });
-  assert.notEqual(unauthenticated.status, 0);
-  assert.match(unauthenticated.stderr, /Cannot prove/);
+});
+
+test('public and staged lookup failures distinguish rejected credentials from denied access', () => {
+  for (const [code, reason] of [['E401', /authentication/i], ['E403', /permission/i]]) {
+    const response = { error: { code, summary: 'private-registry-detail' } };
+    for (const [lookup, options] of [
+      ['public', { publicResult: response }],
+      ['staged', { mode: 'bootstrap-stage', stageStatus: 1, stages: response }],
+    ]) {
+      const result = requireUnused(options);
+      assert.notEqual(result.status, 0);
+      assert.match(result.stderr, new RegExp(lookup));
+      assert.match(result.stderr, new RegExp(code));
+      assert.match(result.stderr, reason);
+      assert.doesNotMatch(result.stdout + result.stderr, /private-registry-detail/);
+      assert.equal(result.stageCalls, lookup === 'staged' ? 'stage\n' : '');
+    }
+  }
 });

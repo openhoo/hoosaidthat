@@ -22,14 +22,24 @@ pins Node 24 and npm 11.20.0 and offers two explicit npm modes:
   stage-list operations. A successful run verifies the public version's tarball
   integrity and npm provenance metadata against its publication receipt.
 - `bootstrap-stage`: use this for the first package when its trusted publisher
-  cannot yet be configured. Supply a temporary npm browser-login session token
-  through the repository's `NPM_TOKEN` Actions secret. The workflow verifies
-  the session and stages the package with provenance using `npm stage publish`.
-  A maintainer must review and approve that stage with MFA on npmjs.com (or
-  with `npm stage approve <stage-id>`) before it becomes public. The workflow
-  labels this outcome **staged**, not published. Remove the temporary secret
-  after the run, then configure the package's trusted publisher for later
-  `trusted` releases. No local package build or publication is needed.
+  cannot yet be configured. Have an npm maintainer set a temporary granular
+  access token as the repository’s `NPM_TOKEN` Actions secret. For
+  **packages and scopes**, select only `@openhoo/hoosaidthat` if it already
+  exists, or the `@openhoo` scope for the first release. Choose
+  `read-write-stage-only`; leave **organizations** at `no-access` and
+  **Bypass 2FA** off. See [npm’s token permissions](https://docs.npmjs.com/cli/v11/commands/npm-token/)
+  and [staged publishing](https://docs.npmjs.com/staged-publishing/).
+  Choose the shortest expiry that covers runner queues, the full qualification
+  and final staging. An [`npm login` session lasts two hours](https://github.blog/changelog/2025-12-09-npm-classic-tokens-revoked-session-based-auth-and-cli-token-management-now-available/);
+  a previous qualification alone took 2 h 7 min. An initial successful
+  `npm whoami` cannot establish that the credential will still work at promotion.
+  The workflow rechecks the public version and the stage list before promoting
+  the images. On `E401`, check credential validity and expiry; on `E403`, check
+  package/scope permissions before starting another attempt. The workflow uses
+  `npm stage publish` with provenance; a maintainer must review and approve
+  the stage with MFA on npmjs.com (or with `npm stage approve <stage-id>`)
+  before it becomes public. Revoke the bootstrap token and remove the Actions
+  secret after use; configure the package’s trusted publisher for later releases.
 
 Creating a trusted publisher is a separate npm account configuration step;
 adding this workflow to GitHub does not grant it permission on npm. Newly
