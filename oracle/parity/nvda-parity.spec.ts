@@ -88,6 +88,37 @@ test.describe("NVDA window placement", () => {
   });
 });
 
+coreTest("a collapsed native select presents changes while focus stays on the control", async ({ page, screenReader, screenReaderClient }) => {
+  const url = "https://parity.test/select-value";
+  await page.route(url, route => route.fulfill({
+    contentType: "text/html; charset=utf-8",
+    body: '<!doctype html><html lang="en"><title>Language selection</title><main><button>Start</button>' +
+      '<label>Language <select><option value="">Choose</option><option value="en-GB">English</option>' +
+      '<option value="zu">Zulu</option></select></label><button>Continue</button></main></html>',
+  }));
+  await page.goto(url);
+  const choice = page.getByRole("combobox", { name: "Language" });
+  await screenReader.focus(choice);
+  await screenReader.ensureFocusMode();
+  await expect(choice).toHaveValue("");
+  for (const [key, value, name] of [["e", "en-GB", "English"], ["ArrowDown", "zu", "Zulu"]] as const) {
+    const output = await screenReader.observe("Change the selected option", async () => {
+      // NVDA can speak the option before it refreshes the braille display.
+      // Wait for this key's actual display frame without sending another key.
+      const beforeKey = await screenReader.checkpoint();
+      await page.keyboard.press(key);
+      await expect.poll(async () => {
+        const { events } = await screenReaderClient.readEvents(beforeKey, { timeoutMs: 400, quietMs: 80 });
+        return events.filter(event => event.kind === "braille").at(-1)?.text;
+      }, { timeout: 8_000, message: `Braille display after ${key}` }).toContain(name);
+    });
+    await expect(choice).toBeFocused();
+    await expect(choice).toHaveValue(value);
+    expect(output.speech).toContain(name);
+    expect(output.braille).toContain(name);
+  }
+});
+
 coreTest(
   "reference profile presents core speech, braille, details, table, and live-region behavior",
   async ({ page, screenReader }) => {
@@ -277,12 +308,15 @@ actionsTest(
     const executed = new Set<ScreenReaderAction>();
 
     for (const action of selectedActions) {
-      await installFixture(page);
+      if (action === "toggleNativeSelection") await openSelectionDocument(page);
+      else await installFixture(page);
       await screenReader.returnToPage();
       // Review commands operate on the focused editor. Replacing the page
       // can leave NVDA on a menu; toggling that menu into browse mode tests
       // an unrelated control before the editor has even received focus.
-      if (!reviewActions.has(action)) await screenReader.ensureBrowseMode();
+      if (!reviewActions.has(action) && action !== "toggleNativeSelection") {
+        await screenReader.ensureBrowseMode();
+      }
       const beforeFormat = action === "brailleReportFormatting" ? await screenReader.checkpoint() : undefined;
       await prepareAction(page, screenReader, action);
       let formatCell: number | undefined;
@@ -401,7 +435,10 @@ actionsTest(
         await screenReader.act("toggleSingleLetterNavigation");
       }
       if (action === "toggleNativeSelection") {
-        await screenReader.act("toggleNativeSelection");
+        const reset = await screenReader.act("toggleNativeSelection");
+        expect(reset.timedOut).toBe(false);
+        expect(reset.speech).toMatch(/Native app selection mode disabled|Nativer Auswahlmodus deaktiviert/iu);
+        await page.goto("about:blank");
       }
       if (action === "leftMouseLock" || action === "rightMouseLock") {
         await screenReader.act(action);
@@ -598,6 +635,18 @@ async function verifiedReturnToPage(
   return observation!;
 }
 
+async function startInObjectReview(reader: ScreenReaderSession): Promise<void> {
+  // NVDA retains the review mode across page replacements. Document review
+  // can be unavailable for the focused object, so observe the actual mode.
+  for (let step = 0; step < 3; step++) {
+    const previous = await reader.act("previousReviewMode");
+    expect(previous.timedOut, "establish object review").toBe(false);
+    if (/Object review|Objektbetrachter|No previous review mode|Kein weiterer Betrachter vorhanden/iu.test(previous.speech)) return;
+    expect(previous.speech, "moving down through review modes").toMatch(/Document review|Dokumentbetrachter/iu);
+  }
+  throw new Error("Object review was not reached");
+}
+
 async function prepareAction(
   page: Parameters<typeof installFixture>[0],
   screenReader: ScreenReaderSession,
@@ -626,6 +675,19 @@ async function prepareAction(
       screenReader,
       page.getByRole("button", { name: "Details action" }),
     );
+  } else if (action === "toggleNativeSelection") {
+    const start = page.getByRole("link", { name: "Selection document start" });
+    await screenReader.observe("Focus the selection document", () => start.focus(), "focus");
+    await expect(start).toBeFocused();
+    await expect.poll(async () => {
+      const { focus } = await screenReader.state();
+      return [focus.browserWindowActive, focus.webContentFocused, focus.name];
+    }, { message: "native focus must reach the new top-level selection document" })
+      .toEqual([true, true, "Selection document start"]);
+    await screenReader.ensureBrowseMode();
+    await screenReader.documentStart();
+    const heading = await screenReader.nextHeading();
+    expect(heading.speech).toContain("Selectable text sample");
   } else if (action === "reportTextSelection") {
     await screenReader.observe("Select text in entry", async () => {
       await page.getByLabel("Parity entry").selectText();
@@ -709,7 +771,7 @@ async function prepareAction(
     // In NVDA document review, the review position is the virtual caret and
     // may legitimately differ from the focused object. Object review makes
     // this fixture target exact without bypassing NVDA's mouse command.
-    await screenReader.act("previousReviewMode");
+    await startInObjectReview(screenReader);
     if (action !== "moveMouseToNavigatorObject") {
       await screenReader.act("moveMouseToNavigatorObject");
     }
@@ -844,8 +906,14 @@ async function prepareAction(
       await screenReader.act("setReviewCopyStart");
       await screenReader.act("reviewNextWord");
     }
-    if (action === "previousReviewMode")
-      await screenReader.act("nextReviewMode");
+    if (action === "nextReviewMode" || action === "previousReviewMode") {
+      await startInObjectReview(screenReader);
+      if (action === "previousReviewMode") {
+        const next = await screenReader.act("nextReviewMode");
+        expect(next.timedOut).toBe(false);
+        expect(next.speech).toMatch(/(?:Document|Screen) review|(?:Dokument|Bildschirm)betrachter/iu);
+      }
+    }
   } else if (action === "activate" || action === "previousFocusable") {
     // Backward navigation must target a named nonprotected control. Password
     // focus is separately qualified through native redaction in settings.
@@ -967,6 +1035,20 @@ async function prepareAction(
   } else {
     await screenReader.documentStart();
   }
+}
+
+// Replacing a page with setContent can leave NVDA attached to the virtual
+// buffer of an embedded document. Native selection needs a live top-level
+// text selection provider. Navigation creates one without network access.
+async function openSelectionDocument(page: Parameters<typeof installFixture>[0]) {
+  const url = "https://parity.test/native-selection";
+  await page.route(url, route => route.fulfill({
+    contentType: "text/html; charset=utf-8",
+    body: '<!doctype html><html lang="en"><title>Native selection fixture</title><main>' +
+      '<a href="#sample">Selection document start</a>' +
+      '<h1 id="sample">Selectable text sample</h1><p>Plain text for selection.</p></main></html>',
+  }), { times: 1 });
+  await page.goto(url);
 }
 
 async function installFixture(
@@ -1267,11 +1349,11 @@ const semanticExpectations = new Map<ScreenReaderAction, RegExp>([
   ["reportReviewFormatting", /(?:font|Schrift|bold|Fett|24)/iu],
   [
     "nextReviewMode",
-    /(?:Object|Document|Screen) review|(?:Objekt|Dokument|Bildschirm)betrachter/iu,
+    /(?:Document|Screen) review|(?:Dokument|Bildschirm)betrachter/iu,
   ],
   [
     "previousReviewMode",
-    /(?:Object|Document|Screen) review|(?:Objekt|Dokument|Bildschirm)betrachter/iu,
+    /Object review|Objektbetrachter/iu,
   ],
   ["leftMouseClick", /Left click|Linksklick/iu],
   ["leftMouseLock", /Left mouse button lock|Linke Maustaste gesperrt/iu],

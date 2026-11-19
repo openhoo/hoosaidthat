@@ -53,7 +53,7 @@ jobs:
             import { readFileSync } from "node:fs";
             const source = JSON.parse(readFileSync("images/hoovda/source.json", "utf8"));
             if (source.repository !== "openhoo/hoovda" || !/^[0-9a-f]{40}$/.test(source.commit)) throw new Error("Invalid HooVDA source pin");
-            console.log(`commit=${source.commit}`);
+            console.log("commit=" + source.commit);
           ' >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -70,15 +70,24 @@ jobs:
       - name: Build pinned native runtime
         run: |
           test "$(git -C hoovda rev-parse HEAD)" = "${{ steps.hoovda-source.outputs.commit }}"
+          ci_version="$(node -p 'require("./package.json").version')-ci"
           docker build --platform linux/amd64 --tag hoovda-engine:dev \
-            --build-arg VERSION=0.1.0-ci \
+            --build-arg VERSION="$ci_version" \
             --build-arg COMMIT="${{ steps.hoovda-source.outputs.commit }}" \
             --build-arg BUILD_DATE="$(git -C hoovda show -s --format=%cI HEAD)" hoovda
           docker build --platform linux/amd64 --tag hoosaidthat-hoovda:dev \
+            --build-arg IMAGE_VERSION="$ci_version" \
             --build-arg HOOVDA_COMMIT="${{ steps.hoovda-source.outputs.commit }}" \
             --build-arg IMAGE_REVISION="$GITHUB_SHA" \
             --build-arg BUILD_DATE="$(git show -s --format=%cI HEAD)" \
             --file images/hoovda/Dockerfile .
+      - name: Check package, running engine and browser loopback
+        run: node scripts/hoovda-doctor.mjs --runtime docker --image hoosaidthat-hoovda:dev --source "$GITHUB_SHA"
+      - name: Check browse and table navigation across frame focus
+        env:
+          CONTAINER_ENGINE: docker
+          SCREEN_READER_IMAGE: hoosaidthat-hoovda:dev
+        run: node scripts/hoovda-parity.mjs en-US desktop actions-5
       - run: CONTAINER_ENGINE=docker bash images/hoovda/smoke-test.sh hoosaidthat-hoovda:dev
       - run: CONTAINER_ENGINE=docker npm run test:e2e:hoovda
       - name: Verify native fixtures with current supported Playwright

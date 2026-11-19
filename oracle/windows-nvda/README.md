@@ -11,7 +11,7 @@ console login and SSH transport belong to WinHoo. The NVDA test process,
 Chrome and Playwright all run inside that guest. Only its authenticated SSH
 port is needed; leave the Windows firewall rules for public networks in place.
 
-1. Install WinHoo with the `desktop archive --output` command. Follow
+1. Install WinHoo with `desktop archive --output` and `desktop focus-window --pid … --started-ticks …`. Follow
    its local desktop guide, using `--account HstOracle`. Keep the same private
    VM directory across runs. No container engine or second computer is required.
 2. Place the NVDA installer and Chrome archive listed in `runtime-lock.json`
@@ -29,9 +29,14 @@ node scripts/nvda-windows.mjs winhoo run --desktop "$desktop" --mode actions-08 
 node scripts/nvda-windows.mjs winhoo run --desktop "$desktop" --mode matrix --candidate "$(git rev-parse HEAD)" --cache "$media" --evidence "$evidence/matrix-01"
 ```
 
-The controller verifies the active guest scripts, builds the parity suite and
-ships it with integrity-checked Playwright packages, ARM64 Node and Windows
-FFmpeg. Each invocation owns a unique guest directory. The host retrieves the
+The controller builds the parity suite and packs the checked Playwright
+packages, ARM64 Node and Windows FFmpeg before it starts or adopts the VM.
+A local build failure leaves the desktop in its original power state and
+records `shutdown: not-acquired`. Once Windows is ready, the controller
+verifies the installed guest scripts and finds the browser that owns the live CDP
+port on the dedicated console. WinHoo activates that process and records the
+Windows foreground PID and method in `browser-focus.json`. Each invocation
+owns a unique guest directory. The host retrieves the
 guest identity, report JSON and ordered block records over WinHoo. On a failed
 block it also downloads the original trace, video and reader events in
 `failed-block.zip` before shutdown, with the guest digest in
@@ -44,6 +49,12 @@ probe, a diagnostic shard or two partial matrices cannot satisfy that gate.
 Any core, actions-01 through actions-08 or settings block can be replayed
 with its original language and keyboard layout. A failed matrix receipt
 counts only its report-verified prefix and remains failed.
+
+If a run stops before Playwright starts, look at `browser-discovery.log` in
+that attempt's evidence directory. It records when the guest sees the runtime
+heartbeat, checks Chrome's loopback listener and verifies its process and owner.
+`browser-focus.json` is written only after the foreground window is confirmed.
+A browser startup timeout is not a screen reader assertion failure.
 
 ## Check the engine
 

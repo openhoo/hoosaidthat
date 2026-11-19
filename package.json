@@ -1,6 +1,6 @@
 {
   "name": "@openhoo/hoosaidthat",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Real screen-reader testing fixtures, assertions, and visual evidence for Playwright.",
   "type": "module",
   "license": "MIT",
@@ -43,7 +43,8 @@
     "hoosaidthat-nvda-windows": "./scripts/nvda-windows.mjs",
     "hoosaidthat-talkback-android": "./scripts/talkback-android.mjs",
     "hoosaidthat-native": "./scripts/native-screen-reader.mjs",
-    "hoosaidthat-voiceover-macos": "./scripts/voiceover-macos.mjs"
+    "hoosaidthat-voiceover-macos": "./scripts/voiceover-macos.mjs",
+    "hoosaidthat-hoovda-doctor": "./scripts/hoovda-doctor.mjs"
   },
   "types": "./dist/index.d.ts",
   "files": [
@@ -79,7 +80,8 @@
     "scripts/native/focus-macos.js",
     "scripts/native/platform.mjs",
     "oracle/macos-voiceover",
-    "oracle/native-check"
+    "oracle/native-check",
+    "scripts/hoovda-doctor.mjs"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json && tsc -p tsconfig.parity.json && node scripts/build-parity.mjs",

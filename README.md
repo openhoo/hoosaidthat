@@ -205,6 +205,25 @@ const observation = await screenReader.observe('Open dialog', async () => {
 });
 ```
 
+To test an *automatic* announcement, take a fresh speech checkpoint immediately
+before the triggering interaction and read from it once. For example, after
+establishing that the opener has focus:
+
+```ts
+const beforeOpen = await screenReader.checkpoint();
+await screenReader.activate();
+const opened = await screenReader.readFrom(beforeOpen, 'First dialog focus');
+expect(opened.speech).toContain('Edit profile'); // dialog context
+expect(opened.speech).toContain('Cancel');       // initially focused button
+await expect(page.getByRole('button', { name: 'Cancel' })).toBeFocused();
+```
+
+A later `readCurrent`, Find, or heading scan tests what the user can *request*
+afterwards; it cannot establish what was announced on entry. For tab stops,
+exercise both Tab and Shift+Tab, and cover the empty as well as the populated
+state when content controls whether a stop exists. Take another checkpoint
+for each independent change (for example, clearing one of two field errors).
+
 Regression-test a complete stable flow with Playwright snapshots:
 
 ```ts
@@ -232,6 +251,56 @@ Playwright video. HooVDA also records container A/V, so its WebM contains real
 eSpeak audio synchronized to the browser display. Real NVDA uses Playwright's
 browser video with the same synchronized overlay; its capture boundary is
 structured presentation hooks, not acoustic Windows audio.
+
+### Check the local HooVDA runtime before a long suite
+
+From the installed package, run `npx hoosaidthat-hoovda-doctor`. The doctor
+starts one managed runtime and reports its image ID, platform, HooSaidThat
+source revision and HooVDA commit. It compares the engine pin in the installed
+package with both the image label and the authenticated, running engine. It
+then connects to Chromium over CDP and reads a fresh marker from a server bound
+to the test host's loopback address. The process exits nonzero if any check
+fails and stops its container on exit.
+
+For a source build, use `--image <tag-or-digest> --source <full-HooSaidThat-commit>`;
+`--runtime docker` and `--runtime podman` select the container engine. If your
+site also needs a media server or another service, check that service from the
+runtime browser before starting the suite. A successful loopback check only
+proves the path it exercised.
+
+### When the page fails to load
+
+If a test using the `page` fixture fails, times out, or is interrupted, its
+Playwright result includes `screen-reader-browser-failures.json`. It records
+the first 16 document/script failures and first eight other failures, including
+HTTP errors and uncaught JavaScript error types. Counts include omitted events.
+Classification uses the browser's request type: an SVG requested as a
+JavaScript module is a script. Each event records whether it occurred before
+HooSaidThat dispatched its first reader gesture on the fixture page. This does
+not track keyboards or tools controlled outside the session.
+
+Resource IDs are comparable only within that attempt. The attachment omits URLs,
+paths, query values, headers, bodies, error messages, and stacks. A recognized
+file extension, the presence of an `import` query key, and the browser network
+error code can help explain why a shell rendered but an expected control never
+appeared. This is evidence of what the browser observed, not a determination of
+which component caused a failure. A successful HTTP status also doesn't prove
+a dev server supplied the expected module: compare the module the browser
+actually imported (including its version query) with the installed source.
+
+Playwright keeps this attachment with the failed attempt even if a retry passes.
+For independent reruns, use distinct output directories; Playwright clears the
+selected directory when a new run begins:
+
+```bash
+npx playwright test --retries=0 --output=test-results/qualify-001
+npx playwright test --retries=0 --output=test-results/recheck-001 --grep 'First dialog focus'
+```
+
+Keep each result with its selected case IDs, source commit, and runtime/engine
+revision. Report initial failures and subsequent passes separately. A passing
+HooVDA/Chromium check does not establish the result for native Windows NVDA or
+another browser.
 
 ## Annotated website reports
 

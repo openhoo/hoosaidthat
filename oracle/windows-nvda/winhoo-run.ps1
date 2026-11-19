@@ -23,6 +23,7 @@ try {
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     [IO.Compression.ZipFile]::ExtractToDirectory($zip,$work)
     $env:HST_WINHOO_GUEST=$Owner
+    $env:HST_WINHOO_ATTEMPT=$Attempt
     $env:HST_NVDA_QUALIFICATION='1'
     $env:PLAYWRIGHT_BROWSERS_PATH=Join-Path $work 'browsers'
     $env:CI='1'

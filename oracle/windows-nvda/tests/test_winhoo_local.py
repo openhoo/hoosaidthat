@@ -2,9 +2,11 @@
 import hashlib
 import importlib.util
 import json
+import subprocess
 from pathlib import Path
 import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest import mock
 
@@ -17,6 +19,47 @@ import winhoo_bundle
 
 
 class GuestRunnerTests(unittest.TestCase):
+    def test_invalid_local_bundle_never_acquires_or_stops_a_desktop(self):
+        for state in ('off', 'running'):
+            with self.subTest(state=state), tempfile.TemporaryDirectory() as temp:
+                vm = Path(temp)/'vm'
+                (vm/'hoosaidthat').mkdir(parents=True)
+                (vm/'hoosaidthat/owner.json').write_text('{"uuid":"vm"}')
+                args = SimpleNamespace(operation='run', mode='core', candidate=None, desktop=vm,
+                                       evidence=Path(temp)/'attempt', cache=None, adopt_running=True)
+                with mock.patch.object(runner, 'command', return_value={'state':state,'uuid':'vm'}) as command, \
+                     mock.patch.object(runner, 'bundle', side_effect=ValueError('invalid local bundle')):
+                    with self.assertRaisesRegex(ValueError, 'invalid local bundle'):
+                        runner.main(args)
+                self.assertEqual([call.args[1] for call in command.call_args_list], ['status'])
+                receipt = json.loads((args.evidence/'receipt.json').read_bytes())
+                self.assertEqual((receipt['state'],receipt['shutdown']), ('failed','not-acquired'))
+
+    def test_focuses_only_the_discovered_browser_on_the_attested_console(self):
+        browser = {'pid': 272, 'startedTicks': 638990000000000000, 'session': 1}
+        sample = {'pid': 272, 'session': 1, 'owner': 'vm', 'process': 'chrome', 'method': 'caption-click'}
+        with tempfile.TemporaryDirectory() as folder, mock.patch.object(runner,'command',side_effect=[browser,sample]) as cmd:
+            self.assertEqual(runner.focus_browser(None,{'uuid':'vm'},{'id':1},Path(folder)), {**sample,'startedTicks':browser['startedTicks']})
+            self.assertEqual(cmd.call_args.args[1:], ('focus-window','--pid',272,'--started-ticks',browser['startedTicks']))
+        with tempfile.TemporaryDirectory() as folder, mock.patch.object(runner,'command',return_value={**browser,'session':2}) as cmd:
+            with self.assertRaisesRegex(RuntimeError,'attested Windows console'): runner.focus_browser(None,{'uuid':'vm'},{'id':1},Path(folder))
+            self.assertEqual(cmd.call_count,1)
+        for other in ({'pid':273},{'process':'explorer'},{'owner':'other'},{'method':'requested'}):
+            with self.subTest(other=other), tempfile.TemporaryDirectory() as folder, mock.patch.object(runner,'command',side_effect=[browser,{**sample,**other}]):
+                with self.assertRaisesRegex(RuntimeError,'did not confirm'): runner.focus_browser(None,{'uuid':'vm'},{'id':1},Path(folder))
+
+    def test_discovery_timeout_keeps_the_last_guest_phase_without_sending_another_command(self):
+        def timeout(*args, stderr_log, **kwargs):
+            stderr_log.write('HST browser: waiting for runtime heartbeat\n')
+            stderr_log.write('HST browser: checking Chrome and its loopback listener\n')
+            stderr_log.write('unrelated transport diagnostic\n')
+            raise subprocess.TimeoutExpired('winhoo desktop exec', 180)
+        with tempfile.TemporaryDirectory() as folder, mock.patch.object(runner,'command',side_effect=timeout) as cmd:
+            with self.assertRaisesRegex(RuntimeError,'checking Chrome and its loopback listener'):
+                runner.focus_browser(None,{'uuid':'vm'},{'id':1},Path(folder))
+            self.assertEqual(cmd.call_count,1)
+            self.assertTrue((Path(folder)/'browser-discovery.log').is_file())
+
     def test_failure_archive_can_only_read_the_selected_attempt_and_block(self):
         attempt='d'*32
         with tempfile.TemporaryDirectory() as d:
@@ -49,13 +92,18 @@ class GuestRunnerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             root=Path(d); (root/'reports').mkdir()
             block={'locale':'en-US','layout':'desktop','block':'core'}
-            records=[{**block,'state':'running'},{**block,'state':'passed','selected':4}]
+            records=[{**block,'state':'running'},{**block,'state':'passed','selected':5}]
             path=root/'blocks.jsonl'; text=''.join(json.dumps(r)+'\n' for r in records); path.write_text(text)
             report=root/'reports/en-US-desktop-core.json'
             with self.assertRaises(FileNotFoundError): runner.evidence(root,'core')
-            stats={'expected':4,'flaky':0,'unexpected':0}
+            stats={'expected':5,'flaky':0,'unexpected':0}
             report.write_text(json.dumps({'stats':stats}))
             self.assertEqual(runner.evidence(root,'core'),1)
+            # Both records agreeing on the former minimum still omits a core case.
+            path.write_text(text.replace('"selected": 5','"selected": 4'))
+            report.write_text(json.dumps({'stats':{**stats,'expected':4}}))
+            with self.assertRaisesRegex(RuntimeError,'disagree'): runner.evidence(root,'core')
+            path.write_text(text)
             report.write_text(json.dumps({'stats':{**stats,'flaky':1}}))
             with self.assertRaisesRegex(RuntimeError,'disagree'): runner.evidence(root,'core')
             path.write_text(text+text)
@@ -66,11 +114,11 @@ class GuestRunnerTests(unittest.TestCase):
             root=Path(d); (root/'reports').mkdir()
             def record(block, state, **extra):
                 return {'locale':'en-US','layout':'desktop','block':block,'state':state,**extra}
-            records=[record('core','running'),record('core','passed',selected=4),
+            records=[record('core','running'),record('core','passed',selected=5),
                      record('actions-01','running'),record('actions-01','failed')]
             file=root/'blocks.jsonl'
             file.write_text(''.join(json.dumps(r)+'\n' for r in records))
-            stats={'expected':4,'flaky':0,'unexpected':0}
+            stats={'expected':5,'flaky':0,'unexpected':0}
             (root/'reports/en-US-desktop-core.json').write_text(json.dumps({'stats':stats}))
             self.assertEqual(runner.evidence(root,'matrix',partial=True),1)
             with self.assertRaisesRegex(RuntimeError,'Incomplete'):runner.evidence(root,'matrix')

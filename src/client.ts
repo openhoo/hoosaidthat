@@ -107,6 +107,8 @@ export class HttpScreenReaderClient {
         screenReader: {
           name: this.screenReaderName,
           version: value.version,
+          ...(this.screenReaderName === 'hoovda' && typeof value.commit === 'string' && /^[0-9a-f]{40}$/.test(value.commit)
+            ? { revision: value.commit } : {}),
           capture: this.screenReaderName === 'voiceover' ? value.capture as CaptureBoundary
             : this.screenReaderName === 'talkback' ? 'talkback-tts-output'
             : this.screenReaderName === 'nvda' ? 'nvda-presentation-hooks'
@@ -945,6 +947,7 @@ function isV2Health(
   protocolVersion: '2.0';
   status: 'ok';
   version: string;
+  commit?: unknown;
   profile: ScreenReaderProfile;
   locale: 'en-US' | 'de-DE';
   keyboardLayout: 'desktop' | 'laptop';

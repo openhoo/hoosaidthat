@@ -1,3 +1,4 @@
+import { markReaderGesture } from './browser-failures.js';
 import { createHash } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { basename, dirname } from 'node:path';
@@ -151,6 +152,7 @@ export class ScreenReaderSession {
     }
     return await playwrightTest.step(`Screen reader: ${label}`, async () => {
       await this.show(label, 'Listening...');
+      markReaderGesture(this.page);
       const response = await this.client.perform(action);
       const observation = response.events
         ? this.observation(
@@ -661,6 +663,7 @@ export class ScreenReaderSession {
     const label = `${SCREEN_READER_ACTIONS[action]} ${cell}`;
     return await playwrightTest.step(`Screen reader: ${label}`, async () => {
       await this.show(label, 'Listening...');
+      markReaderGesture(this.page);
       const response = await this.client.perform(action, String(cell));
       if (response.delivery !== 'structured') {
         throw new Error(
@@ -694,6 +697,7 @@ export class ScreenReaderSession {
     const label = `Find: ${normalized}`;
     return await playwrightTest.step(`Screen reader: ${label}`, async () => {
       await this.show(label, 'Listening...');
+      markReaderGesture(this.page);
       const response = await this.client.perform('find', normalized);
       if (response.delivery !== 'structured') {
         throw new Error(
@@ -723,8 +727,11 @@ export class ScreenReaderSession {
     // by comparing its accessible name with this Page's non-empty title.
     await this.page.bringToFront();
     await this.page.waitForTimeout(this.options.quietMs);
+    let lastFocus: { browserWindowActive: boolean; webContentFocused: boolean; role: string | null } | undefined;
     const pageContextReady = async (): Promise<boolean> => {
       const state = await this.client.state();
+      const { browserWindowActive, webContentFocused, role: focusRole } = state.focus;
+      lastFocus = { browserWindowActive, webContentFocused, role: focusRole ?? null };
       if (!state.focus.browserWindowActive || !state.focus.webContentFocused) return false;
       const role = state.focus.role?.trim().toLowerCase().replace(/\s+/g, ' ');
       if (!role || role === 'unknown' || role === 'invalid' || role === 'invalid role') return false;
@@ -771,7 +778,7 @@ export class ScreenReaderSession {
       if (await pageContextReady()) return;
     }
     throw new Error(
-      `web-content focus was not verified after ${maxGestures} native screen-reader focus actions`,
+      `web-content focus was not verified after ${maxGestures} native screen-reader focus actions: ${JSON.stringify(lastFocus)}`,
     );
   }
 
@@ -1072,22 +1079,17 @@ function isDeepActiveElement(element: Element): boolean {
   return active === element;
 }
 
-async function assertNativeViewport(page: Page): Promise<void> {
-  const geometry = await page.evaluate(() => ({
-    innerWidth,
-    innerHeight,
-    outerWidth,
-    outerHeight,
-  }));
-  if (
-    geometry.outerWidth <= 0 ||
-    geometry.outerHeight <= 0 ||
-    geometry.innerWidth > geometry.outerWidth ||
-    geometry.innerHeight >= geometry.outerHeight
-  ) {
+export async function assertNativeViewport(page: Page): Promise<void> {
+  // Chromium can report an inner width wider than the outer frame during
+  // a native Windows resize. Playwright tracks emulation independently.
+  const viewport = page.viewportSize();
+  if (viewport !== null) {
     throw new Error(
-      `Native screen readers require Playwright's native browser viewport; use defineConfig from @openhoo/hoosaidthat or set use.viewport=null (${JSON.stringify(geometry)})`,
+      `Native screen readers require Playwright's native browser viewport; use defineConfig from @openhoo/hoosaidthat or set use.viewport=null (emulated ${viewport.width}x${viewport.height})`,
     );
+  }
+  if (!await page.evaluate(() => window.outerWidth > 0 && window.outerHeight > 0)) {
+    throw new Error('The native screen reader browser window has no measurable dimensions');
   }
 }
 

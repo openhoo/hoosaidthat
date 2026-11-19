@@ -4,7 +4,26 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { chromium, type Page, type TestInfo } from '@playwright/test';
-import { ScreenReaderSession } from '../src/session.js';
+import { assertNativeViewport, ScreenReaderSession } from '../src/session.js';
+
+test('native viewport accepts Windows frame measurements and rejects an emulated size that fits', async (t) => {
+  const browser = await chromium.launch();
+  t.after(() => browser.close());
+  const page = await browser.newPage({ viewport: null });
+  // Real measurements from Chrome in the Windows NVDA guest after a resize.
+  await page.evaluate(() => {
+    Object.defineProperties(window, {
+      innerWidth: { configurable: true, value: 804 }, innerHeight: { configurable: true, value: 469 },
+      outerWidth: { configurable: true, value: 800 }, outerHeight: { configurable: true, value: 552 },
+    });
+  });
+  await assertNativeViewport(page);
+  await page.setViewportSize({ width: 640, height: 400 });
+  await page.evaluate(() => {
+    Object.defineProperties(window, { innerWidth: { value: 640 }, innerHeight: { value: 400 } });
+  });
+  await assert.rejects(() => assertNativeViewport(page), /viewport=null/);
+});
 
 // Explicit browser smoke: excluded from the default *.test.js unit gate.
 function screenshotSession(page: Page, directory: string, overlay: boolean): ScreenReaderSession {
@@ -84,3 +103,31 @@ test('element evidence preserves page styles, cleans failed overlays, and masks 
   assert.equal(await page.locator('#__hoosaidthat_screenreader_overlay__').count(), 0);
 });
 
+test('a successful retry leaves the first attempt’s module failure attached to that attempt', async (t) => {
+  const { execFile } = await import('node:child_process');
+  const { promisify } = await import('node:util');
+  const { fileURLToPath } = await import('node:url');
+  const directory = await mkdtemp(join(tmpdir(), 'hoosaidthat-browser-failure-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const { stdout } = await promisify(execFile)(process.execPath, [
+    fileURLToPath(import.meta.resolve('@playwright/test/cli')),
+    'test', '--config', fileURLToPath(new URL('./browser-failure-fixture/', import.meta.url)),
+    '--output', directory, '--workers=1', '--retries=1', '--reporter=json',
+  ]);
+  const attempts = JSON.parse(stdout).suites[0].specs[0].tests[0].results;
+  assert.deepEqual(attempts.map((attempt: { status: string }) => attempt.status), ['failed', 'passed']);
+  const name = 'screen-reader-browser-failures.json';
+  const evidence = attempts[0].attachments.find((a: { name: string }) => a.name === name);
+  assert.ok(evidence, 'keep browser evidence even though a subsequent attempt passes');
+  const raw = Buffer.from(evidence.body, 'base64').toString('utf8');
+  const report = JSON.parse(raw);
+  assert.equal(report.retry, 0);
+  assert.equal(report.events[0].beforeFirstReaderGesture, true);
+  assert.equal(report.firstReaderGestureAtMs, null);
+  assert.deepEqual(report.events.map((e: { kind: string; resourceType: string; extension: string; importQuery: boolean; code: string }) =>
+    [e.kind, e.resourceType, e.extension, e.importQuery, e.code]), [
+    ['request-failed', 'script', 'svg', true, 'ERR_INTERNET_DISCONNECTED'],
+  ]);
+  assert.doesNotMatch(raw, /private-host|private-name|sensitive-query|token=/);
+  assert.equal(attempts[1].attachments.some((a: { name: string }) => a.name === name), false);
+});

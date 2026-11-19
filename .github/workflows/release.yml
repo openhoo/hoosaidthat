@@ -240,6 +240,7 @@ jobs:
           docker pull --platform linux/amd64 "$ORCA_CANDIDATE"
           docker tag "$(docker image inspect --format '{{.Id}}' "$ORCA_CANDIDATE")" hoosaidthat-orca:release
           npx playwright install --with-deps chromium ffmpeg
+          node scripts/hoovda-doctor.mjs --runtime docker --image hoosaidthat-hoovda:release --source "$GITHUB_SHA"
           npm run test:session-browser
           npm run test:report-edges -- test-results/report-edges
           bash images/hoovda/smoke-test.sh hoosaidthat-hoovda:release

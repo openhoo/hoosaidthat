@@ -6,6 +6,7 @@ import {
   type Page,
   type PlaywrightTestConfig,
 } from '@playwright/test';
+import { watchBrowserFailures } from './browser-failures.js';
 import { HttpScreenReaderClient } from './client.js';
 import { isRuntimeBootstrapURL, RUNTIME_KEEP_ALIVE_URL } from './bootstrap.js';
 import { androidContextFactory, type ScreenReaderContextFactory } from './android-context.js';
@@ -133,7 +134,7 @@ export const test = base.extend<ScreenReaderFixtures & NativeContextFixtures, Sc
     { scope: 'worker' },
   ],
 
-  page: async ({ context, browser, screenReaderResolvedOptions }, use) => {
+  page: async ({ context, browser, screenReaderResolvedOptions }, use, testInfo) => {
     // Keep Playwright's per-test context for isolation, tracing, and video.
     // Once its page exists, retire the runtime bootstrap tab even when it
     // belongs to the browser's separate default context. Native focus must
@@ -188,8 +189,13 @@ export const test = base.extend<ScreenReaderFixtures & NativeContextFixtures, Sc
       if (browser.isConnected()) await ensureKeepAlive(browser, context);
       await closeContext.call(context, options);
     };
+    const finishBrowserEvidence = watchBrowserFailures(page);
     try {
-      await use(page);
+      try {
+        await use(page);
+      } finally {
+        await finishBrowserEvidence(testInfo);
+      }
     } finally {
       try {
         if (browser.isConnected()) await ensureKeepAlive(browser, context);

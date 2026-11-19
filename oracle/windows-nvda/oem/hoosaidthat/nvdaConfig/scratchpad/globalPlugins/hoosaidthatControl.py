@@ -603,6 +603,7 @@ class OracleState:
         self.active_session = None
         self.finished = {}
         self.command = "event"
+        self.elements_list_focused = False
         self.ready = False
         self.locale = "en-US"
         self.keyboard_layout = "desktop"
@@ -995,6 +996,8 @@ def execute_action(command, argument):
     with STATE.lock:
         before = STATE.sequence
         STATE.command = command
+        if command == "elementsList":
+            STATE.elements_list_focused = False
         layout = STATE.keyboard_layout
     STATE.append("commandStarted", definition[1])
     try:
@@ -1030,16 +1033,20 @@ def execute_action(command, argument):
         quiet_deadline = time.monotonic() + 0.45
         hard_deadline = time.monotonic() + 12.0
         timed_out = False
-        while time.monotonic() < hard_deadline:
-            with STATE.condition:
+        with STATE.condition:
+            while True:
                 quiet_deadline = max(quiet_deadline, STATE.last_event_at + 0.45)
-                remaining = min(quiet_deadline, hard_deadline) - time.monotonic()
-                if remaining <= 0:
-                    timed_out = time.monotonic() >= hard_deadline
+                now = time.monotonic()
+                # NVDA schedules its modal Elements List with wx.CallAfter.
+                # An idle queue before the tree gets focus is not completion.
+                awaiting_dialog = command == "elementsList" and not STATE.elements_list_focused
+                if not awaiting_dialog and quiet_deadline <= min(now, hard_deadline):
                     break
-                STATE.condition.wait(remaining)
-        if time.monotonic() >= hard_deadline and time.monotonic() < quiet_deadline:
-            timed_out = True
+                if now >= hard_deadline:
+                    timed_out = True
+                    break
+                deadline = hard_deadline if awaiting_dialog else min(quiet_deadline, hard_deadline)
+                STATE.condition.wait(deadline - now)
         # Taking the mandatory snapshot can fail even after gesture delivery.
         # Do not commit a successful settlement before all required reads and
         # retained-history checks have succeeded.
@@ -1825,15 +1832,13 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
             )
             protected = object_is_protected(obj)
             name = "" if protected else str(getattr(obj, "name", "") or "")
-            STATE.append(
-                "focus",
-                " ".join(part for part in (name, str(role_name or "")) if part),
-                **(
-                    {"redacted": True}
-                    if protected
-                    else {}
-                ),
-            )
+            with STATE.condition:
+                STATE.append("focus", " ".join(part for part in (name, str(role_name or "")) if part),
+                             **({"redacted": True} if protected else {}))
+                if (STATE.command == "elementsList"
+                        and getattr(role, "name", None) in ("TREEVIEW", "TREEVIEWITEM")
+                        and getattr(obj, "processID", None) == os.getpid()):
+                    STATE.elements_list_focused = True
         except Exception:
             log.debugWarning("HooSaidThat focus capture failed", exc_info=True)
 

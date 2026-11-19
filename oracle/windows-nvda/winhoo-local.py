@@ -39,10 +39,10 @@ def save(path, data):
     temp.replace(path)
 
 
-def command(a, verb, *args, json_out=False, timeout=40, input_text=None, log=None, check=True):
+def command(a, verb, *args, json_out=False, timeout=40, input_text=None, log=None, stderr_log=None, check=True):
     params = [os.environ.get('HST_WINHOO_BIN', 'winhoo'), 'desktop', verb, str(a.desktop), *map(str,args)]
     completed = subprocess.run(params, check=check, timeout=timeout, stdout=subprocess.PIPE if json_out else log,
-                               stderr=subprocess.STDOUT if log else None, input=input_text,
+                               stderr=subprocess.STDOUT if log else stderr_log, input=input_text,
                                stdin=subprocess.DEVNULL if input_text is None else None, text=True)
     if json_out:
         return json.loads(completed.stdout)
@@ -148,7 +148,7 @@ def evidence(folder, mode, locale='en-US', layout='desktop', *, partial=False):
         stats = report['stats']
         if (stats.get('flaky') != 0 or stats.get('unexpected') != 0 or
             stats.get('expected') != block.get('selected') or
-            not isinstance(stats.get('expected'),int) or stats['expected'] < (4 if identity[2]=='core' else 2)):
+            not isinstance(stats.get('expected'),int) or stats['expected'] < (5 if identity[2]=='core' else 2)):
             raise RuntimeError('Playwright report and block outcome disagree')
     return passed
 
@@ -179,17 +179,42 @@ def failed_output(folder, attempt, mode):
     return str(base/path.name)
 
 
-def guest_parity(a, root, binding, folder):
+def focus_browser(a, binding, console, folder):
+    path = folder/'browser-discovery.log'
+    try:
+        # Leave time beyond the guest's own readiness loop for a cold PowerShell/CIM call.
+        with path.open('x') as log:
+            browser = command(a,'exec','--file',HERE/'winhoo-browser.ps1','--timeout',180,
+                              json_out=True,timeout=195,stderr_log=log)
+    except subprocess.SubprocessError as exc:
+        phases = [line for line in path.read_text(errors='replace').splitlines()
+                  if line.startswith('HST browser: ')]
+        last = phases[-1] if phases else 'guest probe has not reported a phase'
+        raise RuntimeError(f'Chrome discovery failed ({last}); see {path.name}') from exc
+    pid, ticks = browser.get('pid'), browser.get('startedTicks')
+    if (type(pid) is not int or pid <= 0 or type(ticks) is not int or ticks <= 0 or
+            type(browser.get('session')) is not int or browser['session'] != console['id']):
+        raise RuntimeError('The live Chrome process does not belong to the attested Windows console')
+    # Keep the outer deadline beyond WinHoo's 90-second cold-start/cleanup budget.
+    sample = command(a,'focus-window','--pid',pid,'--started-ticks',ticks,json_out=True,timeout=105)
+    if (sample.get('pid') != pid or sample.get('owner') != binding['uuid'] or
+            sample.get('session') != console['id'] or sample.get('process','').casefold() != 'chrome' or
+            sample.get('method') not in ('caption-click','already-active')):
+        raise RuntimeError('WinHoo did not confirm the runtime browser in the foreground')
+    return {**sample, 'startedTicks':ticks}
+
+
+def guest_parity(a, artifact, binding, folder, console):
     attempt = uuid.uuid4().hex
-    with tempfile.TemporaryDirectory(dir=root) as directory:
-        artifact = Path(directory)/'runner.zip'
-        bundle(HERE.parents[1],a.cache or a.desktop.parent/'media',artifact)
-        digest = sha(artifact)
-        command(a,'put',artifact,'hst-'+attempt+'.zip','--timeout',150,timeout=165)
+    digest = sha(artifact)
+    command(a,'put',artifact,'hst-'+attempt+'.zip','--timeout',150,timeout=165)
     info = {'attempt':attempt,'bundle':digest,'owner':binding['uuid'],'mode':a.mode}
     if a.mode != 'matrix':
         info.update(locale=a.locale,layout=a.layout)
     save(folder/'guest-input.json',info)
+    # A service-session command will own the guest for the duration of parity.
+    # Acquire the foreground before that lock, using this boot's actual CDP owner.
+    save(folder/'browser-focus.json',focus_browser(a,binding,console,folder))
     script = '& {\n' + (HERE/'winhoo-run.ps1').read_text() + '\n} ' + ' '.join(
         (attempt,digest,a.mode,binding['uuid'],a.locale,a.layout)) + '\nexit $LASTEXITCODE'
     budget = 8*3600 if a.mode == 'matrix' else 20*60
@@ -235,7 +260,7 @@ def main(a):
     a.desktop = a.desktop.expanduser().resolve(strict=True)
     root = a.desktop/'hoosaidthat'
     root.mkdir(mode=0o700,exist_ok=True)
-    with lease(root):
+    with lease(root), tempfile.TemporaryDirectory(dir=root) as directory:
         provenance = candidate(a) if a.operation == 'run' else None
         info = command(a,'status',json_out=True)
         binding = {'uuid':info['uuid']}
@@ -248,13 +273,18 @@ def main(a):
             raise RuntimeError('Desktop is already active; specify --adopt-running only for your own dedicated guest')
         attempt_dir = a.evidence.expanduser().resolve()
         attempt_dir.mkdir(mode=0o700,parents=True,exist_ok=False)
-        receipt = {'desktop':binding,'operation':a.operation,'mode':getattr(a,'mode',None),'state':'starting','shutdown':'pending','passedBlocks':0}
+        receipt = {'desktop':binding,'operation':a.operation,'mode':getattr(a,'mode',None),'state':'preparing','shutdown':'not-acquired','passedBlocks':0}
         if provenance:
             receipt['source'] = provenance
         destination = attempt_dir/'receipt.json'
         save(destination,receipt)
         started = False
         try:
+            artifact = Path(directory)/'runner.zip'
+            if a.operation == 'run':
+                bundle(HERE.parents[1],a.cache or a.desktop.parent/'media',artifact)
+            receipt.update(state='starting', shutdown='pending')
+            save(destination,receipt)
             active = command(a,'up',json_out=True)
             if active.get('uuid') != info['uuid'] or active.get('state') != 'running':
                 raise RuntimeError('Could not acquire the selected WinHoo desktop')
@@ -272,7 +302,7 @@ def main(a):
                 save(destination,receipt)
                 if os.environ.get('HST_NVDA_CONTAINER_ID'):
                     raise RuntimeError('A container qualification is configured; select one owner')
-                receipt['passedBlocks'] = guest_parity(a,root,binding,attempt_dir)
+                receipt['passedBlocks'] = guest_parity(a,artifact,binding,attempt_dir,live['consoleSession'])
                 if provenance and (candidate(a) != provenance or installed_files(a) != receipt['installed']):
                     raise RuntimeError('Qualification inputs changed during the attempt')
             receipt['state'] = 'tested'
@@ -289,9 +319,15 @@ def main(a):
                 latest = command(a,'status',json_out=True)
                 if latest['uuid'] != binding['uuid']:
                     raise RuntimeError('Owner changed during qualification; cleanup deferred')
+                requested_at = time.time()
                 stop = command(a,'down','--timeout',120,json_out=True,timeout=135)
                 if stop.get('shutdown') != 'guest-confirmed' or stop.get('state') != 'off' or stop.get('uuid') != binding['uuid']:
                     raise RuntimeError('WinHoo did not confirm guest shutdown and process exit')
+                if stop.get('method') != 'windows-shutdown' or not isinstance(stop.get('timeUnix'), (int, float)) or not requested_at <= stop['timeUnix'] <= time.time():
+                    raise RuntimeError('WinHoo did not return a fresh guest-originated shutdown')
+                guest_input = attempt_dir/'guest-input.json'
+                save(attempt_dir/'shutdown.json', {**stop, 'requestedAtUnix':requested_at,
+                     'attempt':json.loads(guest_input.read_bytes())['attempt'] if guest_input.exists() else None})
                 receipt['shutdown'] = 'guest-confirmed'
             if receipt['state'] == 'tested' and receipt['shutdown'] == 'guest-confirmed':
                 receipt['state'] = 'passed'

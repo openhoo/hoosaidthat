@@ -9,6 +9,7 @@ separate gate.
 import ast
 import base64
 import hashlib
+import os
 from pathlib import Path
 import queue
 from types import SimpleNamespace
@@ -117,12 +118,15 @@ def load_runtime():
     ]
     if {node.name for node in selected} != required:
         raise AssertionError("production definitions are missing")
+    plugin = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "GlobalPlugin")
+    selected.append(next(node for node in plugin.body if isinstance(node, ast.FunctionDef) and node.name == "event_gainFocus"))
     module = ast.fix_missing_locations(ast.Module(body=selected, type_ignores=[]))
     namespace = {
         "base64": base64,
         "hashlib": hashlib,
         "threading": threading,
         "time": time,
+        "os": os,
         "MAX_EVENTS": 1000,
         "PROVENANCE_BY_KIND": {},
         "COMMAND_BY_ID": {"testMove": ("testMove", "test move", "downArrow", "downArrow")},
@@ -383,6 +387,36 @@ class StateExecutionTests(unittest.TestCase):
         return [
             event for event in self.namespace["STATE"].events if event["kind"] == "commandSettled"
         ]
+
+    def test_elements_list_waits_for_nvda_tree_focus_and_keeps_its_presentation(self):
+        for opens in (True, False):
+            with self.subTest(opens=opens):
+                clock = FastClock()
+                self.namespace["time"] = clock
+                state = self.namespace["STATE"] = self.namespace["OracleState"]()
+                self.namespace["COMMAND_BY_ID"]["elementsList"] = ("elementsList", "Elements list", "NVDA+f7", "NVDA+f7")
+                # A browser tree and another NVDA control can both get focus
+                # before the real dialog. Neither is the requested result.
+                pending = [(0.1, os.getpid() + 1, "TREEVIEW", "Browser tree"),
+                           (0.2, os.getpid(), "BUTTON", "Unrelated button")]
+                if opens:
+                    pending.append((0.93, os.getpid(), "TREEVIEWITEM", "Elementliste  Dialogfeld"))
+
+                def wait(duration):
+                    if not pending or pending[0][0] > clock.now + duration:
+                        clock.sleep(duration)
+                        return
+                    clock.now, pid, role, title = pending.pop(0)
+                    obj = SimpleNamespace(processID=pid, role=SimpleNamespace(name=role, displayString=role),
+                                          isProtected=False, name="Item")
+                    self.namespace["event_gainFocus"](None, obj, lambda: state.append("speech", title))
+
+                state.condition.wait = wait
+                result = invoke_from_http(lambda: self.namespace["execute_action"]("elementsList", ""))
+                self.assertEqual(result["timedOut"], not opens)
+                utterances = [e for e in result["events"] if e["text"] == "Elementliste  Dialogfeld"]
+                self.assertEqual([e["causalCommand"] for e in utterances], ["elementsList"] if opens else [])
+                self.assertEqual(self.settlements()[0]["reason"], "completed" if opens else "timeout")
 
     def test_action_snapshot_failure_emits_one_failed_settlement(self):
         for busy in (False, True):
