@@ -635,6 +635,18 @@ async function verifiedReturnToPage(
   return observation!;
 }
 
+async function startInObjectReview(reader: ScreenReaderSession): Promise<void> {
+  // NVDA retains the review mode across page replacements. Document review
+  // can be unavailable for the focused object, so observe the actual mode.
+  for (let step = 0; step < 3; step++) {
+    const previous = await reader.act("previousReviewMode");
+    expect(previous.timedOut, "establish object review").toBe(false);
+    if (/Object review|Objektbetrachter|No previous review mode|Kein weiterer Betrachter vorhanden/iu.test(previous.speech)) return;
+    expect(previous.speech, "moving down through review modes").toMatch(/Document review|Dokumentbetrachter/iu);
+  }
+  throw new Error("Object review was not reached");
+}
+
 async function prepareAction(
   page: Parameters<typeof installFixture>[0],
   screenReader: ScreenReaderSession,
@@ -759,7 +771,7 @@ async function prepareAction(
     // In NVDA document review, the review position is the virtual caret and
     // may legitimately differ from the focused object. Object review makes
     // this fixture target exact without bypassing NVDA's mouse command.
-    await screenReader.act("previousReviewMode");
+    await startInObjectReview(screenReader);
     if (action !== "moveMouseToNavigatorObject") {
       await screenReader.act("moveMouseToNavigatorObject");
     }
@@ -894,8 +906,14 @@ async function prepareAction(
       await screenReader.act("setReviewCopyStart");
       await screenReader.act("reviewNextWord");
     }
-    if (action === "previousReviewMode")
-      await screenReader.act("nextReviewMode");
+    if (action === "nextReviewMode" || action === "previousReviewMode") {
+      await startInObjectReview(screenReader);
+      if (action === "previousReviewMode") {
+        const next = await screenReader.act("nextReviewMode");
+        expect(next.timedOut).toBe(false);
+        expect(next.speech).toMatch(/(?:Document|Screen) review|(?:Dokument|Bildschirm)betrachter/iu);
+      }
+    }
   } else if (action === "activate" || action === "previousFocusable") {
     // Backward navigation must target a named nonprotected control. Password
     // focus is separately qualified through native redaction in settings.
@@ -1331,11 +1349,11 @@ const semanticExpectations = new Map<ScreenReaderAction, RegExp>([
   ["reportReviewFormatting", /(?:font|Schrift|bold|Fett|24)/iu],
   [
     "nextReviewMode",
-    /(?:Object|Document|Screen) review|(?:Objekt|Dokument|Bildschirm)betrachter/iu,
+    /(?:Document|Screen) review|(?:Dokument|Bildschirm)betrachter/iu,
   ],
   [
     "previousReviewMode",
-    /(?:Object|Document|Screen) review|(?:Objekt|Dokument|Bildschirm)betrachter/iu,
+    /Object review|Objektbetrachter/iu,
   ],
   ["leftMouseClick", /Left click|Linksklick/iu],
   ["leftMouseLock", /Left mouse button lock|Linke Maustaste gesperrt/iu],
