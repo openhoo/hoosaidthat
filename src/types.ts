@@ -1,4 +1,7 @@
+import { createRequire } from 'node:module';
 import type { Locator } from '@playwright/test';
+
+const packageVersion: string = createRequire(import.meta.url)('@openhoo/hoosaidthat/package.json').version;
 
 export const SCREEN_READER_ACTIONS = {
   nextFocusable: 'Next focusable element',
@@ -431,6 +434,8 @@ export interface ScreenReaderHealth {
   screenReader: {
     name: ScreenReaderName;
     version: string;
+    /** Source commit reported by the running HooVDA process, when available. */
+    revision?: string;
     capture: CaptureBoundary;
   };
   profile?: ScreenReaderProfile;
@@ -574,10 +579,10 @@ export function resolveOptions(options: ScreenReaderOptions = {}): ResolvedScree
     image:
       options.image ??
       (screenReader === 'hoovda'
-        ? (process.env.HOOSAIDTHAT_HOOVDA_IMAGE ?? 'ghcr.io/openhoo/hoosaidthat-hoovda:0.1.0')
+        ? (process.env.HOOSAIDTHAT_HOOVDA_IMAGE ?? `ghcr.io/openhoo/hoosaidthat-hoovda:${packageVersion}`)
         : requiresNativeHost(screenReader)
           ? (screenReader === 'voiceover' ? 'external:voiceover-macos' : screenReader === 'talkback' ? 'external:talkback-android' : 'external:nvda-windows')
-          : (process.env.HOOSAIDTHAT_ORCA_IMAGE ?? 'ghcr.io/openhoo/hoosaidthat-orca:0.1.0')),
+          : (process.env.HOOSAIDTHAT_ORCA_IMAGE ?? `ghcr.io/openhoo/hoosaidthat-orca:${packageVersion}`)),
     controlEndpoint:
       options.controlEndpoint ??
       (requiresNativeHost(screenReader) ? process.env[`HOOSAIDTHAT_${screenReader.toUpperCase()}_CONTROL_ENDPOINT`] : undefined),

@@ -252,6 +252,22 @@ eSpeak audio synchronized to the browser display. Real NVDA uses Playwright's
 browser video with the same synchronized overlay; its capture boundary is
 structured presentation hooks, not acoustic Windows audio.
 
+### Check the local HooVDA runtime before a long suite
+
+From the installed package, run `npx hoosaidthat-hoovda-doctor`. The doctor
+starts one managed runtime and reports its image ID, platform, HooSaidThat
+source revision and HooVDA commit. It compares the engine pin in the installed
+package with both the image label and the authenticated, running engine. It
+then connects to Chromium over CDP and reads a fresh marker from a server bound
+to the test host's loopback address. The process exits nonzero if any check
+fails and stops its container on exit.
+
+For a source build, use `--image <tag-or-digest> --source <full-HooSaidThat-commit>`;
+`--runtime docker` and `--runtime podman` select the container engine. If your
+site also needs a media server or another service, check that service from the
+runtime browser before starting the suite. A successful loopback check only
+proves the path it exercised.
+
 ### When the page fails to load
 
 If a test using the `page` fixture fails, times out, or is interrupted, its

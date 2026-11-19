@@ -33,6 +33,12 @@ export default defineConfig({
   testDir: '.',
   testMatch: ['nvda-parity.spec.ts', 'nvda-parity.spec.js'],
   outputDir: `../../test-results/${requestedAdapter}-${locale.toLowerCase()}-${keyboardLayout}-parity`,
+  ...(process.env.HST_WINHOO_ATTEMPT && requestedAdapter === 'nvda' && {
+    metadata: {
+      hstMatrix: { adapter: requestedAdapter, locale, layout: keyboardLayout,
+        block: process.env.HST_NVDA_PARITY_BLOCK, attempt: process.env.HST_WINHOO_ATTEMPT },
+    },
+  }),
   workers: 1,
   fullyParallel: false,
   timeout: 12 * 60_000,

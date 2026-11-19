@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { createRequire } from 'node:module';
 import { defineConfig } from '../src/fixtures.js';
 import { resolveOptions, SCREEN_READER_ACTIONS } from '../src/types.js';
 
@@ -18,6 +19,14 @@ test('resolves safe runtime defaults', () => {
   assert.equal(options.quietMs, 300);
   assert.deepEqual(options.viewport, { width: 1280, height: 720 });
   assert.equal(SCREEN_READER_ACTIONS.nextHeading, 'Next heading');
+});
+
+test('default runtime image tags match the installed package', () => {
+  const { version } = createRequire(import.meta.url)('@openhoo/hoosaidthat/package.json');
+  for (const screenReader of ['orca', 'hoovda'] as const) {
+    assert.equal(resolveOptions({ screenReader }).image,
+      process.env[`HOOSAIDTHAT_${screenReader.toUpperCase()}_IMAGE`] ?? `ghcr.io/openhoo/hoosaidthat-${screenReader}:${version}`);
+  }
 });
 
 test('resolves Linux HooVDA image and immutable profile', () => {

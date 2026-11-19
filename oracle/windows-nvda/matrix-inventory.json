@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "requireReportBinding": true,
+  "blocks": {
+    "core": [
+      "coverage manifest exactly covers advertised profile",
+      "a collapsed native select presents changes while focus stays on the control",
+      "reference profile presents core speech, braille, details, table, and live-region behavior",
+      "live regions preserve priority, atomicity, relevance, busy suppression, and interruption order",
+      "a native mouse click reaches the button after Chrome opens partly off screen"
+    ],
+    "actions-01": [
+      "coverage manifest exactly covers advertised profile",
+      "every declared web-profile command executes through selected adapter"
+    ],
+    "actions-02": [
+      "coverage manifest exactly covers advertised profile",
+      "every declared web-profile command executes through selected adapter"
+    ],
+    "actions-03": [
+      "coverage manifest exactly covers advertised profile",
+      "every declared web-profile command executes through selected adapter"
+    ],
+    "actions-04": [
+      "coverage manifest exactly covers advertised profile",
+      "every declared web-profile command executes through selected adapter"
+    ],
+    "actions-05": [
+      "coverage manifest exactly covers advertised profile",
+      "every declared web-profile command executes through selected adapter"
+    ],
+    "actions-06": [
+      "coverage manifest exactly covers advertised profile",
+      "every declared web-profile command executes through selected adapter"
+    ],
+    "actions-07": [
+      "coverage manifest exactly covers advertised profile",
+      "every declared web-profile command executes through selected adapter"
+    ],
+    "actions-08": [
+      "coverage manifest exactly covers advertised profile",
+      "every declared web-profile command executes through selected adapter"
+    ],
+    "settings": [
+      "coverage manifest exactly covers advertised profile",
+      "selected adapter applies and resets session presentation settings"
+    ]
+  }
+}

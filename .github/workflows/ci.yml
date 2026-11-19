@@ -81,6 +81,8 @@ jobs:
             --build-arg IMAGE_REVISION="$GITHUB_SHA" \
             --build-arg BUILD_DATE="$(git show -s --format=%cI HEAD)" \
             --file images/hoovda/Dockerfile .
+      - name: Check package, running engine and browser loopback
+        run: node scripts/hoovda-doctor.mjs --runtime docker --image hoosaidthat-hoovda:dev --source "$GITHUB_SHA"
       - name: Check browse and table navigation across frame focus
         env:
           CONTAINER_ENGINE: docker

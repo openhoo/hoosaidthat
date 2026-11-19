@@ -319,9 +319,15 @@ def main(a):
                 latest = command(a,'status',json_out=True)
                 if latest['uuid'] != binding['uuid']:
                     raise RuntimeError('Owner changed during qualification; cleanup deferred')
+                requested_at = time.time()
                 stop = command(a,'down','--timeout',120,json_out=True,timeout=135)
                 if stop.get('shutdown') != 'guest-confirmed' or stop.get('state') != 'off' or stop.get('uuid') != binding['uuid']:
                     raise RuntimeError('WinHoo did not confirm guest shutdown and process exit')
+                if stop.get('method') != 'windows-shutdown' or not isinstance(stop.get('timeUnix'), (int, float)) or not requested_at <= stop['timeUnix'] <= time.time():
+                    raise RuntimeError('WinHoo did not return a fresh guest-originated shutdown')
+                guest_input = attempt_dir/'guest-input.json'
+                save(attempt_dir/'shutdown.json', {**stop, 'requestedAtUnix':requested_at,
+                     'attempt':json.loads(guest_input.read_bytes())['attempt'] if guest_input.exists() else None})
                 receipt['shutdown'] = 'guest-confirmed'
             if receipt['state'] == 'tested' and receipt['shutdown'] == 'guest-confirmed':
                 receipt['state'] = 'passed'

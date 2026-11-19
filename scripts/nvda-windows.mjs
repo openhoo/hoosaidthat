@@ -950,6 +950,7 @@ function runParityInvocation(locale, keyboardLayout, token, label, overrides = {
       env: {
         ...process.env,
         HOOSAIDTHAT_PARITY_ADAPTER: 'nvda',
+        HST_NVDA_PARITY_BLOCK: label,
         SCREEN_READER_LOCALE: locale,
         SCREEN_READER_KEYBOARD_LAYOUT: keyboardLayout,
         HOOSAIDTHAT_NVDA_CONTROL_TOKEN: token,

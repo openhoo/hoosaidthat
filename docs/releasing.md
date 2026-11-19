@@ -63,6 +63,20 @@ runner. For the workflow, configure the repository variable
 Require one matrix receipt with all 40 blocks (190 actions per locale/layout,
 core and settings), zero retries, and confirmed guest shutdown. A diagnostic
 replay or a green HooVDA image CI job is a separate result.
+For a WinHoo run, also verify the original guest report archive offline with
+WinHoo 0.2.0 or later. Use the inventory from the candidate checkout; it
+declares the case titles independently of what Playwright tells the verifier
+passed. The report for each block identifies its locale, keyboard layout, block
+and guest attempt. The shutdown record is copied from that attempt's own
+`desktop down` operation, before another run can replace it.
+
+```sh
+winhoo desktop verify-nvda-matrix "$evidence" \
+  --inventory oracle/windows-nvda/matrix-inventory.json \
+  --candidate "$(git rev-parse HEAD)" --tree "$(git rev-parse 'HEAD^{tree}')" \
+  --engine "$(node -p 'require("./images/hoovda/source.json").commit')"
+```
+
 The qualification and release compare the HooVDA pin to the source tree on
 upstream main, so a merge with identical bytes is accepted and new engine
 changes must be reviewed before publication.
