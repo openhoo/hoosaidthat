@@ -1,0 +1,100 @@
+name: Qualify immutable runtime images
+
+on:
+  workflow_call:
+    inputs:
+      hoovda:
+        description: HooSaidThat HooVDA image by GHCR manifest digest
+        type: string
+        required: true
+      orca:
+        description: HooSaidThat Orca image by GHCR manifest digest
+        type: string
+        required: true
+      source:
+        description: HooSaidThat source commit recorded in the runtime image
+        type: string
+        required: true
+
+permissions:
+  contents: read
+  packages: read
+
+env:
+  HOOVDA_CANDIDATE: ${{ inputs.hoovda }}
+  ORCA_CANDIDATE: ${{ inputs.orca }}
+  RUNTIME_SOURCE: ${{ inputs.source }}
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - id: plan
+        run: |
+          set -euo pipefail
+          matrix=$(node scripts/qualify-runtime.mjs plan)
+          printf 'matrix=%s\n' "$matrix" >> "$GITHUB_OUTPUT"
+
+  check:
+    name: Runtime / ${{ matrix.id }}
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24
+          cache: npm
+      - name: Build the checked out client
+        run: |
+          npm ci
+          npm run build
+      - name: Pull the exact candidate
+        if: matrix.reader != 'none'
+        env:
+          READER: ${{ matrix.reader }}
+          GHCR_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          case "$READER" in
+            hoovda) image=$HOOVDA_CANDIDATE ;;
+            orca) image=$ORCA_CANDIDATE ;;
+            *) exit 2 ;;
+          esac
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          docker pull --platform linux/amd64 "$image"
+      - name: Install the needed browser tools
+        if: matrix.browser != 'none'
+        env:
+          BROWSER: ${{ matrix.browser }}
+        run: |
+          case "$BROWSER" in
+            chromium) node_modules/.bin/playwright install --with-deps chromium ffmpeg ;;
+            ffmpeg) node_modules/.bin/playwright install ffmpeg ;;
+            *) exit 2 ;;
+          esac
+      - name: Run this lane with one reader at a time
+        env:
+          LANE: ${{ matrix.id }}
+        run: node scripts/qualify-runtime.mjs run "$LANE"
+      - name: Preserve this lane's receipts and raw test evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: release-check-${{ matrix.id }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: test-results/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30

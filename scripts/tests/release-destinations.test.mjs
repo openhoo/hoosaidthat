@@ -7,10 +7,7 @@ import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
-const workflow = readFileSync(join(root, '.github/workflows/release.yml'), 'utf8');
-const block = workflow.match(/<<'GUARDS'\n([\s\S]*?)\n          GUARDS/);
-assert.ok(block, 'workflow contains publication destination guards');
-const script = block[1].split('\n').map(line => line.slice(10)).join('\n');
+const script = readFileSync(join(root, 'scripts/release-absence-guards.sh'), 'utf8');
 
 function requireUnused({ mode = 'trusted', publicResult = { error: { code: 'E404' } },
   publicStatus = 1, stages = [], stageStatus = 0 } = {}) {
