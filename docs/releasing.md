@@ -93,9 +93,10 @@ Published artifacts:
 Image builds push run-scoped candidate indexes with BuildKit SBOM and maximal
 provenance attestations. Qualification pulls those exact digests. Publication
 then promotes the same OCI indexes to version tags without rebuilding them.
-The always-uploaded `release-qualification-evidence` artifact preserves the
-qualification results, `release-candidates.json` with source commits, workflow
-run and attempt, candidate digests and destination tags, and
+The build job packs the tested npm files once; the publishing job checks the
+archive checksum and publishes those bytes. Its `release-qualification-evidence`
+artifact preserves `release-candidates.json` with source commits, workflow run
+and attempt, candidate digests and destination tags, and
 `npm-publication-receipt.json` with the publishing status and tarball integrity.
 The bootstrap receipt also contains the validated stage ID; a trusted receipt
 records successful public-registry integrity and provenance metadata checks.
@@ -111,3 +112,30 @@ means npm publication and public metadata verification are complete.
 After a first release, set each GHCR package visibility deliberately and verify
 the npm tarball, OCI digest, SBOM, provenance, and fresh-pull smoke before
 announcing it.
+
+## Timing the qualification without publishing
+
+Each hosted runner uses one screen reader at a time. Across runners, the four
+language/layout combinations run concurrently, each divided into two groups that
+together execute core, all eight action blocks, and settings. Browser, report,
+doctor, smoke, and example checks run alongside them. The English desktop runs
+the full HooVDA examples; the other three combinations retain the targeted
+aria-details check. The Orca examples run in full. Each job uploads its own
+evidence under `release-check-*`. A failed test or missing required upload
+prevents promotion. For a new publication attempt, rerun **all jobs** so that
+the build, qualification, and publication refer to the same attempt.
+
+To time this on GitHub, open **Actions → Release → Run workflow**. Select
+the branch with the workflow to measure, fill in the version and HooVDA pin,
+and copy the existing candidate tag from the original run's
+`release-candidates.json` (just `candidate-<source SHA>-<run ID>-<attempt>`).
+Enter it as **rehearsal_candidate** and leave **confirm_release** unchecked.
+The rehearsal resolves the existing HooVDA and Orca indexes and runs the same
+qualification against their digests with read-only permissions. It performs no
+build or publication and does not take the lock for a real release.
+
+Compare the old **Qualify release candidates** step with elapsed time from
+the first qualification job starting until the last one finishes. Include
+checkout, pulls, uploads, and runner waits within that interval; also record
+total runner minutes separately. The rehearsed interval excludes the initial
+release build and final promotion.

@@ -19,6 +19,10 @@ on:
         options:
           - trusted
           - bootstrap-stage
+      rehearsal_candidate:
+        description: Existing candidate tag to benchmark without publishing (leave empty for release)
+        required: false
+        type: string
       confirm_release:
         description: Publish npm package and three GHCR images using the selected mode
         required: true
@@ -27,25 +31,42 @@ on:
 
 permissions:
   contents: read
-  packages: write
-  id-token: write
-  attestations: write
+  packages: read
 
 concurrency:
-  group: release-${{ inputs.version }}
+  group: ${{ inputs.confirm_release && format('release-{0}', inputs.version) || format('rehearsal-{0}', github.run_id) }}
   cancel-in-progress: false
 
+env:
+  RELEASE_VERSION: ${{ inputs.version }}
+  HOOVDA_REF: ${{ inputs.hoovda_ref }}
+  NPM_PUBLISH_MODE: ${{ inputs.npm_publish_mode }}
+  ENGINE_IMAGE: ghcr.io/openhoo/hoosaidthat-hoovda-engine
+  HOOVDA_IMAGE: ghcr.io/openhoo/hoosaidthat-hoovda
+  ORCA_IMAGE: ghcr.io/openhoo/hoosaidthat-orca
+
 jobs:
-  release:
-    if: inputs.confirm_release
+  missing-rehearsal-candidate:
+    if: "!inputs.confirm_release && inputs.rehearsal_candidate == ''"
     runs-on: ubuntu-latest
-    env:
-      RELEASE_VERSION: ${{ inputs.version }}
-      HOOVDA_REF: ${{ inputs.hoovda_ref }}
-      NPM_PUBLISH_MODE: ${{ inputs.npm_publish_mode }}
-      ENGINE_IMAGE: ghcr.io/openhoo/hoosaidthat-hoovda-engine
-      HOOVDA_IMAGE: ghcr.io/openhoo/hoosaidthat-hoovda
-      ORCA_IMAGE: ghcr.io/openhoo/hoosaidthat-orca
+    steps:
+      - run: |
+          echo 'Specify an existing candidate for a read-only rehearsal or explicitly confirm a release.' >&2
+          exit 1
+
+  build:
+    if: inputs.confirm_release
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      engine: ${{ steps.images.outputs.engine }}
+      hoovda: ${{ steps.images.outputs.hoovda }}
+      orca: ${{ steps.images.outputs.orca }}
+      bundle: ${{ steps.bundle.outputs.artifact-id }}
+      tarball_sha512: ${{ steps.pack.outputs.sha512 }}
+      attempt: ${{ steps.images.outputs.attempt }}
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -67,9 +88,12 @@ jobs:
           go-version: '1.27.4'
           cache-dependency-path: hoovda/go.sum
       - name: Validate immutable release identity
+        env:
+          REHEARSAL_CANDIDATE: ${{ inputs.rehearsal_candidate }}
         shell: bash
         run: |
           set -euo pipefail
+          test -z "${REHEARSAL_CANDIDATE:-}" || { echo "Cannot publish a rehearsal." >&2; exit 1; }
           if [[ ! "$RELEASE_VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]] || (( ${#RELEASE_VERSION} > 128 )); then
             echo "version must be valid SemVer, fit an OCI tag, omit build metadata, and have no v prefix" >&2
             exit 1
@@ -98,52 +122,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cat > "$RUNNER_TEMP/release-absence-guards.sh" <<'GUARDS'
-          require_unused_npm_version() {
-            local package_name public_result stage_result
-            package_name=$(node -p 'require("./package.json").name')
-            public_result=$(mktemp)
-            if npm view "${package_name}@${RELEASE_VERSION}" version --json \
-              --registry=https://registry.npmjs.org > "$public_result" 2> "${public_result}.stderr"; then
-              echo "npm version already exists; release refused" >&2
-              return 1
-            fi
-            if ! jq -e 'type == "object" and .error.code == "E404"' "$public_result" > /dev/null; then
-              echo "Cannot prove npm version is absent; release refused" >&2
-              return 1
-            fi
-            if [[ "$NPM_PUBLISH_MODE" == bootstrap-stage ]]; then
-              stage_result=$(mktemp)
-              if npm stage list "$package_name" --json --registry=https://registry.npmjs.org \
-                > "$stage_result" 2> "${stage_result}.stderr"; then
-                if ! jq -e --arg package "$package_name" --arg version "$RELEASE_VERSION" \
-                  'type == "array" and all(.[]; type == "object" and .packageName == $package and (.version | type == "string")) and all(.[]; .version != $version)' \
-                  "$stage_result" > /dev/null; then
-                  echo "npm staged version exists or stage listing is invalid; release refused" >&2
-                  return 1
-                fi
-              elif ! jq -e 'type == "object" and .error.code == "E404"' "$stage_result" > /dev/null; then
-                echo "Cannot prove npm staged version is absent; release refused" >&2
-                return 1
-              fi
-            fi
-          }
-          require_unused_image_tag() {
-            local reference=$1 result error
-            result=$(mktemp)
-            if docker buildx imagetools inspect "$reference" > "$result" 2>&1; then
-              echo "Image version tag already exists: $reference; release refused" >&2
-              return 1
-            fi
-            error=$(cat "$result")
-            error=${error#ERROR: }
-            case "$error" in
-              "$reference: not found"|"$reference: manifest unknown"|"$reference: manifest unknown: manifest unknown"|"manifest unknown") ;;
-              *) echo "Cannot prove image version tag is absent: $reference; release refused" >&2; return 1 ;;
-            esac
-          }
-          GUARDS
-          source "$RUNNER_TEMP/release-absence-guards.sh"
+          source scripts/release-absence-guards.sh
           require_unused_npm_version
         env:
           NODE_AUTH_TOKEN: ${{ inputs.npm_publish_mode == 'bootstrap-stage' && secrets.NPM_TOKEN || '' }}
@@ -163,6 +142,13 @@ jobs:
           npm test
           npm run typecheck
           npm run pack:check
+      - name: Pack tested npm files
+        id: pack
+        run: |
+          mkdir -p "$RUNNER_TEMP/bundle"
+          package=$(npm pack --json --pack-destination "$RUNNER_TEMP/bundle" | jq -er '.[0].filename')
+          mv "$RUNNER_TEMP/bundle/$package" "$RUNNER_TEMP/bundle/package.tgz"
+          printf 'sha512=%s\n' "$(sha512sum "$RUNNER_TEMP/bundle/package.tgz" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
       - name: Authenticate GHCR
         shell: bash
         run: echo "$GITHUB_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
@@ -171,6 +157,7 @@ jobs:
       - name: Create Buildx builder
         run: docker buildx create --name hoosaidthat-release --use
       - name: Build attested release candidates
+        id: images
         shell: bash
         run: |
           set -euo pipefail
@@ -201,11 +188,11 @@ jobs:
             --file images/orca/Dockerfile .
           orca_digest=$(jq -er '."containerimage.digest" | select(test("^sha256:[0-9a-f]{64}$"))' "$RUNNER_TEMP/orca-metadata.json")
           {
-            printf 'ENGINE_CANDIDATE=%s@%s\n' "$ENGINE_IMAGE" "$engine_digest"
-            printf 'HOOVDA_CANDIDATE=%s@%s\n' "$HOOVDA_IMAGE" "$hoovda_digest"
-            printf 'ORCA_CANDIDATE=%s@%s\n' "$ORCA_IMAGE" "$orca_digest"
-          } >> "$GITHUB_ENV"
-          mkdir -p test-results
+            printf 'engine=%s@%s\n' "$ENGINE_IMAGE" "$engine_digest"
+            printf 'hoovda=%s@%s\n' "$HOOVDA_IMAGE" "$hoovda_digest"
+            printf 'orca=%s@%s\n' "$ORCA_IMAGE" "$orca_digest"
+            echo "attempt=$GITHUB_RUN_ATTEMPT"
+          } >> "$GITHUB_OUTPUT"
           jq -n --arg repository "$GITHUB_REPOSITORY" --arg sourceRef "$GITHUB_REF" \
             --arg sourceCommit "$GITHUB_SHA" --arg companionCommit "$hoovda_commit" \
             --arg version "$RELEASE_VERSION" --arg runId "$GITHUB_RUN_ID" \
@@ -229,54 +216,79 @@ jobs:
                 {name: "orca", candidateTag: ($orcaImage + ":" + $candidateTag),
                   reference: ($orcaImage + "@" + $orcaDigest), digest: $orcaDigest,
                   versionTag: ($orcaImage + ":" + $version)}]}' \
-            > test-results/release-candidates.json
-      - name: Qualify release candidates
-        env:
-          CONTAINER_ENGINE: docker
+            > "$RUNNER_TEMP/bundle/release-candidates.json"
+      - name: Store immutable publication inputs
+        id: bundle
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: release-inputs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/bundle
+          if-no-files-found: error
+          retention-days: 30
+      - name: Preserve Buildx attestation metadata
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: release-buildx-metadata
+          path: |
+            ${{ runner.temp }}/hoovda-engine-metadata.json
+            ${{ runner.temp }}/hoovda-metadata.json
+            ${{ runner.temp }}/orca-metadata.json
+          if-no-files-found: error
+          retention-days: 30
+
+  qualify:
+    needs: build
+    uses: ./.github/workflows/qualify-runtime.yml
+    with:
+      hoovda: ${{ needs.build.outputs.hoovda }}
+      orca: ${{ needs.build.outputs.orca }}
+      source: ${{ github.sha }}
+
+  publish:
+    needs: [build, qualify]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    env:
+      ENGINE_CANDIDATE: ${{ needs.build.outputs.engine }}
+      HOOVDA_CANDIDATE: ${{ needs.build.outputs.hoovda }}
+      ORCA_CANDIDATE: ${{ needs.build.outputs.orca }}
+      TARBALL_SHA512: ${{ needs.build.outputs.tarball_sha512 }}
+      BUILD_ATTEMPT: ${{ needs.build.outputs.attempt }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24
+          package-manager-cache: false
+          registry-url: https://registry.npmjs.org
+      - run: npm install --global npm@11.20.0
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          artifact-ids: ${{ needs.build.outputs.bundle }}
+          path: ${{ runner.temp }}/bundle
+          merge-multiple: true
+      - name: Verify publication inputs
         run: |
-          set -euo pipefail
-          docker pull --platform linux/amd64 "$HOOVDA_CANDIDATE"
-          docker tag "$(docker image inspect --format '{{.Id}}' "$HOOVDA_CANDIDATE")" hoosaidthat-hoovda:release
-          docker pull --platform linux/amd64 "$ORCA_CANDIDATE"
-          docker tag "$(docker image inspect --format '{{.Id}}' "$ORCA_CANDIDATE")" hoosaidthat-orca:release
-          npx playwright install --with-deps chromium ffmpeg
-          node scripts/hoovda-doctor.mjs --runtime docker --image hoosaidthat-hoovda:release --source "$GITHUB_SHA"
-          npm run test:session-browser
-          npm run test:report-edges -- test-results/report-edges
-          bash images/hoovda/smoke-test.sh hoosaidthat-hoovda:release
-          bash images/orca/smoke-test.sh hoosaidthat-orca:release orca
-          for matrix in en-US/desktop en-US/laptop de-DE/desktop de-DE/laptop; do
-            locale=${matrix%/*}
-            layout=${matrix#*/}
-            CONTAINER_ENGINE=docker SCREEN_READER_IMAGE=hoosaidthat-hoovda:release \
-              node scripts/hoovda-parity.mjs "$locale" "$layout"
-          done
-          SCREEN_READER=hoovda SCREEN_READER_IMAGE=hoosaidthat-hoovda:release \
-            npx playwright test --config examples/basic/playwright.config.ts \
-              --output test-results/hoovda-en-US-desktop
-          for matrix in en-US/laptop de-DE/desktop de-DE/laptop; do
-            locale=${matrix%/*}
-            layout=${matrix#*/}
-            SCREEN_READER=hoovda SCREEN_READER_IMAGE=hoosaidthat-hoovda:release \
-              SCREEN_READER_LOCALE="$locale" SCREEN_READER_KEYBOARD_LAYOUT="$layout" \
-              npx playwright test --config examples/basic/playwright.config.ts \
-                --output "test-results/hoovda-${locale}-${layout}" \
-                --grep 'matches pinned NVDA aria-details'
-          done
-          SCREEN_READER=orca SCREEN_READER_IMAGE=hoosaidthat-orca:release \
-            npx playwright test --config examples/basic/playwright.config.ts \
-              --output test-results/orca
-          SCREEN_READER_IMAGE=hoosaidthat-hoovda:release \
-            npm run test:e2e:report -- --output test-results/report-candidate
-          for report in test-results/report-candidate/*/screenreader/screen-reader-report.html; do
-            test -f "$report"
-            node scripts/verify-web-report.mjs "$report" test-results/report-viewer
-          done
+          test "$BUILD_ATTEMPT" = "$GITHUB_RUN_ATTEMPT" || { echo 'Rerun all jobs to qualify this release attempt.' >&2; exit 1; }
+          printf '%s  %s\n' "$TARBALL_SHA512" "$RUNNER_TEMP/bundle/package.tgz" | sha512sum --check --status
+          mkdir -p test-results
+          cp "$RUNNER_TEMP/bundle/release-candidates.json" test-results/
+          jq -e --arg run "$GITHUB_RUN_ID" --arg attempt "$BUILD_ATTEMPT" --arg sha "$GITHUB_SHA" \
+            --arg engine "$ENGINE_CANDIDATE" --arg hoovda "$HOOVDA_CANDIDATE" --arg orca "$ORCA_CANDIDATE" \
+            '.run.id == $run and .run.attempt == $attempt and .sourceCommit == $sha and
+             ([.images[].reference] == [$engine, $hoovda, $orca])' test-results/release-candidates.json >/dev/null
+      - name: Authenticate GHCR
+        run: echo "$GITHUB_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Require unused publication destinations
         shell: bash
         run: |
           set -euo pipefail
-          source "$RUNNER_TEMP/release-absence-guards.sh"
+          source scripts/release-absence-guards.sh
           require_unused_npm_version
           require_unused_image_tag "${ENGINE_IMAGE}:${RELEASE_VERSION}"
           require_unused_image_tag "${HOOVDA_IMAGE}:${RELEASE_VERSION}"
@@ -310,11 +322,13 @@ jobs:
           if [[ "$NPM_PUBLISH_MODE" == bootstrap-stage ]]; then
             publish_command=(npm stage publish)
           fi
-          "${publish_command[@]}" --access public --provenance --tag "$npm_tag" --json \
+          "${publish_command[@]}" "$RUNNER_TEMP/bundle/package.tgz" --access public --provenance --tag "$npm_tag" --json \
             > "$RUNNER_TEMP/npm-publish-raw.json"
           export NPM_RELEASE_TAG="$npm_tag"
           node scripts/release-receipt.mjs create "$RUNNER_TEMP/npm-publish-raw.json" \
             test-results/npm-publication-receipt.json
+          actual_integrity="sha512-$(openssl dgst -sha512 -binary "$RUNNER_TEMP/bundle/package.tgz" | openssl base64 -A)"
+          jq -e --arg expected "$actual_integrity" '.package.integrity == $expected' test-results/npm-publication-receipt.json >/dev/null
           if [[ "$NPM_PUBLISH_MODE" == bootstrap-stage ]]; then
             echo '### npm package staged; publication requires maintainer MFA approval' >> "$GITHUB_STEP_SUMMARY"
             echo 'Review the sanitized stage receipt in release-qualification-evidence and approve the stage on npmjs.com.' >> "$GITHUB_STEP_SUMMARY"
@@ -347,14 +361,33 @@ jobs:
           path: test-results
           if-no-files-found: ignore
           retention-days: 30
-      - name: Preserve Buildx attestation metadata
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        if: always()
-        with:
-          name: release-buildx-metadata
-          path: |
-            ${{ runner.temp }}/hoovda-engine-metadata.json
-            ${{ runner.temp }}/hoovda-metadata.json
-            ${{ runner.temp }}/orca-metadata.json
-          if-no-files-found: ignore
-          retention-days: 30
+
+  rehearsal-inputs:
+    if: "!inputs.confirm_release && inputs.rehearsal_candidate != ''"
+    runs-on: ubuntu-latest
+    outputs:
+      hoovda: ${{ steps.refs.outputs.hoovda }}
+      orca: ${{ steps.refs.outputs.orca }}
+      source: ${{ steps.refs.outputs.source }}
+    steps:
+      - name: Resolve existing candidate indexes without registry writes
+        id: refs
+        env:
+          CANDIDATE_TAG: ${{ inputs.rehearsal_candidate }}
+        run: |
+          set -euo pipefail
+          [[ "$CANDIDATE_TAG" =~ ^candidate-([0-9a-f]{40})-[1-9][0-9]*-[1-9][0-9]*$ ]]
+          echo "source=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
+          for pair in "hoovda=$HOOVDA_IMAGE" "orca=$ORCA_IMAGE"; do
+            image=${pair#*=}
+            digest=$(docker buildx imagetools inspect "$image:$CANDIDATE_TAG" --format '{{json .Manifest}}' | jq -er '.digest | select(test("^sha256:[0-9a-f]{64}$"))')
+            printf '%s=%s@%s\n' "${pair%%=*}" "$image" "$digest" >> "$GITHUB_OUTPUT"
+          done
+
+  rehearse:
+    needs: rehearsal-inputs
+    uses: ./.github/workflows/qualify-runtime.yml
+    with:
+      hoovda: ${{ needs.rehearsal-inputs.outputs.hoovda }}
+      orca: ${{ needs.rehearsal-inputs.outputs.orca }}
+      source: ${{ needs.rehearsal-inputs.outputs.source }}

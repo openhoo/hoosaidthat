@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -77,6 +77,8 @@ function run(label, specializedEnvironment) {
     label,
   );
   console.log(`HooVDA parity ${locale}/${keyboardLayout}/${label}`);
+  const reportDir = process.env.HST_PARITY_REPORT_DIR;
+  if (reportDir) mkdirSync(reportDir, { recursive: true });
   const result = spawnSync(
     process.execPath,
     [
@@ -86,6 +88,7 @@ function run(label, specializedEnvironment) {
       parityConfig,
       '--output',
       output,
+      ...(reportDir ? ['--workers=1', '--retries=0', '--reporter=list,json'] : []),
     ],
     {
       cwd: invocationRoot,
@@ -101,6 +104,7 @@ function run(label, specializedEnvironment) {
         HOOSAIDTHAT_NVDA_PARITY_SETTINGS: '',
         HOOSAIDTHAT_NVDA_PARITY_ARTIFACTS: '',
         ...specializedEnvironment,
+        ...(reportDir && { PLAYWRIGHT_JSON_OUTPUT_FILE: resolve(reportDir, label + '.json') }),
       },
     },
   );
