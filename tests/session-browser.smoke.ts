@@ -103,3 +103,31 @@ test('element evidence preserves page styles, cleans failed overlays, and masks 
   assert.equal(await page.locator('#__hoosaidthat_screenreader_overlay__').count(), 0);
 });
 
+test('a successful retry leaves the first attempt’s module failure attached to that attempt', async (t) => {
+  const { execFile } = await import('node:child_process');
+  const { promisify } = await import('node:util');
+  const { fileURLToPath } = await import('node:url');
+  const directory = await mkdtemp(join(tmpdir(), 'hoosaidthat-browser-failure-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const { stdout } = await promisify(execFile)(process.execPath, [
+    fileURLToPath(import.meta.resolve('@playwright/test/cli')),
+    'test', '--config', fileURLToPath(new URL('./browser-failure-fixture/', import.meta.url)),
+    '--output', directory, '--workers=1', '--retries=1', '--reporter=json',
+  ]);
+  const attempts = JSON.parse(stdout).suites[0].specs[0].tests[0].results;
+  assert.deepEqual(attempts.map((attempt: { status: string }) => attempt.status), ['failed', 'passed']);
+  const name = 'screen-reader-browser-failures.json';
+  const evidence = attempts[0].attachments.find((a: { name: string }) => a.name === name);
+  assert.ok(evidence, 'keep browser evidence even though a subsequent attempt passes');
+  const raw = Buffer.from(evidence.body, 'base64').toString('utf8');
+  const report = JSON.parse(raw);
+  assert.equal(report.retry, 0);
+  assert.equal(report.events[0].beforeFirstReaderGesture, true);
+  assert.equal(report.firstReaderGestureAtMs, null);
+  assert.deepEqual(report.events.map((e: { kind: string; resourceType: string; extension: string; importQuery: boolean; code: string }) =>
+    [e.kind, e.resourceType, e.extension, e.importQuery, e.code]), [
+    ['request-failed', 'script', 'svg', true, 'ERR_INTERNET_DISCONNECTED'],
+  ]);
+  assert.doesNotMatch(raw, /private-host|private-name|sensitive-query|token=/);
+  assert.equal(attempts[1].attachments.some((a: { name: string }) => a.name === name), false);
+});

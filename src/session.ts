@@ -1,3 +1,4 @@
+import { markReaderGesture } from './browser-failures.js';
 import { createHash } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { basename, dirname } from 'node:path';
@@ -151,6 +152,7 @@ export class ScreenReaderSession {
     }
     return await playwrightTest.step(`Screen reader: ${label}`, async () => {
       await this.show(label, 'Listening...');
+      markReaderGesture(this.page);
       const response = await this.client.perform(action);
       const observation = response.events
         ? this.observation(
@@ -661,6 +663,7 @@ export class ScreenReaderSession {
     const label = `${SCREEN_READER_ACTIONS[action]} ${cell}`;
     return await playwrightTest.step(`Screen reader: ${label}`, async () => {
       await this.show(label, 'Listening...');
+      markReaderGesture(this.page);
       const response = await this.client.perform(action, String(cell));
       if (response.delivery !== 'structured') {
         throw new Error(
@@ -694,6 +697,7 @@ export class ScreenReaderSession {
     const label = `Find: ${normalized}`;
     return await playwrightTest.step(`Screen reader: ${label}`, async () => {
       await this.show(label, 'Listening...');
+      markReaderGesture(this.page);
       const response = await this.client.perform('find', normalized);
       if (response.delivery !== 'structured') {
         throw new Error(
