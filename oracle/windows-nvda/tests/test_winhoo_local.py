@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest import mock
 
@@ -17,6 +18,22 @@ import winhoo_bundle
 
 
 class GuestRunnerTests(unittest.TestCase):
+    def test_invalid_local_bundle_never_acquires_or_stops_a_desktop(self):
+        for state in ('off', 'running'):
+            with self.subTest(state=state), tempfile.TemporaryDirectory() as temp:
+                vm = Path(temp)/'vm'
+                (vm/'hoosaidthat').mkdir(parents=True)
+                (vm/'hoosaidthat/owner.json').write_text('{"uuid":"vm"}')
+                args = SimpleNamespace(operation='run', mode='core', candidate=None, desktop=vm,
+                                       evidence=Path(temp)/'attempt', cache=None, adopt_running=True)
+                with mock.patch.object(runner, 'command', return_value={'state':state,'uuid':'vm'}) as command, \
+                     mock.patch.object(runner, 'bundle', side_effect=ValueError('invalid local bundle')):
+                    with self.assertRaisesRegex(ValueError, 'invalid local bundle'):
+                        runner.main(args)
+                self.assertEqual([call.args[1] for call in command.call_args_list], ['status'])
+                receipt = json.loads((args.evidence/'receipt.json').read_bytes())
+                self.assertEqual((receipt['state'],receipt['shutdown']), ('failed','not-acquired'))
+
     def test_focuses_only_the_discovered_browser_on_the_attested_console(self):
         browser = {'pid': 272, 'startedTicks': 638990000000000000, 'session': 1}
         sample = {'pid': 272, 'session': 1, 'owner': 'vm', 'process': 'chrome', 'method': 'caption-click'}

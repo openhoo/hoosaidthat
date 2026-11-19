@@ -88,7 +88,7 @@ test.describe("NVDA window placement", () => {
   });
 });
 
-coreTest("a collapsed native select presents changes while focus stays on the control", async ({ page, screenReader }) => {
+coreTest("a collapsed native select presents changes while focus stays on the control", async ({ page, screenReader, screenReaderClient }) => {
   const url = "https://parity.test/select-value";
   await page.route(url, route => route.fulfill({
     contentType: "text/html; charset=utf-8",
@@ -102,7 +102,16 @@ coreTest("a collapsed native select presents changes while focus stays on the co
   await screenReader.ensureFocusMode();
   await expect(choice).toHaveValue("");
   for (const [key, value, name] of [["e", "en-GB", "English"], ["ArrowDown", "zu", "Zulu"]] as const) {
-    const output = await screenReader.observe("Change the selected option", () => page.keyboard.press(key));
+    const output = await screenReader.observe("Change the selected option", async () => {
+      // NVDA can speak the option before it refreshes the braille display.
+      // Wait for this key's actual display frame without sending another key.
+      const beforeKey = await screenReader.checkpoint();
+      await page.keyboard.press(key);
+      await expect.poll(async () => {
+        const { events } = await screenReaderClient.readEvents(beforeKey, { timeoutMs: 400, quietMs: 80 });
+        return events.filter(event => event.kind === "braille").at(-1)?.text;
+      }, { timeout: 8_000, message: `Braille display after ${key}` }).toContain(name);
+    });
     await expect(choice).toBeFocused();
     await expect(choice).toHaveValue(value);
     expect(output.speech).toContain(name);

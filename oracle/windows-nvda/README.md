@@ -29,9 +29,11 @@ node scripts/nvda-windows.mjs winhoo run --desktop "$desktop" --mode actions-08 
 node scripts/nvda-windows.mjs winhoo run --desktop "$desktop" --mode matrix --candidate "$(git rev-parse HEAD)" --cache "$media" --evidence "$evidence/matrix-01"
 ```
 
-The controller verifies the active guest scripts, builds the parity suite and
-ships it with integrity-checked Playwright packages, ARM64 Node and Windows
-FFmpeg. Before starting the tests, it finds the browser that owns the live CDP
+The controller builds the parity suite and packs the checked Playwright
+packages, ARM64 Node and Windows FFmpeg before it starts or adopts the VM.
+A local build failure leaves the desktop in its original power state and
+records `shutdown: not-acquired`. Once Windows is ready, the controller
+verifies the installed guest scripts and finds the browser that owns the live CDP
 port on the dedicated console. WinHoo activates that process and records the
 Windows foreground PID and method in `browser-focus.json`. Each invocation
 owns a unique guest directory. The host retrieves the

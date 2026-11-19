@@ -185,7 +185,8 @@ def focus_browser(a, binding, console):
     if (type(pid) is not int or pid <= 0 or type(ticks) is not int or ticks <= 0 or
             type(browser.get('session')) is not int or browser['session'] != console['id']):
         raise RuntimeError('The live Chrome process does not belong to the attested Windows console')
-    sample = command(a,'focus-window','--pid',pid,'--started-ticks',ticks,json_out=True,timeout=55)
+    # Keep the outer deadline beyond WinHoo's 90-second cold-start/cleanup budget.
+    sample = command(a,'focus-window','--pid',pid,'--started-ticks',ticks,json_out=True,timeout=105)
     if (sample.get('pid') != pid or sample.get('owner') != binding['uuid'] or
             sample.get('session') != console['id'] or sample.get('process','').casefold() != 'chrome' or
             sample.get('method') not in ('caption-click','already-active')):
@@ -193,13 +194,10 @@ def focus_browser(a, binding, console):
     return {**sample, 'startedTicks':ticks}
 
 
-def guest_parity(a, root, binding, folder, console):
+def guest_parity(a, artifact, binding, folder, console):
     attempt = uuid.uuid4().hex
-    with tempfile.TemporaryDirectory(dir=root) as directory:
-        artifact = Path(directory)/'runner.zip'
-        bundle(HERE.parents[1],a.cache or a.desktop.parent/'media',artifact)
-        digest = sha(artifact)
-        command(a,'put',artifact,'hst-'+attempt+'.zip','--timeout',150,timeout=165)
+    digest = sha(artifact)
+    command(a,'put',artifact,'hst-'+attempt+'.zip','--timeout',150,timeout=165)
     info = {'attempt':attempt,'bundle':digest,'owner':binding['uuid'],'mode':a.mode}
     if a.mode != 'matrix':
         info.update(locale=a.locale,layout=a.layout)
@@ -252,7 +250,7 @@ def main(a):
     a.desktop = a.desktop.expanduser().resolve(strict=True)
     root = a.desktop/'hoosaidthat'
     root.mkdir(mode=0o700,exist_ok=True)
-    with lease(root):
+    with lease(root), tempfile.TemporaryDirectory(dir=root) as directory:
         provenance = candidate(a) if a.operation == 'run' else None
         info = command(a,'status',json_out=True)
         binding = {'uuid':info['uuid']}
@@ -265,13 +263,18 @@ def main(a):
             raise RuntimeError('Desktop is already active; specify --adopt-running only for your own dedicated guest')
         attempt_dir = a.evidence.expanduser().resolve()
         attempt_dir.mkdir(mode=0o700,parents=True,exist_ok=False)
-        receipt = {'desktop':binding,'operation':a.operation,'mode':getattr(a,'mode',None),'state':'starting','shutdown':'pending','passedBlocks':0}
+        receipt = {'desktop':binding,'operation':a.operation,'mode':getattr(a,'mode',None),'state':'preparing','shutdown':'not-acquired','passedBlocks':0}
         if provenance:
             receipt['source'] = provenance
         destination = attempt_dir/'receipt.json'
         save(destination,receipt)
         started = False
         try:
+            artifact = Path(directory)/'runner.zip'
+            if a.operation == 'run':
+                bundle(HERE.parents[1],a.cache or a.desktop.parent/'media',artifact)
+            receipt.update(state='starting', shutdown='pending')
+            save(destination,receipt)
             active = command(a,'up',json_out=True)
             if active.get('uuid') != info['uuid'] or active.get('state') != 'running':
                 raise RuntimeError('Could not acquire the selected WinHoo desktop')
@@ -289,7 +292,7 @@ def main(a):
                 save(destination,receipt)
                 if os.environ.get('HST_NVDA_CONTAINER_ID'):
                     raise RuntimeError('A container qualification is configured; select one owner')
-                receipt['passedBlocks'] = guest_parity(a,root,binding,attempt_dir,live['consoleSession'])
+                receipt['passedBlocks'] = guest_parity(a,artifact,binding,attempt_dir,live['consoleSession'])
                 if provenance and (candidate(a) != provenance or installed_files(a) != receipt['installed']):
                     raise RuntimeError('Qualification inputs changed during the attempt')
             receipt['state'] = 'tested'
