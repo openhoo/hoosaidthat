@@ -179,7 +179,21 @@ def failed_output(folder, attempt, mode):
     return str(base/path.name)
 
 
-def guest_parity(a, root, binding, folder):
+def focus_browser(a, binding, console):
+    browser = command(a,'exec','--file',HERE/'winhoo-browser.ps1','--timeout',100,json_out=True,timeout=110)
+    pid, ticks = browser.get('pid'), browser.get('startedTicks')
+    if (type(pid) is not int or pid <= 0 or type(ticks) is not int or ticks <= 0 or
+            type(browser.get('session')) is not int or browser['session'] != console['id']):
+        raise RuntimeError('The live Chrome process does not belong to the attested Windows console')
+    sample = command(a,'focus-window','--pid',pid,'--started-ticks',ticks,json_out=True,timeout=55)
+    if (sample.get('pid') != pid or sample.get('owner') != binding['uuid'] or
+            sample.get('session') != console['id'] or sample.get('process','').casefold() != 'chrome' or
+            sample.get('method') not in ('caption-click','already-active')):
+        raise RuntimeError('WinHoo did not confirm the runtime browser in the foreground')
+    return {**sample, 'startedTicks':ticks}
+
+
+def guest_parity(a, root, binding, folder, console):
     attempt = uuid.uuid4().hex
     with tempfile.TemporaryDirectory(dir=root) as directory:
         artifact = Path(directory)/'runner.zip'
@@ -190,6 +204,9 @@ def guest_parity(a, root, binding, folder):
     if a.mode != 'matrix':
         info.update(locale=a.locale,layout=a.layout)
     save(folder/'guest-input.json',info)
+    # A service-session command will own the guest for the duration of parity.
+    # Acquire the foreground before that lock, using this boot's actual CDP owner.
+    save(folder/'browser-focus.json',focus_browser(a,binding,console))
     script = '& {\n' + (HERE/'winhoo-run.ps1').read_text() + '\n} ' + ' '.join(
         (attempt,digest,a.mode,binding['uuid'],a.locale,a.layout)) + '\nexit $LASTEXITCODE'
     budget = 8*3600 if a.mode == 'matrix' else 20*60
@@ -272,7 +289,7 @@ def main(a):
                 save(destination,receipt)
                 if os.environ.get('HST_NVDA_CONTAINER_ID'):
                     raise RuntimeError('A container qualification is configured; select one owner')
-                receipt['passedBlocks'] = guest_parity(a,root,binding,attempt_dir)
+                receipt['passedBlocks'] = guest_parity(a,root,binding,attempt_dir,live['consoleSession'])
                 if provenance and (candidate(a) != provenance or installed_files(a) != receipt['installed']):
                     raise RuntimeError('Qualification inputs changed during the attempt')
             receipt['state'] = 'tested'

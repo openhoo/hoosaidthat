@@ -17,6 +17,19 @@ import winhoo_bundle
 
 
 class GuestRunnerTests(unittest.TestCase):
+    def test_focuses_only_the_discovered_browser_on_the_attested_console(self):
+        browser = {'pid': 272, 'startedTicks': 638990000000000000, 'session': 1}
+        sample = {'pid': 272, 'session': 1, 'owner': 'vm', 'process': 'chrome', 'method': 'caption-click'}
+        with mock.patch.object(runner,'command',side_effect=[browser,sample]) as cmd:
+            self.assertEqual(runner.focus_browser(None,{'uuid':'vm'},{'id':1}), {**sample,'startedTicks':browser['startedTicks']})
+            self.assertEqual(cmd.call_args.args[1:], ('focus-window','--pid',272,'--started-ticks',browser['startedTicks']))
+        with mock.patch.object(runner,'command',return_value={**browser,'session':2}) as cmd:
+            with self.assertRaisesRegex(RuntimeError,'attested Windows console'): runner.focus_browser(None,{'uuid':'vm'},{'id':1})
+            self.assertEqual(cmd.call_count,1)
+        for other in ({'pid':273},{'process':'explorer'},{'owner':'other'},{'method':'requested'}):
+            with self.subTest(other=other),mock.patch.object(runner,'command',side_effect=[browser,{**sample,**other}]):
+                with self.assertRaisesRegex(RuntimeError,'did not confirm'): runner.focus_browser(None,{'uuid':'vm'},{'id':1})
+
     def test_failure_archive_can_only_read_the_selected_attempt_and_block(self):
         attempt='d'*32
         with tempfile.TemporaryDirectory() as d:

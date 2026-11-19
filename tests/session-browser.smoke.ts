@@ -4,7 +4,26 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { chromium, type Page, type TestInfo } from '@playwright/test';
-import { ScreenReaderSession } from '../src/session.js';
+import { assertNativeViewport, ScreenReaderSession } from '../src/session.js';
+
+test('native viewport accepts Windows frame measurements and rejects an emulated size that fits', async (t) => {
+  const browser = await chromium.launch();
+  t.after(() => browser.close());
+  const page = await browser.newPage({ viewport: null });
+  // Real measurements from Chrome in the Windows NVDA guest after a resize.
+  await page.evaluate(() => {
+    Object.defineProperties(window, {
+      innerWidth: { configurable: true, value: 804 }, innerHeight: { configurable: true, value: 469 },
+      outerWidth: { configurable: true, value: 800 }, outerHeight: { configurable: true, value: 552 },
+    });
+  });
+  await assertNativeViewport(page);
+  await page.setViewportSize({ width: 640, height: 400 });
+  await page.evaluate(() => {
+    Object.defineProperties(window, { innerWidth: { value: 640 }, innerHeight: { value: 400 } });
+  });
+  await assert.rejects(() => assertNativeViewport(page), /viewport=null/);
+});
 
 // Explicit browser smoke: excluded from the default *.test.js unit gate.
 function screenshotSession(page: Page, directory: string, overlay: boolean): ScreenReaderSession {
