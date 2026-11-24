@@ -1,9 +1,9 @@
 #!/usr/bin/env node
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 import { ATDriver } from './native/at-driver.mjs';
 import { VoiceOverDriver } from './native/voiceover.mjs';
 import { assertNativePlatform, inspectVoiceOverDesktop, nativeProbe } from './native/platform.mjs';
@@ -157,6 +157,6 @@ Use one Playwright worker per native desktop. Ctrl+C closes the owned browser.`)
   }
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+if (process.argv[1] && await realpath(process.argv[1]).catch(() => undefined) === fileURLToPath(import.meta.url)) {
   main().catch(error => { console.error(`Native screen reader bridge failed: ${error.message}`); process.exitCode = 1; });
 }
