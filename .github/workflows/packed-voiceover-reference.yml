@@ -1,0 +1,75 @@
+name: Qualify the packed iPhone VoiceOver candidate f22781c
+on:
+  push:
+    branches: [diagnostics/packed-voiceover-f22781c]
+permissions:
+  contents: read
+jobs:
+  compare:
+    runs-on: xcode-27
+    timeout-minutes: 45
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_27.1.app/Contents/Developer
+      HOMEBREW_NO_AUTO_UPDATE: '1'
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: f22781cd54a7acf465124b89a8afe11939259f09
+          persist-credentials: false
+      - name: Build and install the exact package candidate in a fresh consumer directory
+        run: |
+          test "$(git rev-parse HEAD)" = f22781cd54a7acf465124b89a8afe11939259f09
+          git diff --exit-code HEAD
+          npm ci --no-audit --no-fund
+          npm run build
+          mkdir -p "$RUNNER_TEMP/qualification" "$RUNNER_TEMP/consumer"
+          npm pack --json --pack-destination "$RUNNER_TEMP/qualification" > "$RUNNER_TEMP/npm-pack.json"
+          archive=$(jq -er '.[0].filename' "$RUNNER_TEMP/npm-pack.json")
+          jq --arg source "$(git rev-parse HEAD)" '.[0] | {source:$source,name,version,filename,integrity,shasum}' "$RUNNER_TEMP/npm-pack.json" > "$RUNNER_TEMP/qualification/package-receipt.json"
+          cd "$RUNNER_TEMP/consumer"
+          echo '{"name":"qualification-consumer","private":true}' > package.json
+          npm install --no-audit --no-fund --ignore-scripts "$RUNNER_TEMP/qualification/$archive"
+          test -x node_modules/.bin/hoosaidthat-voiceover-ios
+          test -f node_modules/@openhoo/hoosaidthat/dist/index.js
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: qualified-package
+          path: ${{ runner.temp }}/qualification
+          retention-days: 7
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          repository: IRS-Public/aloud
+          ref: 3287d38c7833eaea0abfb537b5e2c099abb6232f
+          path: reference
+          persist-credentials: false
+      - name: Prepare the recorded reference fixture
+        run: |
+          command -v xcodegen || brew install xcodegen
+          xcrun xcodebuild -version
+      - name: Run the same native fixture as upstream
+        working-directory: reference
+        run: node test/ios-voiceover-smoke.mjs
+        env:
+          ALOUD_VO_SMOKE_CASE: modal
+      - name: Preserve native reference results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: upstream-native-reference
+          path: |
+            reference/aloud-report/voiceover-smoke/voiceover/*.log
+            reference/aloud-report/voiceover-smoke/voiceover/*.json
+            reference/aloud-report/voiceover-smoke/voiceover/*.xcresult
+          retention-days: 7
+      - name: Run HooSaidThat in Safari on the same simulator
+        if: ${{ !cancelled() }}
+        run: |
+          udid=$(xcrun simctl list devices booted --json | jq -re '[.devices[][]|select(.isAvailable and (.deviceTypeIdentifier|contains("SimDeviceType.iPhone-")))] | select(length == 1) | .[0].udid')
+          cd "$RUNNER_TEMP/consumer"
+          node_modules/.bin/hoosaidthat-voiceover-ios run --udid "$udid" --results "$GITHUB_WORKSPACE/results/safari"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: warmed-safari-results
+          path: results/safari
+          retention-days: 7
