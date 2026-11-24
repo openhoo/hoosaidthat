@@ -57,6 +57,39 @@ movement, `until` repeats that movement until the substring appears. Supply
 `maxMoves` (1–50); exhausting the limit fails. Without an expectation, the
 step still requires nonempty speech. A scenario accepts 1–100 steps.
 
+## Use a Playwright test
+
+Import `runIPhoneVoiceOver` from `@openhoo/hoosaidthat/ios` in a test that
+runs on your Mac. The helper opens the URL in Mobile Safari and rejects if
+VoiceOver does not speak the expected text. Start your site before the test
+(for example with Playwright's `webServer` setting) and use one worker per
+simulator. The example assumes a single eligible iPhone; if you have several,
+pass `udid` in the options alongside `resultsDirectory`.
+
+```ts
+import { test } from '@playwright/test';
+import { runIPhoneVoiceOver } from '@openhoo/hoosaidthat/ios';
+
+test('VoiceOver reads the checkout summary on iPhone', async ({}, testInfo) => {
+  test.setTimeout(20 * 60_000); // Allows for a cold simulator boot and XCTest build.
+  const { report } = await runIPhoneVoiceOver({
+    url: 'http://127.0.0.1:8080/checkout',
+    steps: [
+      { action: 'forward', until: 'Order summary', maxMoves: 30 },
+      { action: 'forward', expect: 'Pay now' },
+    ],
+  }, { resultsDirectory: testInfo.outputPath('iphone') });
+  await testInfo.attach('iPhone VoiceOver', {
+    body: JSON.stringify(report, null, 2),
+    contentType: 'application/json',
+  });
+});
+```
+
+The return value also includes `outputDirectory`, the location of
+`VoiceOver.xcresult` and the transcript. If a native test fails, inspect
+the run directory under the specified `resultsDirectory`.
+
 ## Results and scope
 
 Each run prints its own directory under `test-results/ios-voiceover/`

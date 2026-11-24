@@ -115,7 +115,7 @@ async function extract(result, dir, device) {
   return JSON.parse(await readFile(join(path, file), 'utf8'));
 }
 
-async function run(device, environment, input, parent) {
+async function runOnDevice(device, environment, input, parent) {
   check(device.state === 'Booted' || device.state === 'Shutdown', `Simulator is ${device.state}; wait until it is ready.`);
   await mkdir(parent, { recursive: true });
   const output = await mkdtemp(join(parent, 'run-'));
@@ -149,16 +149,35 @@ async function run(device, environment, input, parent) {
     validateTranscript(scenario, transcript);
     const summary = JSON.parse(await xcrun(['xcresulttool', 'get', 'test-results', 'summary', '--path', result]));
     check(summary.result === 'Passed' && summary.totalTestCount === 1 && summary.passedTests === 1 && summary.skippedTests === 0, 'Expected exactly one passing native XCTest.');
-    await writeFile(join(output, 'report.json'), JSON.stringify({
+    const report = {
       screenReader: 'VoiceOver', browser: 'Mobile Safari', captureBoundary: 'XCUIVoiceOverService.Output.utterance',
       xcode: environment.xcode, sdk: environment.sdk, device, scenario, transcript,
-    }, null, 2) + '\n');
+    };
+    await writeFile(join(output, 'report.json'), JSON.stringify(report, null, 2) + '\n');
     console.log(`iPhone VoiceOver passed: ${transcript.events.length} native observations (${device.name}, iOS ${device.runtime}).`);
+    return { outputDirectory: output, report };
   } finally {
     fixture?.server.close();
     try { if (bootedHere) await xcrun(['simctl', 'shutdown', device.udid]); }
     finally { await rm(derived, { recursive: true, force: true }); }
   }
+}
+
+async function run(device, environment, input, parent) {
+  const lock = join(tmpdir(), 'hoosaidthat-voiceover-' + device.udid + '.lock');
+  try { await mkdir(lock, { mode: 0o700 }); }
+  catch (err) {
+    if (err.code === 'EEXIST') throw new Error('This simulator is in use. After an interrupted run, confirm no test is running before removing ' + lock);
+    throw err;
+  }
+  try { return await runOnDevice(device, environment, input, parent); }
+  finally { await rm(lock, { recursive: true, force: true }); }
+}
+
+export async function runIPhoneVoiceOver(scenario, { udid, resultsDirectory } = {}) {
+  const input = validateScenario(scenario);
+  const env = await inventory();
+  return run(selectDevice(env.devices, env.runtimes, udid), env, input, resolve(resultsDirectory ?? 'test-results/ios-voiceover'));
 }
 
 async function main(args) {
@@ -184,6 +203,6 @@ async function main(args) {
   await run(device, env, input, resolve(options['--results'] ?? 'test-results/ios-voiceover'));
 }
 
-if (process.argv[1] && await realpath(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (process.argv[1] && await realpath(process.argv[1]).catch(() => undefined) === fileURLToPath(import.meta.url)) {
   main(process.argv.slice(2)).catch(error => { console.error(error.message); process.exitCode = 1; });
 }
