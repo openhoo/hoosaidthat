@@ -1,0 +1,53 @@
+name: Compare with a recorded iOS VoiceOver reference
+on:
+  push:
+    branches: [diagnostics/iphone-voiceover-reference-20261124]
+permissions:
+  contents: read
+jobs:
+  compare:
+    runs-on: xcode-27
+    timeout-minutes: 35
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_27.1.app/Contents/Developer
+      HOMEBREW_NO_AUTO_UPDATE: '1'
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          repository: IRS-Public/aloud
+          ref: 3287d38c7833eaea0abfb537b5e2c099abb6232f
+          path: reference
+          persist-credentials: false
+      - name: Prepare the recorded reference fixture
+        run: |
+          command -v xcodegen || brew install xcodegen
+          xcrun xcodebuild -version
+      - name: Run the same native fixture as upstream
+        working-directory: reference
+        run: node test/ios-voiceover-smoke.mjs
+        env:
+          ALOUD_VO_SMOKE_CASE: modal
+      - name: Preserve native reference results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: upstream-native-reference
+          path: |
+            reference/aloud-report/voiceover-smoke/voiceover/*.log
+            reference/aloud-report/voiceover-smoke/voiceover/*.json
+            reference/aloud-report/voiceover-smoke/voiceover/*.xcresult
+          retention-days: 3
+      - name: Run HooSaidThat in Safari on the same simulator
+        if: ${{ !cancelled() }}
+        run: |
+          udid=$(xcrun simctl list devices booted --json | jq -re '[.devices[][]|select(.isAvailable and (.deviceTypeIdentifier|contains("SimDeviceType.iPhone-")))] | select(length == 1) | .[0].udid')
+          node scripts/voiceover-ios.mjs run --udid "$udid" --results results/safari
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: warmed-safari-results
+          path: results/safari
+          retention-days: 3
