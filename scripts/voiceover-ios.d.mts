@@ -7,6 +7,8 @@ export type IPhoneVoiceOverStep =
 
 export interface IPhoneVoiceOverScenario {
   url: string;
+  /** Wait for this exact accessibility label on the page before enabling VoiceOver. */
+  readyText?: string;
   steps: readonly IPhoneVoiceOverStep[];
 }
 

@@ -23,7 +23,8 @@ function check(condition, message) { if (!condition) throw new Error(message); }
 function onlyKeys(value, keys) { return record(value) && Object.keys(value).every(key => keys.includes(key)); }
 
 export function validateScenario(input) {
-  check(onlyKeys(input, ['url', 'steps']) && typeof input.url === 'string', 'Scenario needs url and steps.');
+  check(onlyKeys(input, ['url', 'readyText', 'steps']) && typeof input.url === 'string', 'Scenario needs url and steps.');
+  if ('readyText' in input) check(typeof input.readyText === 'string' && input.readyText.trim(), 'readyText must be a nonempty accessibility label.');
   const url = new URL(input.url);
   check(['http:', 'https:'].includes(url.protocol) && !url.username && !url.password, 'Use an HTTP(S) URL without embedded credentials.');
   check(Array.isArray(input.steps) && input.steps.length >= 1 && input.steps.length <= 100, 'Expected 1 to 100 steps.');
@@ -73,8 +74,8 @@ export function validateTranscript(scenario, transcript) {
   check(offset === transcript.events.length, 'Unexpected extra VoiceOver events.');
 }
 
-async function xcrun(args) {
-  return (await exec('/usr/bin/xcrun', args, { timeout: 90_000, maxBuffer: 8 * 1024 * 1024 })).stdout;
+async function xcrun(args, timeout = 90_000) {
+  return (await exec('/usr/bin/xcrun', args, { timeout, maxBuffer: 8 * 1024 * 1024 })).stdout;
 }
 
 async function inventory() {
@@ -93,11 +94,12 @@ async function smokeFixture() {
   const path = '/' + id;
   const server = createServer((req, res) => {
     if (req.url !== path) { res.writeHead(404).end(); return; }
+    console.log('Mobile Safari requested the smoke page.');
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
     res.end(`<!doctype html><html lang="en"><meta name="viewport" content="width=device-width"><title>VoiceOver test</title><main><h1>${heading}</h1><button>${button}</button></main></html>`);
   });
   await new Promise((ok, fail) => { server.once('error', fail); server.listen(0, '127.0.0.1', ok); });
-  return { server, scenario: { url: `http://127.0.0.1:${server.address().port}${path}`, steps: [
+  return { server, scenario: { url: `http://127.0.0.1:${server.address().port}${path}`, readyText: button, steps: [
     { action: 'forward', until: button, maxMoves: 40 }, { action: 'backward', expect: heading }, { action: 'forward', expect: button },
   ] } };
 }
@@ -130,14 +132,15 @@ async function runOnDevice(device, environment, input, parent) {
       await xcrun(['simctl', 'boot', device.udid]);
       bootedHere = true;
     }
+    await xcrun(['simctl', 'bootstatus', device.udid], 5 * 60_000);
     const args = ['xcodebuild', 'test', '-project', project, '-scheme', 'HooSaidThat', '-destination', 'platform=iOS Simulator,id=' + device.udid,
       '-derivedDataPath', derived, '-resultBundlePath', result, '-parallel-testing-enabled', 'NO', '-test-timeouts-enabled', 'YES',
-      '-maximum-test-execution-time-allowance', '300', '-only-testing:HooSaidThatUITests/VoiceOverTests/testScenario'];
+      '-default-test-execution-time-allowance', '480', '-maximum-test-execution-time-allowance', '480', '-only-testing:HooSaidThatUITests/VoiceOverTests/testScenario'];
     // xcodebuild strips TEST_RUNNER_ before forwarding the value into XCTest.
     let failure;
     try {
       const { stdout, stderr } = await exec('/usr/bin/xcrun', args, { env: { ...process.env, TEST_RUNNER_HST_IOS_SCENARIO_JSON: JSON.stringify(scenario) },
-        maxBuffer: 32 * 1024 * 1024, timeout: 15 * 60_000 });
+        maxBuffer: 32 * 1024 * 1024, timeout: 22 * 60_000 });
       await writeFile(join(output, 'xcodebuild.log'), stdout + stderr);
     } catch (error) {
       await writeFile(join(output, 'xcodebuild.log'), (error.stdout ?? '') + (error.stderr ?? ''));

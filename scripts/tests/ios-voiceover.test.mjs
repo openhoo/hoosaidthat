@@ -56,6 +56,8 @@ test('the runner rejects credentials, non-web URLs and invalid step limits befor
   ]) {
     assert.throws(() => validateScenario({ url: invalidUrl, steps }), invalidUrl);
   }
+  assert.throws(() => validateScenario({ url, steps, readyText: '' }));
+  assert.doesNotThrow(() => validateScenario({ url, steps, readyText: 'Pay now' }));
   for (const invalidSteps of [
     [], Array(101).fill(steps[0]), [{ action: 'tap' }], [{ action: 'forward', expect: '' }],
     [{ action: 'current', until: 'Checkout', maxMoves: 3 }],

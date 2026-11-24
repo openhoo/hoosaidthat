@@ -10,6 +10,7 @@ private struct Scenario: Decodable {
         let maxMoves: Int?
     }
     let url: String
+    let readyText: String?
     let steps: [Step]
 }
 
@@ -40,7 +41,47 @@ private final class RunState {
 
 final class VoiceOverTests: XCTestCase {
     @MainActor
-    func testScenario() throws {
+    private func visibleOverlays(in safari: XCUIApplication) -> String {
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        return "Safari alert: \(safari.alerts.firstMatch.exists); Safari sheet: \(safari.sheets.firstMatch.exists); system alert: \(springboard.alerts.firstMatch.exists)"
+    }
+
+    @MainActor
+    private func waitForSpokenFocus(in safari: XCUIApplication) async throws {
+        // isEnabled is a preference. On a fresh simulator the actual VoiceOver
+        // process can take over a minute to initialize after the preference flips.
+        let started = ProcessInfo.processInfo.systemUptime
+        let deadline = started + 180
+        var attempts = 0
+        var lastError: NSError?
+        var lastResult = "no usable response"
+        repeat {
+            guard safari.state == .runningForeground else {
+                throw ScenarioError("Mobile Safari lost focus during VoiceOver startup. " + visibleOverlays(in: safari))
+            }
+            attempts += 1
+            // Only poll the current focus. Replaying a movement could skip an element.
+            do {
+                let text = try HSTVoiceOver.speech(for: "current")
+                if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    print("HooSaidThat: VoiceOver focus spoke after \(Int(ProcessInfo.processInfo.systemUptime - started))s (\(attempts) probes).")
+                    return
+                }
+                lastResult = "empty speech"
+            } catch {
+                lastError = error as NSError
+                lastResult = "native error"
+            }
+            let remaining = deadline - ProcessInfo.processInfo.systemUptime
+            if remaining <= 0 { break }
+            try await Task.sleep(nanoseconds: UInt64(min(remaining, 1) * 1_000_000_000))
+        } while ProcessInfo.processInfo.systemUptime < deadline
+        let reason = lastError.map { "\($0.domain) code \($0.code): \($0.localizedDescription)" } ?? "none"
+        throw ScenarioError("VoiceOver did not provide spoken focus within 180s (\(attempts) probes; last result: \(lastResult); last native error: \(reason)). " + visibleOverlays(in: safari))
+    }
+
+    @MainActor
+    func testScenario() async throws {
         let state = RunState()
         let safari = XCUIApplication(bundleIdentifier: "com.apple.mobilesafari")
         // XCTest may halt the body if launching Safari or a UI query fails.
@@ -76,6 +117,9 @@ final class VoiceOverTests: XCTestCase {
               url.host?.isEmpty == false, url.user == nil, url.password == nil, (1...100).contains(scenario.steps.count) else {
             throw ScenarioError("Supply an HTTP(S) URL without credentials and between 1 and 100 steps.")
         }
+        if scenario.readyText?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == true {
+            throw ScenarioError("readyText must contain a nonempty label.")
+        }
         for (index, step) in scenario.steps.enumerated() {
             if let until = step.until {
                 guard step.action != .current, step.expect == nil, !until.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
@@ -94,16 +138,25 @@ final class VoiceOverTests: XCTestCase {
         guard HSTVoiceOver.isSupported() else {
             throw ScenarioError("Native iPhone VoiceOver requires Xcode 27 and an iOS 27 or newer simulator.")
         }
+        state.startedSafari = safari.state == .notRunning
+        safari.open(url)
+        let webView = safari.webViews.firstMatch
+        guard safari.wait(for: .runningForeground, timeout: 15), webView.waitForExistence(timeout: 20) else {
+            throw ScenarioError("Mobile Safari did not display a web view for the requested URL. " + visibleOverlays(in: safari))
+        }
+        // A label confirms this page rendered. Only VoiceOver's own utterances
+        // are valid speech evidence and can be included in the transcript.
+        if let readyText = scenario.readyText {
+            let content = webView.descendants(matching: .any).matching(NSPredicate(format: "label == %@", readyText))
+            guard content.firstMatch.waitForExistence(timeout: 30) else {
+                throw ScenarioError("The requested readyText label did not appear in Safari's web view. " + visibleOverlays(in: safari))
+            }
+        }
+        print("HooSaidThat: Safari page ready; starting VoiceOver focus probe.")
         state.initialVoiceOver = HSTVoiceOver.isEnabled()
         if state.initialVoiceOver == false { try HSTVoiceOver.setEnabled(true) }
         guard HSTVoiceOver.isEnabled() else { throw ScenarioError("VoiceOver did not become enabled.") }
-
-        state.startedSafari = safari.state == .notRunning
-        safari.open(url)
-        guard safari.wait(for: .runningForeground, timeout: 15),
-              safari.webViews.firstMatch.waitForExistence(timeout: 20) else {
-            throw ScenarioError("Mobile Safari did not display a web view for the requested URL. Finish Safari onboarding on the simulator, then retry.")
-        }
+        try await waitForSpokenFocus(in: safari)
         for (index, step) in scenario.steps.enumerated() {
             for move in 1...(step.maxMoves ?? 1) {
                 guard safari.state == .runningForeground else { throw ScenarioError("Step \(index): Mobile Safari lost focus.") }

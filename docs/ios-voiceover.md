@@ -28,6 +28,7 @@ Start your website, save a scenario as JSON, and pass it to the runner:
 ```json
 {
   "url": "http://127.0.0.1:8080/checkout",
+  "readyText": "Pay now",
   "steps": [
     { "action": "forward", "until": "Order summary", "maxMoves": 30 },
     { "action": "forward", "expect": "Pay now" },
@@ -41,7 +42,9 @@ Start your website, save a scenario as JSON, and pass it to the runner:
 npm run voiceover:ios:run -- --udid <UDID> --scenario checkout.json
 ```
 
-Use a URL reachable from the simulator. Put identifying page text in the first
+Use a URL reachable from the simulator. The optional `readyText` waits for an
+exact accessibility label on the page before starting VoiceOver. Only the
+reader's returned speech satisfies a scenario step. Put identifying page text in the first
 expectation so a Safari toolbar or an error page cannot satisfy your test.
 If Safari presents its first-run setup, finish it once on that simulator.
 Navigation uses its configured language; match the words it actually speaks.
@@ -71,7 +74,7 @@ import { test } from '@playwright/test';
 import { runIPhoneVoiceOver } from '@openhoo/hoosaidthat/ios';
 
 test('VoiceOver reads the checkout summary on iPhone', async ({}, testInfo) => {
-  test.setTimeout(20 * 60_000); // Allows for a cold simulator boot and XCTest build.
+  test.setTimeout(30 * 60_000); // Allows for a cold simulator boot and XCTest build.
   const { report } = await runIPhoneVoiceOver({
     url: 'http://127.0.0.1:8080/checkout',
     steps: [
