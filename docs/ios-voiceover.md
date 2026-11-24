@@ -101,12 +101,16 @@ on an iPhone 18 Pro simulator with iOS 27.0 (24A434) and Xcode 27.1
 heading after moving backward, and the same button after moving forward.
 Each included the page's unique marker. The [recorded transcript and report](evidence/ios-voiceover-27.0.json) include the exact utterances. Safari passed one native test; the
 separate UIKit control in the same diagnostic job failed. That simulator
-had already been booted and VoiceOver had previously been enabled.
+had already been booted and VoiceOver had previously been enabled. A
+[second job](https://github.com/openhoo/hoosaidthat/actions/runs/45448162533)
+repeated all three Safari observations after an independent native VoiceOver
+session on another runner.
 
 Cold iOS 27.2 runs reached the expected page but failed on the first forward
-command with no utterances. Use the verified runtime when possible. The
-runner can re-enable a silent service once before navigation if it originally
-found VoiceOver off. It never retries a movement that may have changed focus.
+command with no utterances. Use the verified runtime when possible. On a fresh simulator the runner starts Safari before opening the URL and
+allows up to three minutes for the page marker. It reads the current VoiceOver
+focus without moving it. After 100 seconds of silence it can re-enable a
+service it originally found off. It never retries a movement that may have changed focus.
 
 ## Results and scope
 

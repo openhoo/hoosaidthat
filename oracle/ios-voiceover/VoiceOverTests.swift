@@ -52,6 +52,10 @@ final class VoiceOverTests: XCTestCase {
         // process can take over a minute to initialize after the preference flips.
         let started = ProcessInfo.processInfo.systemUptime
         let deadline = started + 180
+        // A cold first launch took ~77s to initialize its voice database in
+        // one simulator run. Read current focus without interrupting the service.
+        // Warm simulators with actual speech return immediately, at either stage.
+        var probeUntil = started + 100
         var attempts = 0
         var restarted = false
         var consecutiveNoSpeech = 0
@@ -85,14 +89,17 @@ final class VoiceOverTests: XCTestCase {
                     consecutiveNoSpeech += 1
                     let first = firstNoSpeechTime ?? now
                     firstNoSpeechTime = first
-                    if consecutiveNoSpeech >= 3 && now - first >= 5 {
+                    if now >= probeUntil && now < deadline && consecutiveNoSpeech >= 3 && now - first >= 5 {
                         // A fresh service may accept enable() before it attaches to Safari.
                         // Restart only a service we started, before any scenario action.
                         if startedHere && !restarted {
                             restarted = true
                             try HSTVoiceOver.setEnabled(false)
+                            guard !HSTVoiceOver.isEnabled() else { throw ScenarioError("VoiceOver did not turn off during startup recovery.") }
                             try HSTVoiceOver.setEnabled(true)
-                            safari.activate()
+                            guard HSTVoiceOver.isEnabled() else { throw ScenarioError("VoiceOver did not turn on during startup recovery.") }
+                            // The same Safari window is already foreground. Keep its focus.
+                            probeUntil = ProcessInfo.processInfo.systemUptime + 20
                             consecutiveNoSpeech = 0
                             firstNoSpeechTime = nil
                             print("HooSaidThat: re-enabled the silent VoiceOver service before navigation.")
@@ -173,6 +180,13 @@ final class VoiceOverTests: XCTestCase {
             throw ScenarioError("Native iPhone VoiceOver requires Xcode 27 and an iOS 27 or newer simulator.")
         }
         state.startedSafari = safari.state == .notRunning
+        if state.startedSafari {
+            // Let Safari finish its first launch before submitting the test URL.
+            safari.launch()
+            guard safari.wait(for: .runningForeground, timeout: 60) else {
+                throw ScenarioError("Mobile Safari did not finish launching.")
+            }
+        }
         safari.open(url)
         let webView = safari.webViews.firstMatch
         guard safari.wait(for: .runningForeground, timeout: 15), webView.waitForExistence(timeout: 20) else {
@@ -181,8 +195,8 @@ final class VoiceOverTests: XCTestCase {
         // A label confirms this page rendered. Only VoiceOver's own utterances
         // are valid speech evidence and can be included in the transcript.
         if let readyText = scenario.readyText {
-            let content = webView.descendants(matching: .any).matching(NSPredicate(format: "label == %@", readyText))
-            guard content.firstMatch.waitForExistence(timeout: 30) else {
+            let content = safari.webViews.descendants(matching: .any).matching(NSPredicate(format: "label == %@", readyText))
+            guard content.firstMatch.waitForExistence(timeout: 180) else {
                 throw ScenarioError("The requested readyText label did not appear in Safari's web view. " + visibleOverlays(in: safari))
             }
         }
