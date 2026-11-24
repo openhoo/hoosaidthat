@@ -10,8 +10,14 @@ import { promisify } from 'node:util';
 
 const exec = promisify(execFile);
 const project = fileURLToPath(new URL('../oracle/ios-voiceover/HooSaidThat.xcodeproj', import.meta.url));
+const prepProject = fileURLToPath(new URL('../oracle/ios-voiceover-prepare/VoiceOverPreparation.xcodeproj', import.meta.url));
 const help = `Usage: hoosaidthat-voiceover-ios doctor [--udid UUID]
        hoosaidthat-voiceover-ios run [--udid UUID] [--scenario FILE] [--results DIRECTORY]
+
+       hoosaidthat-voiceover-ios run-prepared [--udid UUID] [--scenario FILE] [--results DIRECTORY]
+
+run-prepared first verifies real speech in a separate native app on the same
+simulator, restores VoiceOver, then tests Safari. Its report contains only Safari results.
 
 Requires Xcode 27+ and an available iPhone Simulator with iOS 27+.
 doctor lists eligible devices. Select one with --udid if several are available.
@@ -118,7 +124,30 @@ async function extract(result, dir, device) {
   return JSON.parse(await readFile(join(path, file), 'utf8'));
 }
 
-async function runOnDevice(device, environment, input, parent) {
+async function prepareVoiceOver(device, output, derived) {
+  const bundle = join(output, 'Preparation.xcresult');
+  const args = ['xcodebuild', 'test', '-project', prepProject, '-scheme', 'VoiceOverPreparation',
+    '-destination', 'platform=iOS Simulator,id=' + device.udid, '-derivedDataPath', join(derived, 'preparation'),
+    '-resultBundlePath', bundle, '-parallel-testing-enabled', 'NO', '-test-timeouts-enabled', 'YES',
+    '-default-test-execution-time-allowance', '300', '-maximum-test-execution-time-allowance', '300',
+    '-only-testing:VoiceOverPreparationUITests/VoiceOverPreparationTests/testPrepare'];
+  const log = join(output, 'preparation-xcodebuild.log');
+  try {
+    const {stdout, stderr} = await exec('/usr/bin/xcrun', args, {timeout: 15 * 60_000, maxBuffer: 32 * 1024 * 1024});
+    await writeFile(log, stdout + stderr);
+  } catch (error) {
+    await writeFile(log, (error.stdout ?? '') + (error.stderr ?? ''));
+    throw new Error('Preparation failed. Safari was not tested. See ' + log);
+  }
+  const summary = JSON.parse(await xcrun(['xcresulttool', 'get', 'test-results', 'summary', '--path', bundle]));
+  const confirmedDevice = summary.devicesAndConfigurations?.length === 1
+    && summary.devicesAndConfigurations[0].device.deviceId.toLowerCase() === device.udid.toLowerCase();
+  check(confirmedDevice && summary.result === 'Passed' && summary.totalTestCount === 1 && summary.passedTests === 1
+    && summary.skippedTests === 0, 'Expected one successful preparation on the selected iPhone; Safari was not tested.');
+  console.log('VoiceOver preparation passed; starting an independent Mobile Safari XCTest.');
+}
+
+async function runOnDevice(device, environment, input, parent, prepare) {
   check(device.state === 'Booted' || device.state === 'Shutdown', `Simulator is ${device.state}; wait until it is ready.`);
   await mkdir(parent, { recursive: true });
   const output = await mkdtemp(join(parent, 'run-'));
@@ -134,6 +163,7 @@ async function runOnDevice(device, environment, input, parent) {
       bootedHere = true;
     }
     await xcrun(['simctl', 'bootstatus', device.udid], 5 * 60_000);
+    if (prepare) await prepareVoiceOver(device, output, derived);
     const args = ['xcodebuild', 'test', '-project', project, '-scheme', 'HooSaidThat', '-destination', 'platform=iOS Simulator,id=' + device.udid,
       '-derivedDataPath', derived, '-resultBundlePath', result, '-parallel-testing-enabled', 'NO', '-test-timeouts-enabled', 'YES',
       '-default-test-execution-time-allowance', '480', '-maximum-test-execution-time-allowance', '480', '-only-testing:HooSaidThatUITests/VoiceOverTests/testScenario'];
@@ -178,14 +208,14 @@ async function runOnDevice(device, environment, input, parent) {
   }
 }
 
-async function run(device, environment, input, parent) {
+async function run(device, environment, input, parent, prepare = false) {
   const lock = join(tmpdir(), 'hoosaidthat-voiceover-' + device.udid + '.lock');
   try { await mkdir(lock, { mode: 0o700 }); }
   catch (err) {
     if (err.code === 'EEXIST') throw new Error('This simulator is in use. After an interrupted run, confirm no test is running before removing ' + lock);
     throw err;
   }
-  try { return await runOnDevice(device, environment, input, parent); }
+  try { return await runOnDevice(device, environment, input, parent, prepare); }
   finally { await rm(lock, { recursive: true, force: true }); }
 }
 
@@ -198,11 +228,11 @@ export async function runIPhoneVoiceOver(scenario, { udid, resultsDirectory } = 
 async function main(args) {
   if (args.length === 0 || args.includes('--help') || args.includes('-h')) { console.log(help); return; }
   const [command, ...rest] = args;
-  check(['doctor', 'run'].includes(command), help);
+  check(['doctor', 'run', 'run-prepared'].includes(command), help);
   const options = {};
   for (let i = 0; i < rest.length; i += 2) {
     const key = rest[i], value = rest[i + 1];
-    check((command === 'run' ? ['--scenario', '--udid', '--results'] : ['--udid']).includes(key) && value && !value.startsWith('--') && !(key in options), help);
+    check((command !== 'doctor' ? ['--scenario', '--udid', '--results'] : ['--udid']).includes(key) && value && !value.startsWith('--') && !(key in options), help);
     options[key] = value;
   }
   const input = options['--scenario'] ? validateScenario(JSON.parse(await readFile(options['--scenario'], 'utf8'))) : undefined;
@@ -215,7 +245,7 @@ async function main(args) {
   }
   const device = selectDevice(env.devices, env.runtimes, options['--udid']);
   if (command === 'doctor') { console.log(env.xcode + '\n' + JSON.stringify(device)); return; }
-  await run(device, env, input, resolve(options['--results'] ?? 'test-results/ios-voiceover'));
+  await run(device, env, input, resolve(options['--results'] ?? 'test-results/ios-voiceover'), command === 'run-prepared');
 }
 
 if (process.argv[1] && await realpath(process.argv[1]).catch(() => undefined) === fileURLToPath(import.meta.url)) {

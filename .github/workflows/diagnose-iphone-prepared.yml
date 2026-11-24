@@ -1,0 +1,73 @@
+name: Diagnose prepared iPhone VoiceOver
+
+on:
+  push:
+    branches: [diagnostics/iphone-voiceover-warm-7bafe0a]
+
+permissions:
+  contents: read
+
+jobs:
+  safari:
+    runs-on: xcode-27
+    timeout-minutes: 30
+    env:
+      HST_IOS_VERSION: '27.0'
+      DEVELOPER_DIR: /Applications/Xcode_27.1.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Build and install the exact diagnostic package
+        run: |
+          mkdir -p test-results/ios-voiceover
+          npm ci --no-audit --no-fund
+          npm run build
+          npm pack --json --pack-destination "$RUNNER_TEMP" > test-results/ios-voiceover/package-manifest.json
+          archive=$(jq -er '.[0].filename' test-results/ios-voiceover/package-manifest.json)
+          consumer="$RUNNER_TEMP/hst-consumer"
+          mkdir "$consumer"
+          npm install --prefix "$consumer" --ignore-scripts --no-audit --no-fund --legacy-peer-deps "$RUNNER_TEMP/$archive"
+          pkg="$consumer/node_modules/@openhoo/hoosaidthat"
+          test -s "$pkg/oracle/ios-voiceover/UITestHost.swift"
+          test -s "$pkg/oracle/ios-voiceover-prepare/VoiceOverPreparationTests.swift"
+          echo "HST_BIN=$consumer/node_modules/.bin/hoosaidthat-voiceover-ios" >> "$GITHUB_ENV"
+      - name: Create a new iPhone 18 Pro on iOS 27.0
+        run: |
+          runtime=$(xcrun simctl list runtimes -j | jq -er --arg v "$HST_IOS_VERSION" '.runtimes[] | select(.isAvailable and .platform == "iOS" and .version == $v) | .identifier')
+          phone=$(xcrun simctl create "HooSaidThat Warm Diagnostic" com.apple.CoreSimulator.SimDeviceType.iPhone-18-Pro "$runtime")
+          xcrun xcodebuild -version | tee test-results/ios-voiceover/xcode.txt
+          xcrun simctl list devices -j > test-results/ios-voiceover/devices.json
+          echo "HST_PHONE=$phone" >> "$GITHUB_ENV"
+          echo "Selected fresh $phone on $runtime"
+      - name: Present the test iPhone in Device Hub
+        run: |
+          xcrun simctl boot "$HST_PHONE"
+          xcrun simctl bootstatus "$HST_PHONE"
+          open -a "$DEVELOPER_DIR/../Applications/DeviceHub.app" "devices://device/open?id=$HST_PHONE"
+      - name: Run preparation and Safari on the same fresh iPhone
+        run: '"$HST_BIN" run-prepared --udid "$HST_PHONE" --results test-results/ios-voiceover'
+      - name: Verify unique Safari heading and button in the captured speech
+        run: |
+          python3 - <<'PYVERIFY'
+          import glob, json, os, re, urllib.parse
+          reports=glob.glob('test-results/ios-voiceover/run-*/report.json')
+          assert len(reports)==1, reports
+          r=json.load(open(reports[0])); s=r['scenario']; t=r['transcript']
+          assert r['device']['udid']==os.environ['HST_PHONE'] and r['browser']=='Mobile Safari'
+          assert t['url']==s['url'] and t['completed'] is True
+          nonce=urllib.parse.urlsplit(s['url']).path.removeprefix('/')
+          assert re.fullmatch('[a-f0-9]{8}',nonce), nonce
+          heading='Order summary '+nonce; button='Confirm order '+nonce
+          assert s['readyText']==button and s['steps'][0]['until']==button
+          events=t['events']; assert len(events)>=3
+          for event,num,action,text in zip(events[-3:],(0,1,2),('forward','backward','forward'),(button,heading,button)):
+              assert event['step']==num and event['action']==action and text in event['utterance'],event
+              print(action,event['utterance'])
+          PYVERIFY
+      - name: Preserve XCTest results and transcript
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: prepared-iphone-voiceover-results
+          path: test-results/ios-voiceover/
+          if-no-files-found: warn
+          retention-days: 7

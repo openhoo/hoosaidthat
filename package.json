@@ -95,7 +95,12 @@
     "oracle/ios-voiceover/HooSaidThat.xcodeproj/xcshareddata/xcschemes/HooSaidThat.xcscheme",
     "oracle/ios-voiceover/*.swift",
     "oracle/ios-voiceover/*.m",
-    "oracle/ios-voiceover/*.h"
+    "oracle/ios-voiceover/*.h",
+    "oracle/ios-voiceover-prepare/App.swift",
+    "oracle/ios-voiceover-prepare/VoiceOverPreparationTests.swift",
+    "oracle/ios-voiceover-prepare/Info.plist",
+    "oracle/ios-voiceover-prepare/VoiceOverPreparation.xcodeproj/project.pbxproj",
+    "oracle/ios-voiceover-prepare/VoiceOverPreparation.xcodeproj/xcshareddata/xcschemes/VoiceOverPreparation.xcscheme"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json && tsc -p tsconfig.parity.json && node scripts/build-parity.mjs",
