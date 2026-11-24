@@ -106,7 +106,8 @@ async function smokeFixture() {
 
 async function extract(result, dir, device) {
   const path = join(dir, 'attachments');
-  await xcrun(['xcresulttool', 'export', 'attachments', '--path', result, '--output-path', path]);
+  await mkdir(path, { recursive: true });
+  await xcrun(['xcresulttool', 'export', 'attachments', '--test-id', 'VoiceOverTests/testScenario()', '--path', result, '--output-path', path], 180_000);
   const manifest = JSON.parse(await readFile(join(path, 'manifest.json'), 'utf8'));
   const matches = manifest.filter(m => /(?:^|\/)VoiceOverTests\/testScenario(?:\(\))?$/.test(m.testIdentifier))
     .flatMap(m => m.attachments).filter(a => a.deviceId.toLowerCase() === device.udid.toLowerCase()
@@ -146,11 +147,22 @@ async function runOnDevice(device, environment, input, parent) {
       await writeFile(join(output, 'xcodebuild.log'), (error.stdout ?? '') + (error.stderr ?? ''));
       failure = new Error('XCTest did not pass; see xcodebuild.log and VoiceOver.xcresult in ' + output);
     }
-    const transcript = await extract(result, output, device).catch(err => { throw failure ?? err; });
-    await writeFile(join(output, 'transcript.json'), JSON.stringify(transcript, null, 2) + '\n');
-    if (failure) throw failure;
+    let transcript;
+    try {
+      transcript = await extract(result, output, device);
+      await writeFile(join(output, 'transcript.json'), JSON.stringify(transcript, null, 2) + '\n');
+    } catch (err) {
+      if (!failure) throw err;
+      console.error('Could not export the XCTest transcript: ' + err.message);
+    }
+    let summary;
+    try { summary = JSON.parse(await xcrun(['xcresulttool', 'get', 'test-results', 'summary', '--path', result])); }
+    catch (err) { throw failure ?? err; }
+    if (failure) {
+      const detail = summary.testFailures?.[0]?.failureText;
+      throw new Error(failure.message + (detail ? '\n' + detail : ''));
+    }
     validateTranscript(scenario, transcript);
-    const summary = JSON.parse(await xcrun(['xcresulttool', 'get', 'test-results', 'summary', '--path', result]));
     check(summary.result === 'Passed' && summary.totalTestCount === 1 && summary.passedTests === 1 && summary.skippedTests === 0, 'Expected exactly one passing native XCTest.');
     const report = {
       screenReader: 'VoiceOver', browser: 'Mobile Safari', captureBoundary: 'XCUIVoiceOverService.Output.utterance',

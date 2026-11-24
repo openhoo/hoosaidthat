@@ -416,8 +416,8 @@ configuration, capture limits and qualification details. JAWS remains deferred.
 
 ## VoiceOver in iPhone Simulator
 
-Run a website through Mobile Safari and read VoiceOver's own navigation output
-with Xcode 27+ and an iPhone running iOS 27+ in Simulator:
+The experimental iPhone runner opens a website in Mobile Safari and checks
+VoiceOver's own navigation output with Xcode 27+ and an iPhone running iOS 27+ in Simulator:
 
 ```bash
 npm run voiceover:ios:doctor

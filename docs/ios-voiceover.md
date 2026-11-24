@@ -2,7 +2,7 @@
 
 Use a dedicated iPhone simulator with iOS 27 or later and Xcode 27 or later.
 In Xcode Settings → Components, install an iOS Simulator runtime; create an
-iPhone in Xcode's Devices and Simulators window if needed. If several Xcode
+simulated iPhone in [Device Hub](https://developer.apple.com/documentation/xcode/device-hub) if needed (Xcode → Open Developer Tool → Device Hub). If several Xcode
 versions are installed, set `DEVELOPER_DIR` to the desired Xcode's
 `Contents/Developer` directory. No Appium server or signing identity is needed.
 
@@ -92,6 +92,14 @@ test('VoiceOver reads the checkout summary on iPhone', async ({}, testInfo) => {
 The return value also includes `outputDirectory`, the location of
 `VoiceOver.xcresult` and the transcript. If a native test fails, inspect
 the run directory under the specified `resultsDirectory`.
+
+## Verification status
+
+The Safari fixture has loaded successfully on a real iPhone simulator. The
+end-to-end VoiceOver check is experimental: on iOS 27.2, the first forward
+command failed and XCTest returned no utterances. A visible page or a running
+VoiceOver process is not a passing result. Qualification requires a passing
+XCTest and a transcript containing the unique heading and button.
 
 ## Results and scope
 
