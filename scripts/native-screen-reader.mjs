@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { pathToFileURL } from 'node:url';
 import { ATDriver } from './native/at-driver.mjs';
 import { VoiceOverDriver } from './native/voiceover.mjs';
-import { assertNativePlatform, nativeProbe } from './native/platform.mjs';
+import { assertNativePlatform, inspectVoiceOverDesktop, nativeProbe } from './native/platform.mjs';
 import { nativeCommands } from './native/commands.mjs';
 import { startNativeServer } from './native/server.mjs';
 import { NATIVE_BOOTSTRAP_URL } from '../dist/bootstrap.js';
@@ -15,6 +15,7 @@ export function parseArguments(args) {
   const options = {};
   const allowed = new Set(['screen-reader', 'at-driver-endpoint', 'token-file', 'control-port', 'cdp-port', 'locale', 'browser-executable']);
   if (args.includes('--help') || args.includes('-h')) return { help: true };
+  if (args.length === 1 && args[0] === '--doctor') return { doctor: true };
   for (let index = 0; index < args.length; index += 2) {
     const name = args[index]?.slice(2);
     const value = args[index + 1];
@@ -53,14 +54,17 @@ export async function loadControlToken(path) {
 async function main() {
   const options = parseArguments(process.argv.slice(2));
   if (options.help) {
-    console.log(`Usage: hoosaidthat-native --screen-reader voiceover --token-file PATH [options]
+    console.log(`Usage: hoosaidthat-native --doctor
+       hoosaidthat-native --screen-reader voiceover --token-file PATH [options]
 
-Run in an interactive macOS guest with VoiceOver already running and Chrome
-installed. VoiceOver uses its native scripting API; --at-driver-endpoint selects
+Run on a dedicated Mac desktop or in a macOS guest with VoiceOver running and
+Chrome installed. The bridge brings Chrome to the front and sends real keyboard
+input. VoiceOver uses its native scripting API; --at-driver-endpoint selects
 the experimental AT Driver transport.
 Node.js 22+ is required for this host command. See docs/native-screen-readers.md.
 
-  --at-driver-endpoint URL   default ws://127.0.0.1:4382/session
+  --doctor                  standalone: check VoiceOver and Accessibility without controlling the desktop
+  --at-driver-endpoint URL   optional: connect to a running AT Driver
   --control-port PORT       default 3003 (loopback only)
   --cdp-port PORT           default 9225 (loopback only)
   --locale en-US|de-DE       must match the reader's configured language
@@ -70,6 +74,12 @@ The command starts a dedicated browser profile, verifies native reader identity,
 AX focus and actual speech capture, then serves HooSaidThat protocol v2.
 The token file is created privately when missing. Its contents are never printed.
 Use one Playwright worker per native desktop. Ctrl+C closes the owned browser.`);
+    return;
+  }
+  if (options.doctor) {
+    const status = await inspectVoiceOverDesktop();
+    console.log(JSON.stringify(status));
+    if (!status.accessibility || !status.voiceOverRunning) process.exitCode = 1;
     return;
   }
   const screenReader = options['screen-reader'];

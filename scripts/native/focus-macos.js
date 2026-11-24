@@ -4,7 +4,11 @@ ObjC.import('ApplicationServices');
 ObjC.bindFunction('malloc', ['void *', ['unsigned long']]);
 ObjC.bindFunction('free', ['void', ['void *']]);
 function run(argv) {
-  if (!$.AXIsProcessTrusted()) throw new Error('Accessibility permission is required for the native bridge terminal');
+  var accessibility = Boolean($.AXIsProcessTrusted());
+  var running = Number($.NSRunningApplication.runningApplicationsWithBundleIdentifier('com.apple.VoiceOver').count) > 0;
+  if (argv[0] === '--doctor') return JSON.stringify({ accessibility: accessibility, voiceOverRunning: running });
+  if (!accessibility) throw new Error('Accessibility permission is required for the native bridge terminal');
+  if (!running) throw new Error('VoiceOver must be running in the logged-in macOS desktop');
   // This sets the AX messaging timeout only for this probe process. A busy
   // browser must return missing focus/cursor proof instead of blocking the
   // entire probe in one synchronous accessibility request.
@@ -13,12 +17,6 @@ function run(argv) {
   }
   var expectedPid = Number(argv[0]);
   var workspace = $.NSWorkspace.sharedWorkspace;
-  var apps = workspace.runningApplications;
-  var running = false;
-  for (var i = 0; i < apps.count; i++) {
-    if (ObjC.unwrap(apps.objectAtIndex(i).bundleIdentifier) === 'com.apple.VoiceOver') running = true;
-  }
-  if (!running) throw new Error('VoiceOver must be running in the logged-in macOS desktop');
   function attr(element, name) {
     var result = Ref();
     if ($.AXUIElementCopyAttributeValue(element, $(name), result) !== 0) return null;

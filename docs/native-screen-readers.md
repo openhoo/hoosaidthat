@@ -1,8 +1,7 @@
 # VoiceOver
 
-The `voiceover-web` profile drives actual VoiceOver in a dedicated macOS guest.
-A macOS VM provides the operating system required by VoiceOver. The Playwright
-client and synthetic bridge checks can run in a Linux container.
+The `voiceover-web` profile drives Apple's VoiceOver in Chrome on macOS. Use
+a dedicated test Mac or a macOS guest. The Playwright client can run separately.
 
 ## VoiceOver in an isolated macOS guest
 
@@ -63,17 +62,53 @@ the document. Entry gestures stop once descendant membership is verified.
 Losing browser focus, changing documents, or failing cursor verification fails
 the action and preserves a bounded diagnostic code in the native evidence.
 
-## Connecting a prepared guest
+## Running directly on a test Mac
+
+Use a logged-in Mac that can give the test exclusive use of the desktop. The
+bridge opens a temporary Chrome profile in the foreground, moves the VoiceOver
+cursor and sends real keystrokes. Switching apps during a test can change
+what VoiceOver announces. Use the guest above to keep using your own desktop.
+
+Install Node.js 22+ and Google Chrome (or supply a Chromium executable with
+`--browser-executable`). Enable VoiceOver. In [VoiceOver Utility → General](https://support.apple.com/guide/voiceover/cpvougen/mac),
+turn on **Allow VoiceOver to be controlled with AppleScript**. Keep Control
+and Option enabled as VoiceOver modifiers for the built-in key mappings. Give the
+terminal or runner that launches the bridge **Accessibility** permission in
+**System Settings → Privacy & Security**, and allow it to automate **System
+Events** and **VoiceOver** if macOS prompts. Run the following from a source checkout:
 
 ```bash
-hoosaidthat-native --screen-reader voiceover --token-file /private/path/control-token
+npm ci
+npm run build
+node scripts/native-screen-reader.mjs --doctor
 ```
 
-Run the bridge inside a macOS guest with Node 22+, Chrome/Chromium and VoiceOver.
-It uses a temporary browser profile, attests the native reader and browser focus,
-and requires actual speech before serving. Control and CDP bind to loopback on
-3003/9225; use `--control-port`, `--cdp-port` and `--browser-executable` to override.
-The token is created privately and never printed. One worker owns each desktop.
+The doctor checks whether VoiceOver is running and the launching terminal has
+Accessibility permission. It exits with status 1 if either is missing. It
+does not open Chrome, send keystrokes, or request permissions. The actual
+bridge checks scripting access, focus and speech during startup.
+
+Start the bridge and leave it running:
+
+```bash
+node scripts/native-screen-reader.mjs --screen-reader voiceover \
+  --token-file "$HOME/.hoosaidthat/voiceover.token" --locale en-US
+```
+
+After it prints the control and CDP endpoints, run the two example tests from
+the same checkout in a second shell (for example, via SSH to avoid taking
+focus from Chrome):
+
+```bash
+HST_NATIVE_TOKEN_FILE="$HOME/.hoosaidthat/voiceover.token" npm run test:e2e:native
+```
+
+The bridge creates the token file privately if missing. It listens on loopback
+ports 3003 (control) and 9225 (CDP). Press Ctrl+C in its terminal when finished.
+With the installed package, `hoosaidthat-native` runs the same bridge. A
+manually prepared macOS guest uses the same commands.
+
+## Connecting a Playwright project
 
 ```ts
 import { defineConfig } from '@openhoo/hoosaidthat';

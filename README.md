@@ -26,6 +26,9 @@ Experimental Android TalkBack support connects a dedicated device or emulator
 through adb and captures its text-to-speech requests. See the
 [TalkBack guide](oracle/android-talkback/README.md) for setup and qualification limits.
 
+For Apple platforms, see [VoiceOver on the Mac](#voiceover-on-the-mac) or
+[VoiceOver in iPhone Simulator](#voiceover-in-iphone-simulator).
+
 ## Release state
 
 The declared `nvda-web-2026.1.1` browser profile contains 190 unique actions.
@@ -383,7 +386,11 @@ See [runtime protocol](docs/runtime-protocol.md),
 [Orca image](images/orca/README.md), and the
 [Windows NVDA oracle](oracle/windows-nvda/README.md).
 
-## VoiceOver in an isolated macOS guest
+## VoiceOver on the Mac
+
+For a prepared test Mac with Chrome and VoiceOver, see [running the bridge on a Mac desktop](docs/native-screen-readers.md#running-directly-on-a-test-mac).
+
+### Isolated macOS guest
 
 Actual VoiceOver is available with `screenReader: 'voiceover'` and the
 `voiceover-web` profile. On an Apple Silicon Mac with Tart installed:
@@ -398,7 +405,7 @@ For an installed package, use `npx hoosaidthat-voiceover-macos run`.
 The helper provisions a pinned headless macOS guest and runs two native checks
 inside it, then stops the guest. Host audio, desktop windows, clipboard and USB
 passthrough are disabled. The helper leaves host VoiceOver and host settings
-untouched. VoiceOver requires macOS; a Linux container can host the client.
+untouched. This desktop bridge requires macOS; a Linux container can host its client.
 
 On November 4, 2026, VoiceOver 10 (993) / macOS 26.6.2 / Chrome 151.0.7922.34
 passed heading navigation, keyboard button focus and asynchronous live-region
@@ -406,3 +413,17 @@ speech checks from an installed package. Last-phrase sampling may miss identical
 consecutive phrases and phrases replaced between polls. This is bounded smoke
 coverage. See [the VoiceOver guide](docs/native-screen-readers.md) for setup,
 configuration, capture limits and qualification details. JAWS remains deferred.
+
+## VoiceOver in iPhone Simulator
+
+Run a website through Mobile Safari and read VoiceOver's own navigation output
+with Xcode 27+ and an iPhone running iOS 27+ in Simulator:
+
+```bash
+npm run voiceover:ios:doctor
+npm run voiceover:ios:run -- --udid <simulator-UDID>
+```
+
+The default check navigates between a heading and a button. To test your own
+site, pass `--scenario path/to/scenario.json`. See [the iPhone guide](docs/ios-voiceover.md)
+for an example, supported actions and the resulting transcript.

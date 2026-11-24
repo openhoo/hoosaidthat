@@ -27,7 +27,9 @@
     "talkback",
     "android",
     "voiceover",
-    "macos"
+    "macos",
+    "ios",
+    "iphone"
   ],
   "engines": {
     "node": ">=20"
@@ -44,7 +46,8 @@
     "hoosaidthat-talkback-android": "./scripts/talkback-android.mjs",
     "hoosaidthat-native": "./scripts/native-screen-reader.mjs",
     "hoosaidthat-voiceover-macos": "./scripts/voiceover-macos.mjs",
-    "hoosaidthat-hoovda-doctor": "./scripts/hoovda-doctor.mjs"
+    "hoosaidthat-hoovda-doctor": "./scripts/hoovda-doctor.mjs",
+    "hoosaidthat-voiceover-ios": "./scripts/voiceover-ios.mjs"
   },
   "types": "./dist/index.d.ts",
   "files": [
@@ -81,7 +84,13 @@
     "scripts/native/platform.mjs",
     "oracle/macos-voiceover",
     "oracle/native-check",
-    "scripts/hoovda-doctor.mjs"
+    "scripts/hoovda-doctor.mjs",
+    "scripts/voiceover-ios.mjs",
+    "oracle/ios-voiceover/HooSaidThat.xcodeproj/project.pbxproj",
+    "oracle/ios-voiceover/HooSaidThat.xcodeproj/xcshareddata/xcschemes/HooSaidThat.xcscheme",
+    "oracle/ios-voiceover/*.swift",
+    "oracle/ios-voiceover/*.m",
+    "oracle/ios-voiceover/*.h"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json && tsc -p tsconfig.parity.json && node scripts/build-parity.mjs",
@@ -132,7 +141,9 @@
     "voiceover:macos:status": "node scripts/voiceover-macos.mjs status",
     "voiceover:macos:stop": "node scripts/voiceover-macos.mjs stop",
     "hoovda:check": "node scripts/check-hoovda-source.mjs",
-    "nvda:windows:qualification": "node scripts/nvda-windows.mjs qualification"
+    "nvda:windows:qualification": "node scripts/nvda-windows.mjs qualification",
+    "voiceover:ios:doctor": "node scripts/voiceover-ios.mjs doctor",
+    "voiceover:ios:run": "node scripts/voiceover-ios.mjs run"
   },
   "peerDependencies": {
     "@playwright/test": ">=1.62.1 <1.65.0"

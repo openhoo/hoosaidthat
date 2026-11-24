@@ -1,0 +1,38 @@
+name: iPhone VoiceOver
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/iphone-voiceover.yml'
+      - 'oracle/ios-voiceover/**'
+      - 'scripts/voiceover-ios.mjs'
+      - 'scripts/tests/ios-voiceover.test.mjs'
+
+permissions:
+  contents: read
+
+jobs:
+  safari:
+    runs-on: xcode-27
+    timeout-minutes: 22
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Select an available iPhone on this disposable runner
+        run: |
+          node scripts/voiceover-ios.mjs doctor
+          phone=$(xcrun simctl list -j | jq -er '
+            . as $list | [.runtimes[] | select(.isAvailable and .platform == "iOS" and (.version | split(".")[0] | tonumber) >= 27)
+            | .identifier as $runtime | $list.devices[$runtime][]?
+            | select(.isAvailable and (.deviceTypeIdentifier | contains("SimDeviceType.iPhone-")))][0].udid')
+          echo "HST_PHONE=$phone" >> "$GITHUB_ENV"
+      - name: Check actual VoiceOver speech in Mobile Safari
+        run: node scripts/voiceover-ios.mjs run --udid "$HST_PHONE"
+      - name: Preserve XCTest results and transcript
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: iphone-voiceover-results
+          path: test-results/ios-voiceover/
+          if-no-files-found: warn
+          retention-days: 7

@@ -20,6 +20,13 @@ export function assertNativePlatform(screenReader, platform = process.platform) 
   }
 }
 
+export async function inspectVoiceOverDesktop() {
+  assertNativePlatform('voiceover');
+  const script = fileURLToPath(new URL('focus-macos.js', import.meta.url));
+  const { stdout } = await executeFile('/usr/bin/osascript', ['-l', 'JavaScript', script, '--doctor'], { timeout: 5000 });
+  return JSON.parse(stdout);
+}
+
 export function voiceOverCursorMembership(rectangle, positionBytes, sizeBytes, hits) {
   const unverified = { readerCursorInDocument: false, readerCursorAtDocument: false };
   function pair(encoded) {

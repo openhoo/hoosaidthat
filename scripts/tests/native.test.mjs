@@ -167,6 +167,8 @@ test('VoiceOver sends reader-specific shortcuts', () => {
 test('native CLI validates host, ports, options and private token reuse', async t => {
   assert.throws(() => assertNativePlatform('voiceover', 'linux'), /macOS/);
   assertNativePlatform('voiceover', 'darwin');
+  assert.deepEqual(parseArguments(['--doctor']), { doctor: true });
+  assert.throws(() => parseArguments(['--doctor', '--token-file', 'x']), /invalid/);
   assert.throws(() => parseArguments(['--screen-reader', 'voiceover']), /token-file/);
   assert.throws(() => parseArguments(['--screen-reader', 'voiceover', '--token-file', 'x', '--cdp-port', '3003']), /ports must differ/);
   const directory = await mkdtemp(join(tmpdir(), 'hst-native-token-'));
