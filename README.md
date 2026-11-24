@@ -417,7 +417,7 @@ configuration, capture limits and qualification details. JAWS remains deferred.
 ## VoiceOver in iPhone Simulator
 
 The experimental iPhone runner opens a website in Mobile Safari and checks
-VoiceOver's own navigation output with Xcode 27+ and an iPhone running iOS 27+ in Simulator:
+VoiceOver's own navigation output. An [iPhone 18 Pro simulator with iOS 27.0 and Xcode 27.1](docs/ios-voiceover.md#verification-status) spoke the test page's button and heading. To run the check:
 
 ```bash
 npm run voiceover:ios:doctor

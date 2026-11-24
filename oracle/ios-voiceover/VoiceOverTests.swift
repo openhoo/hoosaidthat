@@ -47,12 +47,13 @@ final class VoiceOverTests: XCTestCase {
     }
 
     @MainActor
-    private func waitForVoiceOver(in safari: XCUIApplication, firstAction: Scenario.Action) async throws {
+    private func waitForVoiceOver(in safari: XCUIApplication, firstAction: Scenario.Action, startedHere: Bool) async throws {
         // isEnabled is a preference. On a fresh simulator the actual VoiceOver
         // process can take over a minute to initialize after the preference flips.
         let started = ProcessInfo.processInfo.systemUptime
         let deadline = started + 180
         var attempts = 0
+        var restarted = false
         var consecutiveNoSpeech = 0
         var firstNoSpeechTime: TimeInterval?
         var lastError: NSError?
@@ -79,14 +80,26 @@ final class VoiceOverTests: XCTestCase {
                 // A component may not have initial focus. Only the public, typed
                 // noSpeech response permits the requested navigation to set it.
                 // Transport failures with the same numeric code are not noSpeech.
-                if HSTVoiceOver.isNoSpeech(nativeError), firstAction != .current {
+                if HSTVoiceOver.isNoSpeech(nativeError) {
                     let now = ProcessInfo.processInfo.systemUptime
                     consecutiveNoSpeech += 1
                     let first = firstNoSpeechTime ?? now
                     firstNoSpeechTime = first
                     if consecutiveNoSpeech >= 3 && now - first >= 5 {
-                        print("HooSaidThat: VoiceOver reported no initial speech; performing the first requested movement.")
-                        return
+                        // A fresh service may accept enable() before it attaches to Safari.
+                        // Restart only a service we started, before any scenario action.
+                        if startedHere && !restarted {
+                            restarted = true
+                            try HSTVoiceOver.setEnabled(false)
+                            try HSTVoiceOver.setEnabled(true)
+                            safari.activate()
+                            consecutiveNoSpeech = 0
+                            firstNoSpeechTime = nil
+                            print("HooSaidThat: re-enabled the silent VoiceOver service before navigation.")
+                        } else if firstAction != .current {
+                            print("HooSaidThat: VoiceOver reported no initial speech; performing the first requested movement.")
+                            return
+                        }
                     }
                 } else {
                     consecutiveNoSpeech = 0
@@ -177,7 +190,7 @@ final class VoiceOverTests: XCTestCase {
         state.initialVoiceOver = HSTVoiceOver.isEnabled()
         if state.initialVoiceOver == false { try HSTVoiceOver.setEnabled(true) }
         guard HSTVoiceOver.isEnabled() else { throw ScenarioError("VoiceOver did not become enabled.") }
-        try await waitForVoiceOver(in: safari, firstAction: scenario.steps[0].action)
+        try await waitForVoiceOver(in: safari, firstAction: scenario.steps[0].action, startedHere: state.initialVoiceOver == false)
         for (index, step) in scenario.steps.enumerated() {
             for move in 1...(step.maxMoves ?? 1) {
                 guard safari.state == .runningForeground else { throw ScenarioError("Step \(index): Mobile Safari lost focus.") }

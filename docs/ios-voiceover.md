@@ -1,7 +1,7 @@
 # Test a website with VoiceOver on an iPhone simulator
 
 Use a dedicated iPhone simulator with iOS 27 or later and Xcode 27 or later.
-In Xcode Settings → Components, install an iOS Simulator runtime; create an
+In Xcode Settings → Components, install an iOS Simulator runtime; create a
 simulated iPhone in [Device Hub](https://developer.apple.com/documentation/xcode/device-hub) if needed (Xcode → Open Developer Tool → Device Hub). If several Xcode
 versions are installed, set `DEVELOPER_DIR` to the desired Xcode's
 `Contents/Developer` directory. No Appium server or signing identity is needed.
@@ -95,11 +95,18 @@ the run directory under the specified `resultsDirectory`.
 
 ## Verification status
 
-The Safari fixture has loaded successfully on a real iPhone simulator. The
-end-to-end VoiceOver check is experimental: on iOS 27.2, the first forward
-command failed and XCTest returned no utterances. A visible page or a running
-VoiceOver process is not a passing result. Qualification requires a passing
-XCTest and a transcript containing the unique heading and button.
+On November 24, 2026, a [native XCTest run](https://github.com/openhoo/hoosaidthat/actions/runs/45444402575/job/138624068935)
+on an iPhone 18 Pro simulator with iOS 27.0 (24A434) and Xcode 27.1
+(27A9275) captured three utterances from Mobile Safari: the button, the
+heading after moving backward, and the same button after moving forward.
+Each included the page's unique marker. The [recorded transcript and report](evidence/ios-voiceover-27.0.json) include the exact utterances. Safari passed one native test; the
+separate UIKit control in the same diagnostic job failed. That simulator
+had already been booted and VoiceOver had previously been enabled.
+
+Cold iOS 27.2 runs reached the expected page but failed on the first forward
+command with no utterances. Use the verified runtime when possible. The
+runner can re-enable a silent service once before navigation if it originally
+found VoiceOver off. It never retries a movement that may have changed focus.
 
 ## Results and scope
 

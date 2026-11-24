@@ -21,14 +21,14 @@ jobs:
       DEVELOPER_DIR: /Applications/Xcode_27.1.app/Contents/Developer
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-      - name: Select the iPhone 17 on this disposable runner
+      - name: Select the iPhone 18 Pro on this disposable runner
         run: |
           node scripts/voiceover-ios.mjs doctor
           phone=$(xcrun simctl list -j | jq -er --arg runtimeVersion "$HST_IOS_VERSION" '
             . as $list | [.runtimes[] | select(.isAvailable and .platform == "iOS" and .version == $runtimeVersion)
             | .identifier as $runtime | $list.devices[$runtime][]?
-            | select(.isAvailable and .deviceTypeIdentifier == "com.apple.CoreSimulator.SimDeviceType.iPhone-17")][0].udid')
-          echo "Testing iPhone 17 on iOS $HST_IOS_VERSION ($phone)"
+            | select(.isAvailable and .deviceTypeIdentifier == "com.apple.CoreSimulator.SimDeviceType.iPhone-18-Pro")][0].udid')
+          echo "Testing iPhone 18 Pro on iOS $HST_IOS_VERSION ($phone)"
           echo "HST_PHONE=$phone" >> "$GITHUB_ENV"
       - name: Present the test iPhone in Device Hub
         run: |

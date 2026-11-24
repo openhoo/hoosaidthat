@@ -1,0 +1,67 @@
+{
+  "workflowJob": "https://github.com/openhoo/hoosaidthat/actions/runs/45444402575/job/138624068935",
+  "revision": "f3fe6be302e141ad31028b8f76901f4322be7483",
+  "environment": "Already booted simulator; XCTest host installed; previous native control had enabled and restored VoiceOver.",
+  "resultBundle": "compare-27.1-27.0/safari/run-bcpE6y/VoiceOver.xcresult",
+  "xctest": {
+    "result": "Passed",
+    "passedTests": 1,
+    "failedTests": 0,
+    "skippedTests": 0
+  },
+  "report": {
+    "screenReader": "VoiceOver",
+    "browser": "Mobile Safari",
+    "captureBoundary": "XCUIVoiceOverService.Output.utterance",
+    "xcode": "Xcode 27.1\nBuild version 27A9275",
+    "sdk": "27.1",
+    "device": {
+      "udid": "0A1B5EC5-2485-4F8E-B06B-1185D8E186C0",
+      "name": "iPhone 18 Pro",
+      "state": "Booted",
+      "runtime": "27.0",
+      "build": "24A434"
+    },
+    "scenario": {
+      "url": "http://127.0.0.1:54215/5ccaf982",
+      "readyText": "Confirm order 5ccaf982",
+      "steps": [
+        {
+          "action": "forward",
+          "until": "Confirm order 5ccaf982",
+          "maxMoves": 40
+        },
+        {
+          "action": "backward",
+          "expect": "Order summary 5ccaf982"
+        },
+        {
+          "action": "forward",
+          "expect": "Confirm order 5ccaf982"
+        }
+      ]
+    },
+    "transcript": {
+      "events": [
+        {
+          "utterance": "Confirm order 5ccaf982 Button end, main",
+          "action": "forward",
+          "step": 0
+        },
+        {
+          "utterance": "Order summary 5ccaf982 Heading main, Landmark",
+          "action": "backward",
+          "step": 1
+        },
+        {
+          "utterance": "Confirm order 5ccaf982 Button end, main",
+          "action": "forward",
+          "step": 2
+        }
+      ],
+      "url": "http://127.0.0.1:54215/5ccaf982",
+      "version": 1,
+      "completed": true
+    }
+  }
+}
