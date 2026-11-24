@@ -23,6 +23,16 @@ static NSError *serviceError(NSString *message) {
     return NO;
 }
 
++ (BOOL)isNoSpeechError:(NSError *)error {
+#if __IPHONE_OS_VERSION_MAX_ALLOWED >= 270000
+    if (@available(iOS 27.0, *)) {
+        return [error.domain isEqualToString:XCUIVoiceOverServiceErrorDomain]
+            && error.code == XCUIVoiceOverServiceErrorNoSpeech;
+    }
+#endif
+    return NO;
+}
+
 + (BOOL)setEnabled:(BOOL)enabled error:(NSError **)error {
 #if __IPHONE_OS_VERSION_MAX_ALLOWED >= 270000
     if (@available(iOS 27.0, *)) {

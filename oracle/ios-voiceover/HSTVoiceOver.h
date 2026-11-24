@@ -6,6 +6,7 @@ NS_ASSUME_NONNULL_BEGIN
 @interface HSTVoiceOver : NSObject
 + (BOOL)isSupported;
 + (BOOL)isEnabled;
++ (BOOL)isNoSpeechError:(NSError *)error NS_SWIFT_NAME(isNoSpeech(_:));
 + (BOOL)setEnabled:(BOOL)enabled error:(NSError **)error NS_SWIFT_NAME(setEnabled(_:));
 + (nullable NSString *)speechForAction:(NSString *)action error:(NSError **)error NS_SWIFT_NAME(speech(for:));
 @end

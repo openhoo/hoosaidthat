@@ -47,12 +47,14 @@ final class VoiceOverTests: XCTestCase {
     }
 
     @MainActor
-    private func waitForSpokenFocus(in safari: XCUIApplication) async throws {
+    private func waitForVoiceOver(in safari: XCUIApplication, firstAction: Scenario.Action) async throws {
         // isEnabled is a preference. On a fresh simulator the actual VoiceOver
         // process can take over a minute to initialize after the preference flips.
         let started = ProcessInfo.processInfo.systemUptime
         let deadline = started + 180
         var attempts = 0
+        var consecutiveNoSpeech = 0
+        var firstNoSpeechTime: TimeInterval?
         var lastError: NSError?
         var lastResult = "no usable response"
         repeat {
@@ -68,9 +70,28 @@ final class VoiceOverTests: XCTestCase {
                     return
                 }
                 lastResult = "empty speech"
+                consecutiveNoSpeech = 0
+                firstNoSpeechTime = nil
             } catch {
-                lastError = error as NSError
+                let nativeError = error as NSError
+                lastError = nativeError
                 lastResult = "native error"
+                // A component may not have initial focus. Only the public, typed
+                // noSpeech response permits the requested navigation to set it.
+                // Transport failures with the same numeric code are not noSpeech.
+                if HSTVoiceOver.isNoSpeech(nativeError), firstAction != .current {
+                    let now = ProcessInfo.processInfo.systemUptime
+                    consecutiveNoSpeech += 1
+                    let first = firstNoSpeechTime ?? now
+                    firstNoSpeechTime = first
+                    if consecutiveNoSpeech >= 3 && now - first >= 5 {
+                        print("HooSaidThat: VoiceOver reported no initial speech; performing the first requested movement.")
+                        return
+                    }
+                } else {
+                    consecutiveNoSpeech = 0
+                    firstNoSpeechTime = nil
+                }
             }
             let remaining = deadline - ProcessInfo.processInfo.systemUptime
             if remaining <= 0 { break }
@@ -156,7 +177,7 @@ final class VoiceOverTests: XCTestCase {
         state.initialVoiceOver = HSTVoiceOver.isEnabled()
         if state.initialVoiceOver == false { try HSTVoiceOver.setEnabled(true) }
         guard HSTVoiceOver.isEnabled() else { throw ScenarioError("VoiceOver did not become enabled.") }
-        try await waitForSpokenFocus(in: safari)
+        try await waitForVoiceOver(in: safari, firstAction: scenario.steps[0].action)
         for (index, step) in scenario.steps.enumerated() {
             for move in 1...(step.maxMoves ?? 1) {
                 guard safari.state == .runningForeground else { throw ScenarioError("Step \(index): Mobile Safari lost focus.") }
