@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm, stat, mkdir, writeFile } from 'node:fs/promises';
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { mkdtemp, readFile, rm, stat, mkdir, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import test from 'node:test';
@@ -10,6 +12,14 @@ import { ATDriver } from '../native/at-driver.mjs';
 import { VoiceOverDriver, voiceOverKeyScript } from '../native/voiceover.mjs';
 import { assertNativePlatform, voiceOverCursorMembership } from '../native/platform.mjs';
 import { loadControlToken, parseArguments } from '../native-screen-reader.mjs';
+
+test('the installed Mac command runs through the npm bin symlink', { skip: process.platform === 'win32' }, async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'hst-native-bin-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const bin = join(directory, 'hoosaidthat-native');
+  await symlink(fileURLToPath(new URL('../native-screen-reader.mjs', import.meta.url)), bin);
+  assert.match(execFileSync(process.execPath, [bin, '--help'], { encoding: 'utf8' }), /Usage: hoosaidthat-native --doctor/);
+});
 
 const token = 'test-only-native-token-000000000000';
 async function fixture(t, reader, options = {}) {
@@ -167,6 +177,8 @@ test('VoiceOver sends reader-specific shortcuts', () => {
 test('native CLI validates host, ports, options and private token reuse', async t => {
   assert.throws(() => assertNativePlatform('voiceover', 'linux'), /macOS/);
   assertNativePlatform('voiceover', 'darwin');
+  assert.deepEqual(parseArguments(['--doctor']), { doctor: true });
+  assert.throws(() => parseArguments(['--doctor', '--token-file', 'x']), /invalid/);
   assert.throws(() => parseArguments(['--screen-reader', 'voiceover']), /token-file/);
   assert.throws(() => parseArguments(['--screen-reader', 'voiceover', '--token-file', 'x', '--cdp-port', '3003']), /ports must differ/);
   const directory = await mkdtemp(join(tmpdir(), 'hst-native-token-'));
