@@ -1,0 +1,65 @@
+name: Diagnose iPhone VoiceOver in UIKit and Safari
+on:
+  push:
+    branches: [diagnostics/iphone-voiceover-host-20261124]
+permissions:
+  contents: read
+jobs:
+  compare:
+    runs-on: xcode-27
+    timeout-minutes: 32
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - xcode: '27.1'
+            ios: '27.0'
+          - xcode: '27.2'
+            ios: '27.2'
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_${{ matrix.xcode }}.app/Contents/Developer
+      HST_IOS: ${{ matrix.ios }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+      - name: Boot test iPhone
+        run: |
+          set -eu
+          xcrun xcodebuild -version
+          xcrun simctl list runtimes
+          phone=$(xcrun simctl list -j | jq -er --arg version "$HST_IOS" '
+            . as $list | [.runtimes[] | select(.isAvailable and .platform == "iOS" and .version == $version)
+            | .identifier as $runtime | $list.devices[$runtime][]?
+            | select(.isAvailable and (.deviceTypeIdentifier | contains("SimDeviceType.iPhone-")))][0].udid')
+          echo "HST_PHONE=$phone" >> "$GITHUB_ENV"
+          xcrun simctl boot "$phone"
+          xcrun simctl bootstatus "$phone"
+      - name: Check real speech in UIKit
+        id: native
+        run: |
+          mkdir -p results
+          python3 control/sample-vot.py "$HST_PHONE" "$PWD/results/native-vot" --seconds 560 --after 3 &
+          probe=$!
+          trap 'kill -TERM "$probe" 2>/dev/null || true; wait "$probe" 2>/dev/null || true' EXIT
+          xcrun xcodebuild test -project control/NativeControl.xcodeproj -scheme NativeControl -destination "platform=iOS Simulator,id=$HST_PHONE" -derivedDataPath "$RUNNER_TEMP/build" -parallel-testing-enabled NO -only-testing:NativeControlUITests/NativeControlTests/testNativeVoiceOver -resultBundlePath "$PWD/results/NativeControl.xcresult" | tee results/native.log
+        shell: bash
+      - name: Preserve independent native evidence
+        if: always()
+        run: |
+          xcrun xcresulttool export attachments --path results/NativeControl.xcresult --output-path results/native-attachments
+      - name: Check real speech in Mobile Safari with an installed XCTest host
+        if: ${{ !cancelled() && env.HST_PHONE != '' }}
+        run: |
+          python3 control/sample-vot.py "$HST_PHONE" "$PWD/results/safari-vot" --seconds 560 --after 3 &
+          probe=$!
+          trap 'kill -TERM "$probe" 2>/dev/null || true; wait "$probe" 2>/dev/null || true' EXIT
+          # Use the same scenario, assertions and native bridge as the feature branch.
+          cp oracle/ios-voiceover/VoiceOverTests.swift control/NativeControlTests.swift
+          python3 control/prepare-safari.py
+          node scripts/voiceover-ios.mjs run --udid "$HST_PHONE" --results "$PWD/results/safari"
+        shell: bash
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: compare-${{ matrix.xcode }}-${{ matrix.ios }}
+          path: results/
+          retention-days: 3
