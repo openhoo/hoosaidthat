@@ -664,7 +664,8 @@ export async function runWindowsReader(reader, argv) {
     return;
   }
   let check;
-  if (op === 'parity' || op === 'parity-shard') {
+  const builtinParity = op === 'parity' || op === 'parity-shard';
+  if (builtinParity) {
     args = readerParity(reader, op, args);
     op = 'run';
   }
@@ -890,10 +891,13 @@ export async function runWindowsReader(reader, argv) {
         if (code !== 0) throw new Error('NVDA payload sync failed (exit ' + code + ')');
       } else refreshJaws(root, runtime.controller, path, config, instance.id);
     }
-    await wait(reader, root, config, instance.id, abort.signal, retryAfter, Boolean(check));
+    // The bundled parity runner verifies its own guest, HTTP/CDP, SSH status
+    // and locale before sending keys. Other commands rely on the wrapper.
+    if (!builtinParity)
+      await wait(reader, root, config, instance.id, abort.signal, retryAfter, Boolean(check));
     if (op === 'run') {
       if (!state(root, config, instance.id).running)
-        throw new Error('The reader VM stopped after readiness.');
+        throw new Error('The reader VM stopped before the test.');
       const prefix = 'HOOSAIDTHAT_' + reader.toUpperCase();
       const controlPort = reader === 'nvda' ? 3002 : 3004,
         cdpPort = reader === 'nvda' ? 9224 : 9226;

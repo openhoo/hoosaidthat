@@ -697,7 +697,10 @@ function trySshControl(remoteCommand, deadline = Infinity) {
   } catch (error) {
     return { status: 1, stdout: '', stderr: '', error };
   }
-  const timeout = sshTimeoutMs(remoteCommand, 15_000, deadline);
+  // Automatic status runs the same full Windows diagnostics as manual
+  // control status. Keep its connection and outer readiness deadlines separate.
+  const fullDockerStatus = dockerGuest && process.env.HST_NVDA_ACCELERATION === 'kvm' && remoteCommand === 'status';
+  const timeout = sshTimeoutMs(remoteCommand, fullDockerStatus ? 30_000 : 15_000, deadline);
   if (timeout <= 0) {
     return { status: 1, stdout: '', stderr: '', error: new Error('SSH readiness deadline exhausted') };
   }

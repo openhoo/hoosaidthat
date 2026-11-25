@@ -178,6 +178,7 @@ function invoke(command, scenario, acceleration = 'tcg') {
         let handshake = scenario === 'slow-banner' ? 30_000 : 100;
         if (scenario === 'slow-sync-banner') handshake = 20_000;
         let dispatch = scenario === 'slow-status' ? 240_000 : 100;
+        if (scenario.startsWith('kvm-status-')) dispatch = Number(scenario.split('-')[2]);
         if (scenario === 'slow-sync-update' && command.startsWith('update ')) {
           handshake = 20_000;
           dispatch = 25_000;
@@ -319,6 +320,7 @@ function invoke(command, scenario, acceleration = 'tcg') {
     `);
     const env = { ...process.env, HST_NVDA_RUNTIME_ROOT: runtimeRoot };
     if (docker) { env.HST_NVDA_ENGINE = 'docker'; env.HST_NVDA_CONTAINER_ID = 'a'.repeat(64); }
+    if (scenario.endsWith('-clamped')) env.HST_NVDA_READY_TIMEOUT_MS = '10000';
     if (scenario.startsWith('console-')) env.HST_NVDA_QUALIFICATION = '1';
     if (acceleration === null) delete env.HST_NVDA_ACCELERATION;
     else env.HST_NVDA_ACCELERATION = acceleration;
@@ -335,6 +337,21 @@ function invoke(command, scenario, acceleration = 'tcg') {
     rmSync(temporary, { recursive: true, force: true });
   }
 }
+
+test('Docker/KVM waits for one full status response and never repeats one that exceeded its deadline', () => {
+  for (const [scenario, limit, status] of [
+    ['kvm-status-20000', 30000, 0],
+    ['kvm-status-31000', 30000, 1],
+    ['kvm-status-20000-clamped', 10000, 1],
+  ]) {
+    const run = invoke(['docker-readiness'], scenario, 'kvm');
+    assert.equal(run.status, status, run.stderr);
+    assert.deepEqual(run.calls.map(({command, connect, timeout}) => ({command, connect, timeout})),
+      [{command: 'status', connect: 5, timeout: limit}]);
+    if (status) assert.match(run.stderr, new RegExp(`timed out after ${limit} ms.*Refusing overlapping retries`));
+    else assert.match(run.stdout, /oracle ready/);
+  }
+});
 
 test('Docker sync restarts NVDA and verifies the plugin loaded by that process', () => {
   for (const [scenario, exit] of [['ready', 0], ['wrong-plugin', 1]]) {
