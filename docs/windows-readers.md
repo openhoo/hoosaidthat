@@ -12,10 +12,11 @@ On a provisioned host with this package installed, run `hoosaidthat-windows-read
    docker build --platform linux/amd64 -f desktop/Dockerfile.amd64 -t winhoo-desktop:0.4.0-amd64 .
    ```
 
-2. From the HooSaidThat checkout, install the locked dependencies and build the Playwright fixtures:
+2. From the HooSaidThat checkout, install the locked dependencies, Playwright's FFmpeg for recorded tests, and the fixtures:
 
    ```sh
    npm ci
+   npx playwright install ffmpeg
    npm run build
    ```
 
