@@ -76,6 +76,12 @@ For a new private runtime on a WinHoo image supporting sparse backups, `HST_WINH
 | NVDA 2026.1.1 | 127.0.0.1:8008 | 3002 | 9224 | Queued speech, braille cells and cursor |
 | JAWS 2027 | 127.0.0.1:8009 | 3004 | 9226 | Speech from JAWS Remote Command Server |
 
-The JAWS guest installs the vendor's Remote Command Server component. The `jaws-web` profile supports US English and the desktop keyboard layout. A valid JAWS license or an available vendor demonstration session is required. The bridge checks the running reader and captures a real bootstrap announcement before reporting readiness. Inspect the guest's `C:\HooSaidThat-JAWS\runtime.log` and the private `shared/bootstrap/status.json` if it does not start. A new guest can reuse checksum-verified installers in `shared/cache`: `jaws-installer.exe`, `node.zip` and `chrome.zip`; the expected hashes are in the JAWS runtime lock.
+## First JAWS startup
+
+Use a JAWS license that permits your testing. If Windows shows **JAWS Activation**, start the guest with `hoosaidthat-windows-reader jaws up` so it stays open. In the viewer on port 8009, complete the vendor’s activation in the dedicated Windows account. An existing installation also offers **JAWS → Help → License → Update Activation**. Keep activation details in the guest.
+
+Run `hoosaidthat-windows-reader jaws sync` to restart the bridge, then `jaws check` with the same runner. The `jaws-web` profile uses US English and the desktop keyboard layout. Readiness requires speech from a bootstrap control, followed by a match on reader version, speech source and Chrome identity. If startup fails, run `hoosaidthat-windows-reader jaws status` and inspect `C:\HooSaidThat-JAWS\runtime.log` inside Windows. An installed `RemoteCommandServer.dll` by itself does not mean that JAWS opened its server on port 9002.
+
+A new guest can reuse verified installers in `shared/cache`: `jaws-installer.exe`, `node.zip` and `chrome.zip`. Their SHA-256 hashes are in the JAWS runtime lock.
 
 JAWS speech events are text, not recorded audio or braille. Its advertised keyboard actions are a subset of the NVDA matrix. For NVDA's separate 40-block release qualification, see the [Windows NVDA oracle](../oracle/windows-nvda/README.md). A smoke-check result is not that qualification.

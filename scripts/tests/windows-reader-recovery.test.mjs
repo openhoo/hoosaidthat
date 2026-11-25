@@ -50,7 +50,7 @@ test('failed JAWS provisioning remains inspectable and cannot mask live recovery
     syncBuiltinESMExports();
     globalThis.fetch=async url=>{
       if(process.env.TEST_READY!=='yes')throw Error('bridge is starting');
-      return Response.json(String(url).endsWith('/v2/health')?{ready:true,status:'ok',protocolVersion:'2.0',screenReader:'jaws',profile:'jaws-web',platform:'windows',capture:'jaws-speech-output',version:'1',browser:{version:'2'}}:{Browser:'Chrome/2',webSocketDebuggerUrl:'ws://localhost/fixture'});
+      return Response.json(String(url).endsWith('/v2/health')?{ready:true,status:'ok',protocolVersion:'2.0',screenReader:'jaws',profile:'jaws-web',platform:'windows',capture:'jaws-speech-output',outputSource:'at-driver-interaction.capturedOutput',locale:'en-US',keyboardLayout:'desktop',version:'1',browser:{name:'chrome',version:'2'}}:{Browser:'Chrome/2',webSocketDebuggerUrl:'ws://localhost/devtools/browser/fixture'});
     };
   `);
   const boot = new Date(Date.now() - 120000).toISOString();

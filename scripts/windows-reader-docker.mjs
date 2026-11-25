@@ -495,6 +495,9 @@ export function guestErrorMessage(stderr, exitcode) {
   ).slice(0, 1200);
 }
 export function jawsReady(health, chrome, lock) {
+  const address = chrome?.webSocketDebuggerUrl;
+  if (typeof address !== 'string' || !URL.canParse(address)) return false;
+  const socket = new URL(address);
   return (
     health?.ready === true &&
     health.protocolVersion === '2.0' &&
@@ -503,10 +506,17 @@ export function jawsReady(health, chrome, lock) {
     health.platform === 'windows' &&
     health.profile === 'jaws-web' &&
     health.capture === 'jaws-speech-output' &&
+    health.outputSource === 'at-driver-interaction.capturedOutput' &&
+    health.locale === 'en-US' &&
+    health.keyboardLayout === 'desktop' &&
     health.version === lock.jaws.version &&
-    health.browser?.version === lock.chrome.version &&
+    health.browser?.name === 'chrome' &&
+    health.browser.version === lock.chrome.version &&
     chrome?.Browser === 'Chrome/' + lock.chrome.version &&
-    /^wss?:\/\//.test(chrome.webSocketDebuggerUrl ?? '')
+    ['ws:', 'wss:'].includes(socket.protocol) &&
+    ['127.0.0.1', 'localhost', '[::1]'].includes(socket.hostname) &&
+    !socket.username && !socket.password && !socket.search && !socket.hash &&
+    /^\/devtools\/browser\/[^/]+$/.test(socket.pathname)
   );
 }
 async function jsonEndpoint(url, headers, signal) {

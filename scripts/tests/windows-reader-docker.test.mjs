@@ -147,8 +147,9 @@ test('real JAWS protocol, capture, product and Chrome version must all agree', (
     screenReader: 'jaws',
     platform: 'windows',
     capture: 'jaws-speech-output',
+    outputSource: 'at-driver-interaction.capturedOutput', locale: 'en-US', keyboardLayout: 'desktop',
     version: lock.jaws.version,
-    browser: { version: lock.chrome.version },
+    browser: { name: 'chrome', version: lock.chrome.version },
   };
   const chrome = {
     Browser: 'Chrome/' + lock.chrome.version,
@@ -158,5 +159,7 @@ test('real JAWS protocol, capture, product and Chrome version must all agree', (
   for (const field of Object.keys(health))
     assert.equal(jawsReady({ ...health, [field]: null }, chrome, lock), false, field);
   assert.equal(jawsReady(health, { ...chrome, Browser: 'Chrome/other' }, lock), false);
-  assert.equal(jawsReady(health, { ...chrome, webSocketDebuggerUrl: '' }, lock), false);
+  assert.equal(jawsReady({ ...health, browser: { name: 'other', version: lock.chrome.version } }, chrome, lock), false);
+  for (const address of ['', 'ws://other/devtools/browser/example', 'ws://127.0.0.1/devtools/page/example'])
+    assert.equal(jawsReady(health, { ...chrome, webSocketDebuggerUrl: address }, lock), false);
 });

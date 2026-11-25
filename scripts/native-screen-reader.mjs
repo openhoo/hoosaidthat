@@ -62,17 +62,18 @@ Run in the dedicated Windows guest with JAWS Remote Command Server enabled,
 or on a Mac with VoiceOver running and Chrome installed. The bridge brings Chrome to the front and sends real keyboard
 input. VoiceOver uses its native scripting API; --at-driver-endpoint selects
 the experimental AT Driver transport.
-Node.js 22+ is required for this host command. See docs/native-screen-readers.md.
+Node.js 22+ is required for this host command. See docs/windows-readers.md for JAWS
+and docs/native-screen-readers.md for VoiceOver.
 
   --doctor                  standalone: check VoiceOver and Accessibility without controlling the desktop
   --at-driver-endpoint URL   optional: connect to a running AT Driver
   --control-port PORT       default 3003 (loopback only)
   --cdp-port PORT           default 9225 (loopback only)
-  --locale en-US|de-DE       must match the reader's configured language
+  --locale en-US|de-DE       must match the reader (JAWS: en-US only)
   --browser-executable PATH optional Chrome/Chromium executable
 
 The command starts a dedicated browser profile, verifies native reader identity,
-AX focus and actual speech capture, then serves HooSaidThat protocol v2.
+browser focus and actual speech capture, then serves HooSaidThat protocol v2.
 The token file is created privately when missing. Its contents are never printed.
 Use one Playwright worker per native desktop. Ctrl+C closes the owned browser.`);
     return;
