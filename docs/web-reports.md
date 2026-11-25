@@ -73,8 +73,8 @@ from the companion source change before using this feature. Existing published
 images may not include the index. The exact contract is described in
 [runtime-protocol.md](runtime-protocol.md).
 
-Orca protocol v1 and the real NVDA presentation-hook adapter currently provide
-no original WAV or sample index. Their reports preserve captured speech and
+Orca protocol v1, real NVDA and JAWS currently provide no original WAV or sample index.
+JAWS supplies speech text only. Their reports preserve captured speech and
 snapshots and explicitly show audio as unavailable. A missing, cancelled, or
 invalid audio segment is never replaced with a generated voice.
 

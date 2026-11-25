@@ -86,4 +86,4 @@ Run `hoosaidthat-windows-reader jaws sync` to restart the bridge, then `jaws che
 
 A new guest can reuse verified installers in `shared/cache`: `jaws-installer.exe`, `node.zip` and `chrome.zip`. Their SHA-256 hashes are in the JAWS runtime lock.
 
-JAWS speech events are text, not recorded audio or braille. Its advertised keyboard actions are a subset of the NVDA matrix. For NVDA's separate 40-block release qualification, see the [Windows NVDA oracle](../oracle/windows-nvda/README.md). A smoke-check result is not that qualification.
+JAWS speech events are text. Braille assertions, including negative assertions, report that braille capture is unavailable. Its advertised keyboard actions are a subset of the NVDA matrix. For NVDA's separate 40-block release qualification, see the [Windows NVDA oracle](../oracle/windows-nvda/README.md). A smoke-check result is not that qualification.
