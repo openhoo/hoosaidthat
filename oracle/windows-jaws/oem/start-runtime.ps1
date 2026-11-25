@@ -2,9 +2,23 @@
 $ErrorActionPreference = 'Stop'
 if ($env:USERNAME -ine 'HstJaws') { throw 'Start the JAWS bridge only in the interactive HstJaws desktop' }
 $root = 'C:\HooSaidThat-JAWS'
+function Publish-RuntimeStatus([string]$phase, [string]$errorMessage = '') {
+  $status = '\\host.lan\Data\bootstrap\status.json'
+  $temporary = "$status.$([Guid]::NewGuid().ToString('N')).tmp"
+  $value = @{ phase=$phase; error=$errorMessage; utc=[DateTime]::UtcNow.ToString('o') } | ConvertTo-Json -Compress
+  try {
+    [IO.File]::WriteAllText($temporary, $value, [Text.UTF8Encoding]::new($false))
+    Move-Item -LiteralPath $temporary -Destination $status -Force
+  } catch { [Console]::Error.WriteLine('Could not publish JAWS runtime status to the private share.') }
+  finally { Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue }
+}
 $mutex = [Threading.Mutex]::new($false, 'Local\HoosaidthatJawsRuntime')
-if (!$mutex.WaitOne(0)) { exit 0 }
+# Stopping/replacing a scheduled task can abandon its mutex. Windows grants
+# ownership to this caller when WaitOne throws AbandonedMutexException.
+try { $acquired = $mutex.WaitOne(0) } catch [Threading.AbandonedMutexException] { $acquired = $true }
+if (!$acquired) { $mutex.Dispose(); exit 0 }
 try {
+  Publish-RuntimeStatus 'starting-native-driver'
   $lock = Get-Content "$root\runtime-lock.json" -Raw | ConvertFrom-Json
   $directory = Join-Path $env:ProgramFiles ('Freedom Scientific\JAWS\' + $lock.jaws.version.Split('.')[0])
   $jfw = Join-Path $directory 'jfw.exe'
@@ -28,6 +42,7 @@ try {
   $node = "$root\node\node-v$($lock.node.version)-win-x64\node.exe"
   $chrome = "$root\browser\chrome-win64\chrome.exe"
   $script = "$root\app\node_modules\@openhoo\hoosaidthat\scripts\native-screen-reader.mjs"
+  Publish-RuntimeStatus 'starting-bridge'
   & $node $script --screen-reader jaws --token-file '\\host.lan\Data\secrets\control-token' --browser-executable $chrome *>> "$root\runtime.log"
   if ($LASTEXITCODE -ne 0) { throw 'JAWS bridge exited; see runtime.log in the guest' }
 } catch {
@@ -38,9 +53,6 @@ try {
   $publicReason = if ($reason -like 'JAWS did not open its Remote Command Server*') { 'JAWS did not open its Remote Command Server; inspect licensing, /startrcs and the interactive desktop' }
     elseif ($reason -like 'Installed JAWS version differs*') { 'Installed JAWS version differs from the runtime lock' }
     else { 'JAWS bridge failed to start; inspect C:\HooSaidThat-JAWS\runtime.log in the dedicated guest' }
-  $status = '\\host.lan\Data\bootstrap\status.json'
-  $receipt = @{ phase='failed'; error=$publicReason; utc=[DateTime]::UtcNow.ToString('o') } | ConvertTo-Json -Compress
-  [IO.File]::WriteAllText("$status.tmp", $receipt, [Text.UTF8Encoding]::new($false))
-  Move-Item "$status.tmp" $status -Force
+  Publish-RuntimeStatus 'failed' $publicReason
   throw
 } finally { $mutex.ReleaseMutex(); $mutex.Dispose() }

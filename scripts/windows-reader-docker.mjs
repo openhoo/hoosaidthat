@@ -250,6 +250,7 @@ function state(root, config, expected) {
     id: result,
     running: record.State.Running,
     status: record.State.Status,
+    startedMs: Date.parse(record.State.StartedAt) || 0,
   };
 }
 export function verifyReaderContainer(root, config, result, record) {
@@ -295,7 +296,7 @@ export function ownedDockerGuest(reader, root, expected) {
   if (!current?.running) throw new Error('The owned WinHoo desktop is not running.');
   return current.id;
 }
-function phase(root, reader) {
+function provisioningReceipt(root, reader) {
   const path = join(
     root,
     'shared',
@@ -303,7 +304,8 @@ function phase(root, reader) {
     reader === 'jaws' ? 'status.json' : 'oem-status.json',
   );
   if (!existsSync(path)) return null;
-  if (lstatSync(path).size > 65536) throw new Error('Oversized guest provisioning receipt');
+  const info = lstatSync(path);
+  if (!info.isFile() || info.size > 65536) throw new Error('Invalid guest provisioning receipt');
   let p;
   try {
     p = json(path);
@@ -311,9 +313,12 @@ function phase(root, reader) {
     if (e instanceof SyntaxError) return null;
     throw e;
   }
-  if (p.phase === 'failed' || p.status === 'failed')
-    throw new Error('Guest provisioning failed: ' + String(p.error || p.phase).slice(0, 500));
-  return String(p.phase ?? p.status).slice(0, 120);
+  const phase = typeof p?.phase === 'string' ? p.phase : p?.status;
+  if (typeof phase !== 'string') return null;
+  return {
+    phase: phase.slice(0, 120), modifiedMs: info.mtimeMs,
+    error: phase === 'failed' || p.status === 'failed' ? String(p.error || phase).slice(0, 500) : null,
+  };
 }
 function stageInputs(reader, root) {
   const oracle = join(project, 'oracle', 'windows-' + reader),
@@ -548,7 +553,7 @@ async function child(file, args, env, signal) {
     signal.removeEventListener('abort', abort);
   }
 }
-async function wait(reader, root, config, expected, signal) {
+async function wait(reader, root, config, expected, signal, retryAfter = 0) {
   if (reader === 'nvda') {
     const code = await child(
       process.execPath,
@@ -575,13 +580,9 @@ async function wait(reader, root, config, expected, signal) {
   const end = Date.now() + limit;
   while (Date.now() < end) {
     signal.throwIfAborted();
-    if (!state(root, config, expected).running)
+    const instance = state(root, config, expected);
+    if (!instance.running)
       throw new Error('The JAWS VM stopped before the reader was ready.');
-    const p = phase(root, reader);
-    if (p && p !== lastPhase) {
-      console.log('JAWS provisioning: ' + p);
-      lastPhase = p;
-    }
     try {
       const probe = AbortSignal.any([
         signal,
@@ -604,6 +605,16 @@ async function wait(reader, root, config, expected, signal) {
       last = 'bridge or browser identity does not match the runtime lock';
     } catch (e) {
       last = e.message;
+    }
+    // Always try the live, authenticated bridge first. A receipt belongs to
+    // the previous attempt if it predates this container boot or package sync.
+    const receipt = provisioningReceipt(root, reader);
+    if (receipt && receipt.modifiedMs >= Math.max(instance.startedMs, retryAfter)) {
+      if (receipt.error) throw new Error('Guest provisioning failed: ' + receipt.error);
+      if (receipt.phase !== lastPhase) {
+        console.log('JAWS provisioning: ' + receipt.phase);
+        lastPhase = receipt.phase;
+      }
     }
     await delay(Math.min(3000, Math.max(0, end - Date.now())), undefined, {
       signal,
@@ -787,13 +798,16 @@ export async function runWindowsReader(reader, argv) {
       return;
     }
     if (op === 'status') {
+      const receipt = provisioningReceipt(root, reader);
       console.log(
         JSON.stringify({
           reader,
           root,
           container: current?.status ?? 'absent',
           id: current?.id ?? null,
-          phase: phase(root, reader),
+          phase: receipt?.phase ?? null,
+          error: receipt?.error ?? null,
+          ...(receipt && current?.startedMs && receipt.modifiedMs < current.startedMs ? { previousBoot: true } : {}),
         }),
       );
       return;
@@ -841,6 +855,7 @@ export async function runWindowsReader(reader, argv) {
     }
     if (!instance?.running)
       throw new Error('Start the WinHoo desktop before waiting for the reader.');
+    const retryAfter = op === 'sync' ? Date.now() : 0;
     if (op === 'sync') {
       if (reader === 'nvda') {
         const code = await child(
@@ -852,7 +867,7 @@ export async function runWindowsReader(reader, argv) {
         if (code !== 0) throw new Error('NVDA payload sync failed (exit ' + code + ')');
       } else refreshJaws(root, runtime.controller, path, config, instance.id);
     }
-    await wait(reader, root, config, instance.id, abort.signal);
+    await wait(reader, root, config, instance.id, abort.signal, retryAfter);
     if (op === 'run') {
       if (!state(root, config, instance.id).running)
         throw new Error('The reader VM stopped after readiness.');
