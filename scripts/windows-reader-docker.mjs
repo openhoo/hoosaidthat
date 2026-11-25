@@ -19,6 +19,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { createServer } from 'node:net';
+import { createRequire } from 'node:module';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -29,16 +30,22 @@ const project = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const cli = fileURLToPath(import.meta.url);
 const names = new Set(['nvda', 'jaws']);
 const usage =
-  'Usage: hoosaidthat-windows-reader <nvda|jaws> <doctor|init|up|status|wait|sync|run -- COMMAND [ARG...]|down>';
+  'Usage: hoosaidthat-windows-reader <nvda|jaws> <doctor|init|up|status|wait|sync|check [--navigation]|run -- COMMAND [ARG...]|down>';
 const help =
   usage +
   '\n\nRun inside Linux or WSL2 with a local Docker engine and the WinHoo desktop image.\n' +
   'doctor checks the host; init prepares a private runtime; up boots Windows; wait checks real reader readiness.\n' +
+  'check runs the packaged speech tests and saves reports in a fresh private directory under the current directory.\n' +
+  'jaws check --navigation runs the extended JAWS navigation tests instead.\n' +
   'run starts a test with the reader endpoints and token and stops any VM it started. A manual up stays running.\n' +
   'sync updates the installed reader bridge on a running guest. down stops the desktop and retains its disk.';
 
 function run(file, args, options = {}) {
-  const p = spawnSync(file, args, { encoding: 'utf8', timeout: 15000, ...options });
+  const p = spawnSync(file, args, {
+    encoding: 'utf8',
+    timeout: 15000,
+    ...options,
+  });
   // Never format argv; the child environment and Docker's inspect output may contain secrets.
   if (p.error || p.status !== 0)
     throw new Error(
@@ -239,7 +246,11 @@ function state(root, config, expected) {
     throw new Error('Owned Docker container identity changed.');
   const [record] = JSON.parse(run('docker', ['container', 'inspect', result]));
   verifyReaderContainer(root, config, result, record);
-  return { id: result, running: record.State.Running, status: record.State.Status };
+  return {
+    id: result,
+    running: record.State.Running,
+    status: record.State.Status,
+  };
 }
 export function verifyReaderContainer(root, config, result, record) {
   const owner = createHash('sha256').update(join(root, 'winhoo-docker.json')).digest('hex');
@@ -312,7 +323,11 @@ function stageInputs(reader, root) {
   if (reader === 'nvda') {
     run(process.execPath, [join(project, 'scripts/nvda-windows.mjs'), 'docker-prepare-oem'], {
       stdio: 'inherit',
-      env: { ...process.env, HST_NVDA_ENGINE: 'docker', HST_NVDA_RUNTIME_ROOT: root },
+      env: {
+        ...process.env,
+        HST_NVDA_ENGINE: 'docker',
+        HST_NVDA_RUNTIME_ROOT: root,
+      },
     });
     return;
   }
@@ -415,7 +430,11 @@ function refreshJaws(root, controller, configPath, config, containerId) {
         pid = response.pid;
         atomic(
           pendingPath,
-          JSON.stringify({ container: containerId, digest: expectedDigest, pid }) + '\n',
+          JSON.stringify({
+            container: containerId,
+            digest: expectedDigest,
+            pid,
+          }) + '\n',
         );
         continue;
       }
@@ -432,10 +451,7 @@ function refreshJaws(root, controller, configPath, config, containerId) {
       }
       rmSync(pendingPath, { force: true });
       if (r.status !== 0 || result.exitcode !== 0)
-        throw new Error(
-          'JAWS refresh failed: ' +
-            String(result.err || 'guest exit ' + result.exitcode).slice(0, 450),
-        );
+        throw new Error('JAWS refresh failed: ' + guestErrorMessage(result.err, result.exitcode));
       if (!String(result.out).includes('Installed reader update ' + expectedDigest))
         throw new Error('The guest did not confirm the requested package digest.');
       pid = null;
@@ -454,6 +470,24 @@ function refreshJaws(root, controller, configPath, config, containerId) {
     if (script) rmSync(script, { force: true });
     rmSync(stage, { recursive: true, force: true });
   }
+}
+export function guestErrorMessage(stderr, exitcode) {
+  const text = String(stderr ?? '').trim();
+  let detail = text;
+  if (text.startsWith('#< CLIXML')) {
+    // EncodedCommand serializes Windows PowerShell's progress and errors on
+    // stderr together. Select only its Error strings before limiting output.
+    const entities = { lt: '<', gt: '>', amp: '&', quot: '"', apos: "'" };
+    detail = Array.from(text.matchAll(/<S\b[^>]*\sS=["']Error["'][^>]*>([^<]*)<\/S>/gi), ([, s]) =>
+      s
+        .replace(/&(lt|gt|amp|quot|apos);/g, (_, key) => entities[key])
+        .replace(/_x([a-f0-9]{4})_/gi, (_, hex) => String.fromCharCode(parseInt(hex, 16))),
+    ).join('\n');
+  }
+  return (
+    detail.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '').trim() ||
+    'guest exit ' + exitcode
+  ).slice(0, 1200);
 }
 export function jawsReady(health, chrome, lock) {
   return (
@@ -571,20 +605,40 @@ async function wait(reader, root, config, expected, signal) {
     } catch (e) {
       last = e.message;
     }
-    await delay(Math.min(3000, Math.max(0, end - Date.now())), undefined, { signal });
+    await delay(Math.min(3000, Math.max(0, end - Date.now())), undefined, {
+      signal,
+    });
   }
   throw new Error(
     'JAWS readiness timed out: ' + last + '; last provisioning phase: ' + (lastPhase ?? 'unknown'),
   );
 }
+export function readerCheck(reader, args, cwd = process.cwd()) {
+  if (!names.has(reader) ||
+      (args.length && !(reader === 'jaws' && args.length === 1 && args[0] === '--navigation')))
+    throw new Error('Use nvda check, jaws check, or jaws check --navigation.');
+  const config = join(project, 'oracle/native-check', args.length ? 'jaws-navigation.config.mjs' : 'playwright.config.mjs');
+  const playwright = createRequire(import.meta.url).resolve('@playwright/test/cli');
+  accessSync(config, constants.R_OK);
+  const directory = mkdtempSync(join(cwd, 'hoosaidthat-' + reader + '-check-'));
+  const env = { HST_NATIVE_JSON: join(directory, 'report.json'), HST_NATIVE_RESULTS: join(directory, 'artifacts') };
+  return { directory, argv: ['--', process.execPath, playwright, 'test', '--config', config], env };
+}
 export async function runWindowsReader(reader, argv) {
-  const [op = 'status', ...args] = argv;
+  let [op = 'status', ...args] = argv;
   if (
     (['-h', '--help', 'help'].includes(reader) && argv.length === 0) ||
     (names.has(reader) && ['-h', '--help', 'help'].includes(op) && !args.length)
   ) {
     console.log(help);
     return;
+  }
+  let check;
+  if (op === 'check') {
+    check = readerCheck(reader, args);
+    console.log('Reader check output: ' + check.directory);
+    op = 'run';
+    args = check.argv;
   }
   if (
     !names.has(reader) ||
@@ -808,6 +862,7 @@ export async function runWindowsReader(reader, argv) {
       const tokenFile = join(root, 'shared/secrets/control-token');
       const childEnv = {
         ...(reader === 'nvda' ? env : process.env),
+        ...check?.env,
         SCREEN_READER: reader,
         HST_NATIVE_TOKEN_FILE: tokenFile,
         [prefix + '_CONTROL_ENDPOINT']: 'http://127.0.0.1:' + controlPort,

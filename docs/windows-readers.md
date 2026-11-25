@@ -22,8 +22,7 @@ Run the controller inside x64 Linux or a WSL2 distribution with a local Linux Do
    ```sh
    reader=jaws
    node scripts/windows-reader-docker.mjs "$reader" doctor
-   node scripts/windows-reader-docker.mjs "$reader" run -- \
-     ./node_modules/.bin/playwright test --config oracle/native-check/playwright.config.mjs
+   node scripts/windows-reader-docker.mjs "$reader" check
    ```
 
    The first boot installs Windows and the reader. Later runs reuse the disk. The check navigates by heading, focuses a button and waits for an asynchronous status announcement. JAWS also reads table cells and announces a checkbox's state after activation. Each assertion uses captured reader output. The wrapper waits for the reader and browser and supplies the matching endpoints and control token to the test process. Use one Playwright worker per desktop.
@@ -39,7 +38,7 @@ node scripts/windows-reader-docker.mjs "$reader" sync
 
 NVDA updates its authenticated control plugin. JAWS verifies the staged tarball and scripts, installs them into a fresh application directory and restarts its dedicated bridge task. Both wait for real reader and browser readiness. A new JAWS, Chrome or Node pin requires a newly provisioned guest.
 
-From an installed npm package, use `hoosaidthat-windows-reader --help` and the same subcommands. For the packaged check use Playwright with `--config node_modules/@openhoo/hoosaidthat/oracle/native-check/playwright.config.mjs`.
+From an installed npm package, use the same subcommands: `hoosaidthat-windows-reader nvda check` or `hoosaidthat-windows-reader jaws check`. Each check prints a fresh private output directory under the current working directory. Open its `report.json` for the Playwright results and `artifacts/` for the captured reader events and per-test reports.
 
 ## Run your own tests
 
@@ -59,7 +58,7 @@ export default defineConfig({
 
 Run `hoosaidthat-windows-reader jaws run -- npx playwright test` from your project. Chrome opens URLs inside Windows: an application URL must be reachable from that guest. A server bound to the controller's `127.0.0.1` is a different machine. The packaged checks use self-contained pages so they need no separate web server.
 
-For a longer JAWS navigation check, use `oracle/native-check/jaws-navigation.config.mjs` instead of `playwright.config.mjs` in the speech-check command above. This checks forward and backward movement across heading levels, controls, graphics, list items and unvisited links. It compares the *name of the next target* with what JAWS actually said.
+For a longer JAWS navigation check, run `hoosaidthat-windows-reader jaws check --navigation`. This checks forward and backward movement across heading levels, controls, graphics, list items and unvisited links. It compares the name of the target with what JAWS actually said.
 
 To exercise NVDA's English and German profiles with both keyboard layouts, run the full matrix or replay one block through the same Docker desktop:
 

@@ -1,8 +1,17 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { jawsReady, readerConfig, verifyReaderContainer } from '../windows-reader-docker.mjs';
+import {
+  guestErrorMessage,
+  jawsReady,
+  readerCheck,
+  readerConfig,
+  verifyReaderContainer,
+} from '../windows-reader-docker.mjs';
 
 const root = '/private/test/reader';
 const opts = {
@@ -13,6 +22,47 @@ const opts = {
   cloned: false,
 };
 const id = 'b'.repeat(64);
+test('packaged checks load from another cwd and write reports only in fresh private output', (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), 'windows reader checks '));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  const tokenFile = join(cwd, 'fixture-token');
+  writeFileSync(tokenFile, 'fixture-private-credential', { mode: 0o600 });
+  const seen = new Set();
+  for (const [reader, args, spec] of [
+    ['nvda', [], 'native.spec.mjs'],
+    ['jaws', [], 'jaws.spec.mjs'],
+    ['jaws', ['--navigation'], 'jaws-navigation.spec.mjs'],
+  ]) {
+    const check = readerCheck(reader, args, cwd);
+    const [, program, ...parameters] = check.argv;
+    assert.equal(statSync(check.directory).mode & 0o777, 0o700);
+    assert(!seen.has(check.directory));
+    seen.add(check.directory);
+    const probe = spawnSync(program, [...parameters, '--list'], {
+      cwd, encoding: 'utf8', timeout: 15000,
+      env: { ...process.env, SCREEN_READER: reader, HST_NATIVE_TOKEN_FILE: tokenFile, ...check.env },
+    });
+    assert.equal(probe.status, 0, probe.stderr);
+    assert(probe.stdout.includes(spec));
+    const report = readFileSync(check.env.HST_NATIVE_JSON, 'utf8');
+    assert(!report.includes('fixture-private-credential'));
+    assert.equal(JSON.parse(report).config.projects[0].outputDir, check.env.HST_NATIVE_RESULTS);
+    assert.equal(check.env.HST_NATIVE_RESULTS, join(check.directory, 'artifacts'));
+  }
+  assert.throws(() => readerCheck('nvda', ['--navigation'], cwd), /Use nvda check/);
+  assert.throws(() => readerCheck('jaws', ['--grep', 'example'], cwd), /Use nvda check/);
+});
+test('guest failure surfaces PowerShell errors beyond progress output', () => {
+  const progress = '<Obj S="progress">' + 'noise'.repeat(600) + '</Obj>';
+  const prefix = '#< CLIXML\r\n<Objs>';
+  const error = '<S S="Error">Access &amp; sharing violation_x000D__x000A_</S>';
+  assert.equal(
+    guestErrorMessage(prefix + progress + error + '</Objs>', 1),
+    'Access & sharing violation',
+  );
+  assert.equal(guestErrorMessage(prefix + progress + '</Objs>', 5), 'guest exit 5');
+  assert.equal(guestErrorMessage('plain diagnostic\n', 1), 'plain diagnostic');
+});
 function record(config) {
   return {
     Id: id,
@@ -85,7 +135,10 @@ test('foreign owners, a writable OEM mount and replaced disks cannot be adopted 
   }
 });
 test('real JAWS protocol, capture, product and Chrome version must all agree', () => {
-  const lock = { jaws: { version: '2027.1.2.3' }, chrome: { version: '151.0.0.1' } };
+  const lock = {
+    jaws: { version: '2027.1.2.3' },
+    chrome: { version: '151.0.0.1' },
+  };
   const health = {
     ready: true,
     status: 'ok',
