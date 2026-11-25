@@ -24,12 +24,14 @@ import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { checkReport } from '../oracle/windows-nvda/report-evidence.mjs';
 import { readOracleContainer, readQemuState, requireRunningOracle } from '../oracle/windows-nvda/engine-state.mjs';
 
 import { localDesktop, localControl, requireDesktop } from '../oracle/windows-nvda/winhoo-local.mjs';
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 let invocationRoot = process.cwd();
+const parityAttempt = process.env.HST_WINHOO_ATTEMPT || randomBytes(16).toString('hex');
 let retainParityReports = process.env.HST_NVDA_QUALIFICATION === '1';
 const require = createRequire(import.meta.url);
 const parityConfig = join(
@@ -958,11 +960,14 @@ function runParityInvocation(locale, keyboardLayout, token, label, overrides = {
   if (winhoo) requireDesktop(winhoo);
   const qualification = retainParityReports;
   const report = join(invocationRoot, 'reports', `${locale}-${keyboardLayout}-${label}.json`);
-  if (qualification) mkdirSync(dirname(report), { recursive: true, mode: 0o700 });
+  if (qualification) {
+    mkdirSync(dirname(report), { recursive: true, mode: 0o700 });
+    if (existsSync(report)) throw new Error('Refusing to overwrite retained Playwright evidence: ' + report);
+  }
   function record(state, counts = {}) {
     if (qualification) {
       appendFileSync(join(invocationRoot, 'blocks.jsonl'), JSON.stringify({
-        time: new Date().toISOString(), locale, layout: keyboardLayout, block: label, state, ...counts,
+        time: new Date().toISOString(), locale, layout: keyboardLayout, block: label, attempt: parityAttempt, state, ...counts,
       }) + '\n', { mode: 0o600 });
     }
   }
@@ -998,7 +1003,7 @@ function runParityInvocation(locale, keyboardLayout, token, label, overrides = {
         HOOSAIDTHAT_NVDA_PARITY_ARTIFACTS: '',
         HOOSAIDTHAT_NVDA_PARITY_CORE: '',
         ...overrides,
-        ...(qualification && { PLAYWRIGHT_JSON_OUTPUT_FILE: report }),
+        ...(qualification && { PLAYWRIGHT_JSON_OUTPUT_FILE: report, HST_WINHOO_ATTEMPT: parityAttempt }),
       },
     },
   );
@@ -1012,13 +1017,26 @@ function runParityInvocation(locale, keyboardLayout, token, label, overrides = {
   }
   if (qualification) {
     try {
-      const { stats } = JSON.parse(readFileSync(report, 'utf8'));
-      const required = label === 'core' ? 5 : 2;
-      if (!Number.isInteger(stats.expected) || stats.expected < required || stats.flaky !== 0 ||
-          stats.unexpected !== 0 || !Number.isInteger(stats.skipped) || stats.skipped < 0) {
-        throw new Error(`expected at least ${required} selected passing tests, without retries`);
+      const evidence = JSON.parse(readFileSync(report, 'utf8'));
+      if (parityBlocks.has(label)) {
+        const inventory = JSON.parse(readFileSync(join(deploymentRoot, 'matrix-inventory.json'), 'utf8'));
+        const titles = inventory.blocks[label];
+        if (inventory.schemaVersion !== 1 || !Array.isArray(titles) || !titles.length)
+          throw new Error('Missing declared NVDA block inventory for ' + label);
+        const { passed, skipped } = checkReport(evidence, titles.length, {
+          titles, binding: { adapter: 'nvda', locale, layout: keyboardLayout, block: label, attempt: parityAttempt },
+        });
+        record('passed', { selected: passed, skipped });
+      } else {
+        // A caller-selected legacy run has no declared block in the inventory.
+        const { stats } = evidence;
+        const required = 2;
+        if (!Number.isInteger(stats.expected) || stats.expected < required || stats.flaky !== 0 ||
+            stats.unexpected !== 0 || !Number.isInteger(stats.skipped) || stats.skipped < 0) {
+          throw new Error(`expected at least ${required} selected passing tests, without retries`);
+        }
+        record('passed', { selected: stats.expected, skipped: stats.skipped });
       }
-      record('passed', { selected: stats.expected, skipped: stats.skipped });
     } catch (error) {
       record('failed');
       throw new Error(`Missing or incomplete Playwright evidence for ${name}: ${error.message}`);

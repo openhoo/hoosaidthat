@@ -75,6 +75,8 @@ test('published Windows parity selects the built NVDA suite and retains complete
     writeFileSync(resolve(packageRoot, 'scripts/windows-reader-docker.mjs'), "export const ownedDockerGuest=()=> 'a'.repeat(64);");
     cpSync(resolve(root, 'oracle/windows-nvda/engine-state.mjs'), resolve(packageRoot, 'oracle/windows-nvda/engine-state.mjs'));
     cpSync(resolve(root, 'oracle/windows-nvda/winhoo-local.mjs'), resolve(packageRoot, 'oracle/windows-nvda/winhoo-local.mjs'));
+    for (const name of ['matrix-inventory.json','report-evidence.mjs'])
+      cpSync(resolve(root, 'oracle/windows-nvda', name), resolve(packageRoot, 'oracle/windows-nvda', name));
     cpSync(resolve(root, 'oracle/parity/coverage.json'), resolve(packageRoot, 'oracle/parity/coverage.json'));
     writeFileSync(resolve(packageRoot, 'node_modules/@playwright/test/package.json'), JSON.stringify({ exports: { './cli': './cli.cjs' } }));
     writeFileSync(resolve(packageRoot, 'node_modules/@playwright/test/cli.cjs'), '');
@@ -88,6 +90,7 @@ test('published Windows parity selects the built NVDA suite and retains complete
       import { syncBuiltinESMExports } from 'node:module';
       import { writeFileSync } from 'node:fs';
       import assert from 'node:assert/strict';
+      const inventory = ${JSON.stringify(JSON.parse(readFileSync(resolve(root,"oracle/windows-nvda/matrix-inventory.json"),"utf8")).blocks)};
       let locale = 'en-US';
       let invocations = 0;
       childProcess.execFileSync = () => { throw new Error('published package tried to rebuild missing source'); };
@@ -108,7 +111,20 @@ test('published Windows parity selects the built NVDA suite and retains complete
         if (process.env.HST_NVDA_ENGINE === 'docker') {
           assert.ok(args.includes('--reporter=line,json') && args.includes('--retries=0'));
           if (process.env.TEST_MATRIX_FAIL === String(invocations)) return {status:23};
-          writeFileSync(options.env.PLAYWRIGHT_JSON_OUTPUT_FILE,JSON.stringify({stats:{expected:5,skipped:0,flaky:0,unexpected:0}}));
+          const e = options.env, block = e.HST_NVDA_PARITY_BLOCK;
+          const titles = inventory[block], skipped = 'Intentionally unselected spec';
+          const specs = [...titles,skipped].map(title => {
+            const pass = title !== skipped, status = pass ? 'passed' : 'skipped';
+            return {title,tests:[{expectedStatus:status,status:pass?'expected':'skipped',results:[{retry:0,status,errors:[]}]}]};
+          });
+          const binding = { adapter:'nvda', locale, layout:e.SCREEN_READER_KEYBOARD_LAYOUT, block, attempt:e.HST_WINHOO_ATTEMPT };
+          if (invocations === 3) {
+            if (process.env.TEST_MATRIX_WRONG === 'title') specs[0].title = 'Different passing test';
+            if (process.env.TEST_MATRIX_WRONG === 'retry') specs[0].tests[0].results[0].retry = 1;
+            if (process.env.TEST_MATRIX_WRONG === 'sibling') binding.block = 'actions-01';
+          }
+          writeFileSync(e.PLAYWRIGHT_JSON_OUTPUT_FILE,JSON.stringify({errors:[],config:{workers:1,projects:[{retries:0}],metadata:{hstMatrix:binding}},
+            suites:[{suites:[{specs}]}],stats:{expected:titles.length,skipped:1,flaky:0,unexpected:0}}));
         }
         return { status: 0 };
       };
@@ -144,6 +160,14 @@ test('published Windows parity selects the built NVDA suite and retains complete
     assert.deepEqual(events(resolve(temporary,second)).map(e=>e.state),['running','passed','running','passed','running','failed']);
     assert.match(failed.stderr,/hoosaidthat-windows-reader nvda parity-shard en-US desktop actions-02/);
     assert.deepEqual(readdirSync(resolve(directory,'reports')), reports);
+    for (const [wrong, message] of [['title', /spec titles/], ['retry', /retried/], ['sibling', /metadata/]]) {
+      const previous = attempts();
+      const invalid = invoke({HST_NVDA_ENGINE:'docker', TEST_MATRIX_WRONG:wrong});
+      assert.equal(invalid.status, 1, invalid.stderr);
+      assert.match(invalid.stderr, message);
+      const [attempt] = attempts().filter(n => !previous.includes(n));
+      assert.deepEqual(events(resolve(temporary,attempt)).map(e=>e.state), ['running','passed','running','passed','running','failed']);
+    }
   } finally {
     rmSync(temporary, { recursive: true, force: true });
   }

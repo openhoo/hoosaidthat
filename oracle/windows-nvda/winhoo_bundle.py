@@ -43,7 +43,8 @@ def bundle(project, cache, target):
     with zipfile.ZipFile(target,'x',compression=zipfile.ZIP_DEFLATED,compresslevel=1) as out:
         for name in ('package.json','scripts/nvda-windows.mjs','oracle/parity/coverage.json',
                      'oracle/windows-nvda/runtime-lock.json','oracle/windows-nvda/engine-state.mjs',
-                     'oracle/windows-nvda/winhoo-local.mjs'):
+                     'oracle/windows-nvda/winhoo-local.mjs','oracle/windows-nvda/matrix-inventory.json',
+                     'oracle/windows-nvda/report-evidence.mjs'):
             out.write(project/name,'package/'+name)
         for p in sorted((project/'dist').rglob('*')):
             if p.is_file(): out.write(p,'package/'+p.relative_to(project).as_posix())

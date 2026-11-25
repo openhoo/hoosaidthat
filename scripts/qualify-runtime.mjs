@@ -4,6 +4,9 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
+import { checkReport } from '../oracle/windows-nvda/report-evidence.mjs';
+export { checkReport };
+
 const locales = ['en-US', 'de-DE'];
 const keyboards = ['desktop', 'laptop'];
 const groups = {
@@ -43,28 +46,6 @@ export function reportViewerPaths(root) {
     .filter(path => existsSync(path));
   if (!reports.length) throw Error('No actual screen-reader HTML reports were generated');
   return reports.sort();
-}
-
-export function checkReport(report, minimum) {
-  const {stats, config, errors} = report;
-  if (errors?.length !== 0 || config?.workers !== 1 || !config.projects?.length ||
-      config.projects.some(p => p.retries !== 0) || stats?.flaky !== 0 || stats.unexpected !== 0 ||
-      !Number.isInteger(stats.expected) || stats.expected < minimum)
-    throw Error('Playwright did not confirm the expected native tests without retries');
-  let passed = 0, skipped = 0;
-  function suite(s) {
-    for (const spec of s.specs ?? []) for (const test of spec.tests) {
-      const [result] = test.results;
-      if (test.results.length !== 1 || result.retry !== 0 || result.errors.length ||
-          result.status !== test.expectedStatus || !['passed','skipped'].includes(result.status))
-        throw Error('Playwright reported a missing, failed, retried or unexpected test');
-      if (result.status === 'passed') passed++; else skipped++;
-    }
-    for (const child of s.suites ?? []) suite(child);
-  }
-  report.suites.forEach(suite);
-  if (passed !== stats.expected || skipped !== stats.skipped) throw Error('Individual outcomes disagree with totals');
-  return {passed, skipped};
 }
 
 function execute(cmd, args, env = {}) {

@@ -32,6 +32,8 @@ function invoke(command, scenario, acceleration = 'tcg') {
     cpSync(resolve(root, 'scripts/nvda-windows.mjs'), resolve(packageRoot, 'scripts/nvda-windows.mjs'));
     cpSync(resolve(root, 'oracle/windows-nvda/engine-state.mjs'), resolve(packageRoot, 'oracle/windows-nvda/engine-state.mjs'));
     cpSync(resolve(root, 'oracle/windows-nvda/winhoo-local.mjs'), resolve(packageRoot, 'oracle/windows-nvda/winhoo-local.mjs'));
+    for (const name of ['matrix-inventory.json','report-evidence.mjs'])
+      cpSync(resolve(root, 'oracle/windows-nvda', name), resolve(packageRoot, 'oracle/windows-nvda', name));
     cpSync(resolve(root, 'oracle/parity/coverage.json'), resolve(packageRoot, 'oracle/parity/coverage.json'));
     const docker = command[0] === 'docker-readiness';
     if (docker) {
