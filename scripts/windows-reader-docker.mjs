@@ -883,7 +883,7 @@ export async function runWindowsReader(reader, argv) {
       if (reader === 'nvda') {
         const code = await child(
           process.execPath,
-          [join(project, 'scripts/nvda-windows.mjs'), 'sync'],
+          [join(project, 'scripts/nvda-windows.mjs'), 'sync', '--reload'],
           { ...env, HST_NVDA_CONTAINER_ID: instance.id },
           abort.signal,
         );

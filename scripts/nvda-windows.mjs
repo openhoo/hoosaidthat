@@ -212,10 +212,20 @@ if (command === 'docker' || (dockerGuest && ['doctor','init','up','status','wait
     requireInitialized();
     await waitUntilSshReady();
     break;
-  case 'sync':
+  case 'sync': {
+    const flags = process.argv.slice(3);
+    if (flags.length && !(dockerGuest && flags.length === 1 && flags[0] === '--reload'))
+      throw new Error('Unexpected NVDA sync arguments');
     requireInitialized();
-    await syncControlPayload();
+    const pluginSha256 = await syncControlPayload();
+    if (flags.length) {
+      const previous = runSshControl('status').runtime?.nvdaPid;
+      runSshControl('restart');
+      const active = await waitUntilReady(undefined, { pluginSha256, previous });
+      console.log('NVDA loaded the synchronized plugin in process ' + active.nvdaPid + ': ' + pluginSha256);
+    }
     break;
+  }
   case 'parity':
     await runParityMatrix();
     break;
@@ -394,7 +404,7 @@ function lockedSignInSession(status) {
   return consoleLocked && (session.account === null || session.account === '') ? session.sessionId : null;
 }
 
-async function waitUntilReady(expectedLocale) {
+async function waitUntilReady(expectedLocale, reload) {
   requireInitialized();
   if (winhoo) {
     const deadline = Date.now() + 120_000;
@@ -488,6 +498,13 @@ async function waitUntilReady(expectedLocale) {
         if (ssh.status === 0 && ssh.payload.ready === true && ssh.payload.runtimeFresh === true &&
             typeof ssh.payload.runtime?.locale === 'string' &&
             (expectedLocale === undefined || ssh.payload.runtime.locale === expectedLocale)) {
+          if (reload) {
+            const pid = ssh.payload.runtime.nvdaPid;
+            if (!Number.isSafeInteger(pid) || pid <= 0 || pid === reload.previous || pid !== health.pluginProcessId)
+              throw new Error('Waiting for the restarted NVDA process to report its plugin identity');
+            if (health.pluginSourceSha256 !== reload.pluginSha256)
+              throw Object.assign(new Error('The restarted NVDA process did not load the synchronized plugin'), { code: 'HST_PLUGIN_MISMATCH' });
+          }
           console.log(
             'NVDA 2026.1.1 oracle ready: SSH 127.0.0.1:2224, control 127.0.0.1:3002, CDP 127.0.0.1:9224.',
           );
@@ -499,7 +516,7 @@ async function waitUntilReady(expectedLocale) {
         lastError = 'readiness payload invalid';
       }
     } catch (error) {
-      if (error?.code === 'HST_SSH_TIMEOUT' || error?.code === 'HST_SSH_RESET') throw error;
+      if (error?.code === 'HST_SSH_TIMEOUT' || error?.code === 'HST_SSH_RESET' || error?.code === 'HST_PLUGIN_MISMATCH') throw error;
       sessionResets = 0;
       lastError = error instanceof Error ? error.message : String(error);
     }
@@ -825,6 +842,7 @@ async function syncControlPayload() {
   }
   runSshControl('reconfigure-ssh');
   await waitAfterSshReconfigure();
+  return files.find(f => f.name.endsWith('/hoosaidthatControl.py')).sha256;
 }
 
 async function waitUntilSshReady() {

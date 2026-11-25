@@ -35,7 +35,7 @@ function invoke(command, scenario, acceleration = 'tcg') {
     for (const name of ['matrix-inventory.json','report-evidence.mjs'])
       cpSync(resolve(root, 'oracle/windows-nvda', name), resolve(packageRoot, 'oracle/windows-nvda', name));
     cpSync(resolve(root, 'oracle/parity/coverage.json'), resolve(packageRoot, 'oracle/parity/coverage.json'));
-    const docker = command[0] === 'docker-readiness';
+    const docker = command[0] === 'docker-readiness' || command.includes('--reload');
     if (docker) {
       // Ownership is covered by the Docker controller tests. Only this exact guest may reach readiness.
       writeFileSync(resolve(packageRoot, 'scripts/windows-reader-docker.mjs'), `
@@ -80,6 +80,7 @@ function invoke(command, scenario, acceleration = 'tcg') {
       const scenario = ${JSON.stringify(scenario)};
       const calls = [];
       let playwrightCalls = 0;
+      let reloaded = false;
       const runs = [];
       let now = 0;
       let fetches = 0;
@@ -139,10 +140,11 @@ function invoke(command, scenario, acceleration = 'tcg') {
         assert.equal(program, 'ssh', 'the test must never run another executable');
         const command = args.at(-1);
         if (command.startsWith('locale-')) locale = command.slice(7);
+        if (command === 'restart') reloaded = true;
         const connect = Number(args.find(value => value.startsWith('ConnectTimeout=')).split('=')[1]);
         calls.push({ command, timeout: options.timeout, connect, started: now });
         const payload = { schema: 'hoosaidthat.nvda-ssh-control', version: 1, command, status: 'ready', ready: true, runtimeFresh: true,
-          runtime: { locale, nvdaPid: locale === 'en-US' || ['reader-unchanged', 'retained-german-reader-unchanged'].includes(scenario) ? 42 : 56,
+          runtime: { locale, nvdaPid: reloaded ? 1234 : locale === 'en-US' || ['reader-unchanged', 'retained-german-reader-unchanged'].includes(scenario) ? 42 : 56,
             chromePid: locale === 'de-DE' && ['browser-replaced', 'retained-german-browser-replaced'].includes(scenario) ? 88 : 72 } };
         if (scenario.startsWith('console-') && now < (scenario === 'console-locked' ? Infinity : 150_000)) {
           const account = scenario === 'console-occupied' ? 'ORACLE\\\\other' : null;
@@ -308,7 +310,8 @@ function invoke(command, scenario, acceleration = 'tcg') {
         clearTimeout(signalTimers.get(options?.signal));
         if (scenario === 'fetch-exhausts-deadline' && fetches === 1) now += 45 * 60_000;
         return new Response(JSON.stringify(String(url).includes('/v2/health')
-          ? { protocolVersion: '2.0', screenReader: 'nvda', version: '2026.1.1', ready: true, status: 'ok', profile: 'nvda-web-2026.1.1', captureBoundary: 'nvda-presentation-hooks' }
+          ? { protocolVersion: '2.0', screenReader: 'nvda', version: '2026.1.1', ready: true, status: 'ok', profile: 'nvda-web-2026.1.1', captureBoundary: 'nvda-presentation-hooks',
+              ...(reloaded ? { pluginProcessId: 1234, pluginSourceSha256: scenario==='wrong-plugin' ? '0'.repeat(64) : ${JSON.stringify(payloadEntries.find(f=>f.name.endsWith('/hoosaidthatControl.py')).sha256)} } : {}) }
           : { Browser: 'Chrome/151.0.7922.47', webSocketDebuggerUrl: 'ws://127.0.0.1/devtools/browser/fixture' }));
       };
       process.on('exit', () => writeFileSync(${JSON.stringify(receiptPath)}, JSON.stringify({ calls, now, fetches, playwrightCalls, runs,
@@ -332,6 +335,18 @@ function invoke(command, scenario, acceleration = 'tcg') {
     rmSync(temporary, { recursive: true, force: true });
   }
 }
+
+test('Docker sync restarts NVDA and verifies the plugin loaded by that process', () => {
+  for (const [scenario, exit] of [['ready', 0], ['wrong-plugin', 1]]) {
+    const result = invoke(['sync', '--reload'], scenario, 'kvm');
+    assert.equal(result.status, exit, result.stderr);
+    const commands = result.calls.map(c => c.command);
+    assert.match(commands.shift(), /^update [0-9a-f]{64}$/);
+    assert.deepEqual(commands, ['reconfigure-ssh', 'status', 'status', 'restart', 'status']);
+    if (exit) assert.match(result.stderr, /did not load the synchronized plugin/);
+    else assert.match(result.stdout, /synchronized plugin in process 1234: [0-9a-f]{64}/);
+  }
+});
 
 test('Retained KVM guest reports a persistently locked sign-in screen before the boot deadline', () => {
   const r = invoke(['wait'], 'console-locked', 'kvm');

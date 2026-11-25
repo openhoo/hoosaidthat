@@ -32,14 +32,14 @@ On a provisioned host with this package installed, run `hoosaidthat-windows-read
 
 For a manual investigation, run `up`, `status`, and `wait` separately. `up` means that the VM started; `wait` checks the reader. A manual `up` leaves the guest available across test runs; finish with `down` to stop it and retain its disk. Private state defaults to `~/VMs/hoosaidthat-<reader>-docker`. Choose a different location with `HST_NVDA_RUNTIME_ROOT` or `HST_JAWS_RUNTIME_ROOT` before initialization. Keep it outside the repository.
 
-To test an updated package on an already provisioned guest, rebuild HooSaidThat and run:
+To test an update on an already provisioned guest, start it with `up`, finish any active tests, then sync the new package. From a source checkout, run:
 
 ```sh
 npm run build
 node scripts/windows-reader-docker.mjs "$reader" sync
 ```
 
-NVDA updates its authenticated control plugin. JAWS verifies the staged tarball and scripts, installs them into a fresh application directory and restarts its dedicated bridge task. Both wait for real reader and browser readiness. A new JAWS, Chrome or Node pin requires a newly provisioned guest.
+NVDA restarts the test runtime and verifies that the new process loaded the plugin from this package. JAWS verifies the staged tarball and scripts, installs them into a fresh application directory and restarts its dedicated bridge task. Both wait for real reader and browser readiness. A new JAWS, Chrome or Node pin requires a newly provisioned guest.
 
 In the output directory, open `report.json` for the Playwright results or look under `artifacts/` for captured reader events and a portable HTML report for each test.
 
