@@ -60,12 +60,14 @@ Run `hoosaidthat-windows-reader jaws run -- npx playwright test` from your proje
 
 For a longer JAWS navigation check, run `hoosaidthat-windows-reader jaws check --navigation`. This checks forward and backward movement across heading levels, controls, graphics, list items and unvisited links. It compares the name of the target with what JAWS actually said.
 
-To exercise NVDA's English and German profiles with both keyboard layouts, run the full matrix or replay one block through the same Docker desktop:
+To exercise NVDA's English and German profiles with both keyboard layouts, run the full 40-block matrix from your project, or replay a single block:
 
 ```sh
-node scripts/windows-reader-docker.mjs nvda run -- node scripts/nvda-windows.mjs parity
-node scripts/windows-reader-docker.mjs nvda run -- node scripts/nvda-windows.mjs parity-shard en-US desktop actions-03
+npx hoosaidthat-windows-reader nvda parity
+npx hoosaidthat-windows-reader nvda parity-shard en-US desktop actions-03
 ```
+
+The command prints a fresh private `hoosaidthat-nvda-matrix-*` or `hoosaidthat-nvda-replay-*` directory beneath your current directory. Follow `blocks.jsonl` for progress; `reports/` contains one Playwright JSON report per completed block and `test-results/` holds reader events and test artifacts. A failure stops the attempt and preserves earlier blocks. A replay creates a separate directory. From a source checkout, replace `npx hoosaidthat-windows-reader` with `node scripts/windows-reader-docker.mjs`.
 
 ## Guest storage and capture
 

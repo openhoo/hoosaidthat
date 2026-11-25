@@ -30,13 +30,14 @@ const project = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const cli = fileURLToPath(import.meta.url);
 const names = new Set(['nvda', 'jaws']);
 const usage =
-  'Usage: hoosaidthat-windows-reader <nvda|jaws> <doctor|init|up|status|wait|sync|check [--navigation]|run -- COMMAND [ARG...]|down>';
+  'Usage: hoosaidthat-windows-reader <nvda|jaws> <doctor|init|up|status|wait|sync|check [--navigation]|parity|parity-shard LOCALE LAYOUT BLOCK|run -- COMMAND [ARG...]|down>';
 const help =
   usage +
   '\n\nRun inside Linux or WSL2 with a local Docker engine and the WinHoo desktop image.\n' +
   'doctor checks the host; init prepares a private runtime; up boots Windows; wait checks real reader readiness.\n' +
   'check runs the packaged speech tests and saves reports in a fresh private directory under the current directory.\n' +
   'jaws check --navigation runs the extended JAWS navigation tests instead.\n' +
+  'nvda parity runs all 40 profile blocks. nvda parity-shard replays one block. Each saves its own evidence.\n' +
   'run starts a test with the reader endpoints and token and stops any VM it started. A manual up stays running.\n' +
   'sync updates the installed reader bridge on a running guest. down stops the desktop and retains its disk.';
 
@@ -634,6 +635,14 @@ async function wait(reader, root, config, expected, signal, retryAfter = 0) {
     'JAWS readiness timed out: ' + last + '; last provisioning phase: ' + (lastPhase ?? 'unknown'),
   );
 }
+export function readerParity(reader, op, args) {
+  const replay = op === 'parity-shard' && args.length === 3 &&
+    ['en-US', 'de-DE'].includes(args[0]) && ['desktop', 'laptop'].includes(args[1]) &&
+    /^(core|settings|actions-0[1-8])$/.test(args[2]);
+  if (reader !== 'nvda' || (!(op === 'parity' && args.length === 0) && !replay))
+    throw new Error('Use nvda parity or nvda parity-shard <en-US|de-DE> <desktop|laptop> <core|actions-01..08|settings>.');
+  return ['--', process.execPath, join(project, 'scripts/nvda-windows.mjs'), op, ...args];
+}
 export function readerCheck(reader, args, cwd = process.cwd()) {
   if (!names.has(reader) ||
       (args.length && !(reader === 'jaws' && args.length === 1 && args[0] === '--navigation')))
@@ -655,6 +664,10 @@ export async function runWindowsReader(reader, argv) {
     return;
   }
   let check;
+  if (op === 'parity' || op === 'parity-shard') {
+    args = readerParity(reader, op, args);
+    op = 'run';
+  }
   if (op === 'check') {
     check = readerCheck(reader, args);
     console.log('Reader check output: ' + check.directory);

@@ -29,7 +29,8 @@ import { readOracleContainer, readQemuState, requireRunningOracle } from '../ora
 import { localDesktop, localControl, requireDesktop } from '../oracle/windows-nvda/winhoo-local.mjs';
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const invocationRoot = process.cwd();
+let invocationRoot = process.cwd();
+let retainParityReports = process.env.HST_NVDA_QUALIFICATION === '1';
 const require = createRequire(import.meta.url);
 const parityConfig = join(
   projectRoot,
@@ -118,6 +119,11 @@ try {
 if (dockerGuest && ['sync','control','wait-ssh','parity','parity-cell','parity-shard','docker-readiness'].includes(command)) {
   const { ownedDockerGuest } = await import('./windows-reader-docker.mjs');
   process.env.HST_NVDA_CONTAINER_ID = ownedDockerGuest('nvda',runtimeRoot,process.env.HST_NVDA_CONTAINER_ID);
+  if (!retainParityReports && (command === 'parity' || command === 'parity-shard')) {
+    invocationRoot = mkdtempSync(join(invocationRoot, command === 'parity' ? 'hoosaidthat-nvda-matrix-' : 'hoosaidthat-nvda-replay-'));
+    retainParityReports = true;
+    console.log('NVDA parity evidence: ' + invocationRoot);
+  }
 }
 if (command === 'docker' || (dockerGuest && ['doctor','init','up','status','wait','run','down'].includes(command))) {
   const args = command === 'docker' ? process.argv.slice(3) : process.argv.slice(2);
@@ -942,7 +948,7 @@ function runParityInvocation(locale, keyboardLayout, token, label, overrides = {
   const started = performance.now();
   if (process.env.HST_NVDA_CONTAINER_ID) requireRunningOracle(guestEngine, Infinity, process.env.HST_NVDA_CONTAINER_ID);
   if (winhoo) requireDesktop(winhoo);
-  const qualification = process.env.HST_NVDA_QUALIFICATION === '1';
+  const qualification = retainParityReports;
   const report = join(invocationRoot, 'reports', `${locale}-${keyboardLayout}-${label}.json`);
   if (qualification) mkdirSync(dirname(report), { recursive: true, mode: 0o700 });
   function record(state, counts = {}) {
@@ -991,7 +997,7 @@ function runParityInvocation(locale, keyboardLayout, token, label, overrides = {
   if (result.status !== 0) {
     record('failed');
     const replay = parityBlocks.has(label)
-      ? `\nReplay: hoosaidthat-nvda-windows parity-shard ${locale} ${keyboardLayout} ${label}`
+      ? `\nReplay: ${dockerGuest ? 'hoosaidthat-windows-reader nvda' : 'hoosaidthat-nvda-windows'} parity-shard ${locale} ${keyboardLayout} ${label}`
       : '';
     const reason = result.error?.message ?? result.signal ?? `exit ${result.status}`;
     throw new Error(`NVDA parity failed for ${name} (${reason})${replay}`);
