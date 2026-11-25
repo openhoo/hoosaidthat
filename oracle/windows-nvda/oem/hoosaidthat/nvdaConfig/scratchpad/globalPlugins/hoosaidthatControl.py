@@ -40,6 +40,12 @@ from keyboardHandler import KeyboardInputGesture
 from logHandler import log
 
 
+# Capture once. The sync receipt must identify the plugin loaded in this
+# process even if an operator has already replaced the installed source.
+with open(__file__, "rb") as _plugin_source:
+    PLUGIN_SOURCE_SHA256 = hashlib.sha256(_plugin_source.read()).hexdigest()
+PLUGIN_PROCESS_ID = os.getpid()
+
 PROFILE = "nvda-web-2026.1.1"
 NVDA_VERSION = "2026.1.1"
 CHROME_VERSION = "151.0.7922.47"
@@ -668,6 +674,33 @@ def call_on_main(function, timeout=10.0):
     return result.get("value")
 
 
+def prepare_browse_braille():
+    """Restore NVDA's native display for keyboard navigation in a ready document."""
+    handler = braille.handler
+    if handler.getTether() != "focus" or not handler.enabled:
+        return
+    focus = api.getFocusObject()
+    if object_is_protected(focus):
+        return
+    app = getattr(getattr(focus, "appModule", None), "appName", "")
+    if app not in ("chrome", "msedge"):
+        return
+    document = getattr(focus, "treeInterceptor", None)
+    if not document or not document.isReady or document.passThrough:
+        return
+    # Script emulation skips the Windows key-down counter which normally
+    # dismisses a timed braille message when navigating. Never redraw the
+    # previous buffer while dismissing it.
+    if handler.buffer is handler.messageBuffer:
+        handler._dismissMessage(shouldUpdate=False)
+    # NVDA's handleCaretMove only updates an existing region for the same
+    # document. Focus may have arrived before the virtual display or browse
+    # buffer was ready. Let NVDA rebuild it using the real current focus.
+    regions = handler.mainBuffer.regions
+    if not regions or getattr(regions[-1], "obj", None) != document:
+        handler.initialDisplay()
+
+
 def emulate(gesture_name):
     def invoke():
         if gesture_name == "f6":
@@ -1060,6 +1093,15 @@ def execute_action(command, argument):
         or DIRECT_BRAILLE_COMMAND_BY_ID.get(command)
         or DIRECT_SPEECH_COMMAND_BY_ID[command]
     )
+    # Any repair presents the location *before* the key. Keep this native
+    # frame out of the command's result and evidence of its destination.
+    if (
+        command in ("documentStart", "documentEnd", "moveToContainerStart", "movePastContainerEnd")
+        or command in DIRECT_COMMAND_BY_ID
+        or (command.startswith(("next", "previous")) and command in COMMAND_BY_ID
+            and "NVDA+" not in definition[2])
+    ):
+        call_on_main(prepare_browse_braille)
     with STATE.lock:
         before = STATE.sequence
         STATE.command = command
@@ -1289,6 +1331,8 @@ class Handler(BaseHTTPRequestHandler):
                             "keyboardLayout": STATE.keyboard_layout,
                             "ready": STATE.ready,
                             "captureBoundary": "nvda-presentation-hooks",
+                            "pluginSourceSha256": PLUGIN_SOURCE_SHA256,
+                            "pluginProcessId": PLUGIN_PROCESS_ID,
                             "browser": {
                                 "name": "chrome",
                                 "version": CHROME_VERSION,
@@ -1688,6 +1732,10 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
             self.terminate()
 
     def on_startup(self):
+        # Registering filter_displayDimensions supplies a virtual display, but
+        # does not initialize its buffers the way connecting a driver does.
+        braille.handler.invalidateCache()
+        braille.handler.initialDisplay()
         with STATE.lock:
             STATE.ready = True
 

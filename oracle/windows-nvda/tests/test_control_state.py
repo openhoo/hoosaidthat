@@ -110,7 +110,7 @@ def invoke_from_http(function):
 def load_runtime():
     tree = ast.parse(PLUGIN_PATH.read_text(encoding="utf-8"))
     required = {
-        "OracleState", "call_on_main", "current_state", "object_is_protected", "execute_action", "configure_session",
+        "OracleState", "call_on_main", "current_state", "object_is_protected", "execute_action", "configure_session", "prepare_browse_braille",
     }
     selected = [
         node for node in tree.body
@@ -216,6 +216,66 @@ class StateExecutionTests(unittest.TestCase):
         start()
         self.assertEqual(updates, [False])
         self.assertEqual(self.namespace["STATE"].events, [])
+
+    def test_navigation_rebuilds_only_missing_or_stale_native_browse_regions(self):
+        document = SimpleNamespace(isReady=True, passThrough=False)
+        focus = self.objects["focus"]
+        focus._values["treeInterceptor"] = document
+        display = SimpleNamespace(mainBuffer=SimpleNamespace(regions=[]), messageBuffer=object(),
+                                  enabled=True, getTether=lambda: "focus")
+        display.buffer = display.messageBuffer
+        self.namespace["braille"] = SimpleNamespace(handler=display)
+        calls = []
+
+        def dismiss(shouldUpdate=True):
+            self.assertFalse(shouldUpdate)
+            self.probe.read("display.dismiss", None)
+            calls.append("dismiss")
+            display.buffer = display.mainBuffer
+
+        def initialize():
+            self.probe.read("display.initialize", None)
+            calls.append("initialize")
+            display.mainBuffer.regions = [SimpleNamespace(obj=document)]
+
+        display._dismissMessage, display.initialDisplay = dismiss, initialize
+        prepare = lambda: invoke_from_http(lambda: self.namespace["call_on_main"](
+            self.namespace["prepare_browse_braille"],
+        ))
+        prepare()
+        prepare()
+        self.assertEqual(calls, ["dismiss", "initialize"])
+        display.mainBuffer.regions = [SimpleNamespace(obj=object())]
+        for field, temporary in (("isReady", False), ("passThrough", True)):
+            original = getattr(document, field)
+            setattr(document, field, temporary)
+            prepare()
+            setattr(document, field, original)
+        focus._values["isProtected"] = True
+        prepare()
+        focus._values["isProtected"] = False
+        display.enabled = False
+        prepare()
+        display.enabled = True
+        display.getTether = lambda: "review"
+        prepare()
+        self.assertEqual(calls, ["dismiss", "initialize"])
+        display.getTether = lambda: "focus"
+        prepare()
+        self.assertEqual(calls, ["dismiss", "initialize", "initialize"])
+
+    def test_display_preparation_is_not_attributed_to_the_navigation_key(self):
+        state = self.namespace["STATE"]
+        self.namespace["COMMAND_BY_ID"]["nextHeading"] = ("nextHeading", "heading", "h", "h")
+        self.namespace["prepare_browse_braille"] = lambda: state.append("braille", "before navigation")
+        self.namespace["emulate"] = lambda key: state.append("braille", "new heading")
+        clock = FastClock()
+        self.namespace["time"] = clock
+        state.condition.wait = clock.sleep
+        result = invoke_from_http(lambda: self.namespace["execute_action"]("nextHeading", ""))
+        self.assertEqual(state.events[0]["causalCommand"], "event")
+        self.assertEqual(result["beforeSequence"], state.events[0]["sequence"])
+        self.assertEqual([e["text"] for e in result["events"] if e["kind"] == "braille"], ["new heading"])
 
     def native_object(self, label):
         return NativeObject(
