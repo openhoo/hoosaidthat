@@ -796,8 +796,28 @@ export class ScreenReaderSession {
     if (before.cursorMode !== 'browse' && before.cursorMode !== 'focus') {
       throw new Error(`screen-reader cursor mode is unavailable; expected ${expected}`);
     }
-    await this.act('toggleFocusMode');
-    const after = await this.client.state();
+    const toggle = await this.act('toggleFocusMode');
+    let after = await this.client.state();
+    if (after.cursorMode === expected) return;
+    // Replacing a focused edit can put the reader back in browse mode between
+    // the initial state read and the physical toggle. Only correct the toggle
+    // if the event stream confirms this order; never repeat uncertain input.
+    const modeChange = toggle.events.find(event => event.kind === 'mode' &&
+      event.command === 'toggleFocusMode' && event.reason !== 'automaticFocusMode' &&
+      event.mode === before.cursorMode);
+    if (!toggle.timedOut && modeChange && after.cursorMode === before.cursorMode) {
+      const { events } = await this.client.readEvents(before.lastSequence, { timeoutMs: 1, quietMs: 1 });
+      const automaticChange = events.some(event => event.kind === 'mode' &&
+        event.mode === expected && event.reason === 'automaticFocusMode' &&
+        event.sequence < modeChange.sequence);
+      if (automaticChange) {
+        after = await this.client.state();
+        if (after.cursorMode === before.cursorMode) {
+          await this.act('toggleFocusMode');
+          after = await this.client.state();
+        }
+      }
+    }
     if (after.cursorMode !== expected) {
       throw new Error(
         `screen-reader cursor mode did not become ${expected}; got ${after.cursorMode ?? 'unknown'}`,
