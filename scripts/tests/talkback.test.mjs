@@ -63,6 +63,12 @@ test('TalkBack driver discards stale output and sends native Android gestures', 
   await driver.press('readCurrent');
   assert(calls.some(args => args.includes('readCurrent') && args.includes('instrument')));
   await assert.rejects(() => driver.press([[57, 999]]), /unsupported/);
+  for (const boundary of ['documentStart', 'documentEnd']) {
+    const before = calls.length;
+    await driver.press(nativeCommands('talkback')[boundary]);
+    assert(calls.slice(before).some(args => args.includes(boundary) && args.includes('instrument')));
+    assert(!calls.slice(before).some(args => args.includes('input') || args.includes('event')));
+  }
   history = header;
   await assert.rejects(() => driver.drain(), /lost events/);
   assert.throws(() => driver.assertReady(), /lost events/);
@@ -83,7 +89,8 @@ test('TalkBack uses its default Alt keymap and advertises no NVDA-only commands'
   assert.deepEqual(commands.nextLandmark, [[57, 32]]);
   assert.deepEqual(commands.nextLink, [[57, 40]]);
   assert.deepEqual(commands.nextButton, [[57, 30]]);
-  assert.deepEqual(commands.documentStart, [[57, 113, 21]]);
+  assert.equal(commands.documentStart, 'documentStart');
+  assert.equal(commands.documentEnd, 'documentEnd');
   assert.deepEqual(commands.sayAll, [[57, 113, 59, 66]]);
   for (const unsupported of ['nextHeading7', 'brailleRoute', 'toggleFocusMode', 'find', 'nextRadioButton']) {
     assert.equal(commands[unsupported], undefined);
@@ -152,4 +159,26 @@ test('TalkBack health refuses wrong reader, capture boundary or operating system
     changes = invalid;
     await assert.rejects(() => client.health(), /invalid TalkBack health/);
   }
+});
+
+test('overlapping Android health checks cannot interrupt a native focus action', async () => {
+  let enter, release;
+  const entered = new Promise(resolve => { enter = resolve; });
+  const gate = new Promise(resolve => { release = resolve; });
+  const actions = [];
+  const adb = async (...args) => {
+    if (!args.includes('instrument')) return '123';
+    const action = args[args.indexOf('action') + 1];
+    actions.push(action);
+    if (action === 'focusWeb') { enter(); await gate; }
+    return 'INSTRUMENTATION_RESULT: hst=' + JSON.stringify(state) + '\n';
+  };
+  const focus = androidProbe(adb, 'focusWeb');
+  await entered;
+  const health = androidProbe(adb, 'state');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(actions, ['focusWeb']);
+  release();
+  await Promise.all([health, focus]);
+  assert.deepEqual(actions, ['focusWeb', 'state']);
 });

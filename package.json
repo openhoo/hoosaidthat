@@ -1,6 +1,6 @@
 {
   "name": "@openhoo/hoosaidthat",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Real screen-reader testing fixtures, assertions, and visual evidence for Playwright.",
   "type": "module",
   "license": "MIT",
@@ -78,6 +78,9 @@
     "scripts/native/token.mjs",
     "scripts/native/talkback.mjs",
     "scripts/native/android-devtools.mjs",
+    "scripts/native/android-emulator.mjs",
+    "scripts/native/prepare-talkback-emulator.mjs",
+    "scripts/native/emulator-keyboard.mjs",
     "oracle/android-talkback",
     "!oracle/android-talkback/build",
     "scripts/native-screen-reader.mjs",

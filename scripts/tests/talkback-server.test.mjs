@@ -14,12 +14,12 @@ async function fixture(t, reader, options = {}) {
     assertReady() { if (failure) throw failure; },
     async press(chords) { delivered.push(chords); if (!options.silent) speak('Checkout summary heading level 2'); },
     close() {},
-    ...(options.drainSpeech ? { async drain() { speak('Pending asynchronous output'); } } : {}),
+    ...(options.drain ? { drain: () => options.drain(speak) } : {}),
   };
   let foreground = true;
   let probeFailure = false;
   const bridge = await startNativeServer({ screenReader: reader, token, driver,
-    quietMs: 5, actionTimeoutMs: 50,
+    quietMs: 5, actionTimeoutMs: options.actionTimeoutMs ?? 50,
     probe: async () => {
       if (probeFailure) throw new Error('private native probe error');
       return { version: '16.0',
@@ -146,3 +146,32 @@ test('native identities and capture boundaries cannot be confused with NVDA or H
   }
 });
 
+
+
+test('TalkBack waits for a sampled speech tail before closing its command window', async t => {
+  let polls = 0;
+  const f = await fixture(t, 'talkback', { actionTimeoutMs: 250, async drain(emit) {
+    if (++polls === 2) { // first poll drained earlier events, second is the apparent quiet boundary
+      await new Promise(resolve => setTimeout(resolve, 10));
+      emit('Second utterance from the same heading');
+    }
+  } });
+  await f.client.beginSession('in-flight-tail', false);
+  const result = await f.client.perform('nextHeading');
+  assert.equal(result.timedOut, false);
+  assert.deepEqual(result.events.filter(e => e.kind === 'speech').map(e => [e.command, e.text]), [
+    ['nextHeading', 'Checkout summary heading level 2'], ['nextHeading', 'Second utterance from the same heading'],
+  ]);
+  assert(polls >= 3, 'must observe a quiet sample after receiving additional speech');
+});
+
+test('TalkBack does not claim quiet when its final poll crosses the action deadline', async t => {
+  let polls = 0;
+  const f = await fixture(t, 'talkback', { actionTimeoutMs: 50, async drain(emit) {
+    if (++polls === 2) { await new Promise(resolve => setTimeout(resolve, 60)); emit('Late speech'); }
+  } });
+  await f.client.beginSession('late-poll', false);
+  const result = await f.client.perform('nextHeading');
+  assert.equal(result.timedOut, true);
+  assert(result.events.some(e => e.kind === 'speech' && e.text === 'Late speech' && e.command === 'nextHeading'));
+});

@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { sendEmulatorChord } from './emulator-keyboard.mjs';
 import { nativeCommands } from './commands.mjs';
 
 const execute = promisify(execFile);
@@ -14,18 +15,31 @@ export function createAdb(serial, executable = process.env.HST_ADB_BIN ?? 'adb')
   return async (...args) => {
     try {
       const { stdout } = await execute(executable, ['-s', serial, ...args], {
-        timeout: 10000, maxBuffer: MAX_CAPTURE, encoding: 'buffer', windowsHide: true,
+        timeout: args[0] === 'install' ? 120000 : 10000, maxBuffer: MAX_CAPTURE, encoding: 'buffer', windowsHide: true,
       });
       return stdout;
-    } catch {
+    } catch (error) {
+      if (args[0] === 'install') {
+        const status = /\b(INSTALL_(?:FAILED|PARSE_FAILED)_[A-Z0-9_]+)\b/.exec(String(error.stderr) + String(error.stdout))?.[1];
+        throw new Error(status ?? (error.killed ? 'adb install timed out' : 'adb install failed'));
+      }
       // adb errors may include private synthesis output. Do not reflect them.
       throw new Error('Android adb command failed; check the selected device, installed helper APKs and USB authorization');
     }
   };
 }
 
-export async function androidProbe(adb, action = 'state') {
-  if (!['state', 'focusWeb', 'readCurrent'].includes(action)) throw new Error('unsupported Android probe action');
+const focusActions = new Set(['focusWeb', 'readCurrent', 'documentStart', 'documentEnd']);
+// Only one instrumentation can target this APK at a time. Overlapping
+// health polls otherwise kill an active focus command on a slow emulator.
+const probeQueues = new WeakMap();
+export function androidProbe(adb, action = 'state') {
+  const pending = (probeQueues.get(adb) ?? Promise.resolve()).then(() => probeOnce(adb, action));
+  probeQueues.set(adb, pending.catch(() => {}));
+  return pending;
+}
+async function probeOnce(adb, action) {
+  if (action !== 'state' && !focusActions.has(action)) throw new Error('unsupported Android probe action');
   await adb('shell', 'pidof', 'com.google.android.marvin.talkback');
   const output = (await adb('shell', 'am', 'instrument', '-w', '-r', '-e', 'action', action, PROBE)).toString('utf8');
   const match = /^INSTRUMENTATION_RESULT: hst=(.+)\r?$/m.exec(output);
@@ -83,6 +97,8 @@ export class TalkBackCapture {
   }
 }
 
+export class TalkBackCaptureError extends Error {}
+
 export class TalkBackDriver {
   capture = 'talkback-tts-output';
   outputSource = 'android-TextToSpeechService.onSynthesizeText:talkback-uid';
@@ -93,17 +109,18 @@ export class TalkBackDriver {
   pending;
   timer;
 
-  static async connect(adb) {
-    const driver = new TalkBackDriver(adb);
+  static async connect(adb, options) {
+    const driver = new TalkBackDriver(adb, options);
     await androidProbe(adb);
     // Validate existing history but never replay stale speech into a new session.
-    driver.reader.read(await driver.history());
+    try { driver.reader.read(await driver.history()); }
+    catch { throw new TalkBackCaptureError('TalkBack speech capture is unavailable or invalid'); }
     driver.schedule();
     return driver;
   }
-  constructor(adb) { this.adb = adb; }
+  constructor(adb, { emulatorKeyboard = false } = {}) { this.adb = adb; this.emulatorKeyboard = emulatorKeyboard; }
   history() { return this.adb('exec-out', 'run-as', CAPTURE, 'cat', 'files/speech.jsonl'); }
-  onSpeech(listener) { this.listeners.add(listener); }
+  onSpeech(listener) { this.listeners.add(listener); return () => this.listeners.delete(listener); }
   assertReady() {
     if (this.fault) throw this.fault;
     if (this.closed) throw new Error('TalkBack driver is closed');
@@ -119,18 +136,19 @@ export class TalkBackDriver {
       this.pending = (async () => {
         try {
           this.reader.read(await this.history(), text => { for (const listener of this.listeners) listener(text); });
-        } catch { this.fault = new Error('TalkBack speech capture failed or lost events; restart the bridge'); throw this.fault; }
+        } catch { this.fault = new TalkBackCaptureError('TalkBack speech capture failed or lost events; restart the bridge'); throw this.fault; }
       })().finally(() => { this.pending = undefined; });
     }
     await this.pending;
   }
   async press(command) {
     this.assertReady();
-    if (command === 'focusWeb' || command === 'readCurrent') await androidProbe(this.adb, command);
+    if (focusActions.has(command)) await androidProbe(this.adb, command);
     else {
       const allowed = Object.values(nativeCommands('talkback')).some(value => JSON.stringify(value) === JSON.stringify(command));
       if (!allowed) throw new Error('unsupported TalkBack key gesture');
       for (const chord of command) {
+        if (this.emulatorKeyboard) { await sendEmulatorChord(this.adb, chord); continue; }
         await this.adb('shell', 'input', 'keyboard', chord.length === 1 ? 'keyevent' : 'keycombination',
           ...(chord.length === 1 ? [] : ['-t', '50']), ...chord.map(String));
       }

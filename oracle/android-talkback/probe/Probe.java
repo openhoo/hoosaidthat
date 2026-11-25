@@ -40,11 +40,24 @@ public final class Probe extends Instrumentation {
       boolean delivered = true;
       if (!"state".equals(action)) {
         if (!browser || web == null) throw new IllegalStateException("Chrome web content must be foreground");
-        AccessibilityNodeInfo target = "focusWeb".equals(action) ? web : root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY);
-        if (target == null) throw new IllegalStateException("no native accessibility focus");
-        if (!"focusWeb".equals(action) && !"readCurrent".equals(action)) throw new IllegalArgumentException("unsupported probe action");
-        if ("readCurrent".equals(action)) target.performAction(AccessibilityNodeInfo.ACTION_CLEAR_ACCESSIBILITY_FOCUS);
-        delivered = target.performAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS);
+        AccessibilityNodeInfo current = root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY);
+        if ("focusWeb".equals(action)) {
+          // Already in this document: moving focus again can reset the reader's
+          // position, and Android rejects a redundant ACTION_ACCESSIBILITY_FOCUS.
+          delivered = insideWeb(current) || web.performAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS);
+        } else if ("documentStart".equals(action) || "documentEnd".equals(action)) {
+          // TalkBack's first/last shortcuts span the entire Chrome window, including
+          // its address bar. Work only with native descendants of the WebView.
+          AccessibilityNodeInfo target = boundary(web, "documentEnd".equals(action), 0);
+          if (target == null) throw new IllegalStateException("Chrome document has no readable accessibility node");
+          if (!target.isVisibleToUser()) target.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SHOW_ON_SCREEN.getId());
+          if (target.equals(current)) target.performAction(AccessibilityNodeInfo.ACTION_CLEAR_ACCESSIBILITY_FOCUS);
+          delivered = target.performAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS);
+        } else if ("readCurrent".equals(action)) {
+          if (current == null) throw new IllegalStateException("no native accessibility focus");
+          current.performAction(AccessibilityNodeInfo.ACTION_CLEAR_ACCESSIBILITY_FOCUS);
+          delivered = current.performAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS);
+        } else { throw new IllegalArgumentException("unsupported probe action"); }
         if (!delivered) throw new IllegalStateException("native accessibility focus action was rejected");
       }
       AccessibilityNodeInfo focused = root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY);
@@ -74,6 +87,30 @@ public final class Probe extends Instrumentation {
       if (child != null) { AccessibilityNodeInfo found = findWeb(child, depth + 1); if (found != null) return found; }
     }
     return null;
+  }
+  private static AccessibilityNodeInfo boundary(AccessibilityNodeInfo node, boolean end, int depth) {
+    if (depth > 80) throw new IllegalStateException("Chrome accessibility tree is too deep");
+    // The root is the WebView itself. Do not mistake its page title for content.
+    if (!end && depth > 0 && readable(node)) return node;
+    int count = node.getChildCount();
+    for (int n = 0; n < count; n++) {
+      AccessibilityNodeInfo child = node.getChild(end ? count - 1 - n : n);
+      if (child != null) {
+        AccessibilityNodeInfo found = boundary(child, end, depth + 1);
+        if (found != null) return found;
+      }
+    }
+    return end && depth > 0 && readable(node) ? node : null;
+  }
+  private static boolean readable(AccessibilityNodeInfo node) {
+    if ("android.webkit.WebView".contentEquals(node.getClassName() == null ? "" : node.getClassName())) return false;
+    if (node.isHeading() || node.isClickable() || node.isEditable() || node.isPassword() || node.isScreenReaderFocusable() || node.isFocusable()) return true;
+    // Determine only whether a label exists. Field values and password text are
+    // never read. None of the node text is returned or used as speech evidence.
+    CharSequence label = node.getContentDescription();
+    if (label != null && label.length() > 0) return true;
+    CharSequence text = node.getText();
+    return text != null && text.length() > 0;
   }
   private static boolean insideWeb(AccessibilityNodeInfo node) {
     for (int depth = 0; node != null && depth < 80; depth++, node = node.getParent()) {
