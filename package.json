@@ -1,6 +1,6 @@
 {
   "name": "@openhoo/hoosaidthat",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Real screen-reader testing fixtures, assertions, and visual evidence for Playwright.",
   "type": "module",
   "license": "MIT",

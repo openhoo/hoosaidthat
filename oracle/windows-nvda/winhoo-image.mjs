@@ -3,30 +3,27 @@ import { createHash, randomBytes } from 'node:crypto';
 import {
   chmodSync,
   existsSync,
-  lstatSync,
   mkdirSync,
   mkdtempSync,
-  readFileSync,
   renameSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
+import { readRuntimeFile } from './runtime-file.mjs';
 
 const files = ['winhoo_desktop.py', 'desktop/runtime.json', 'desktop/owner-watchdog.sh'];
 const bundlePath = '/usr/share/winhoo/controller';
 
-function validateBundle(root, version) {
+function validateBundle(root, version, privateCopy = false) {
   const hashes = {};
+  let manifest;
   for (const name of files) {
     const path = join(root, name);
-    const stat = lstatSync(path);
-    if (!stat.isFile() || stat.size < 1 || stat.size > 1024 * 1024) {
-      throw new Error(`Invalid WinHoo controller bundle file: ${name}`);
-    }
-    hashes[name] = createHash('sha256').update(readFileSync(path)).digest('hex');
+    const bytes = readRuntimeFile(path, 1024 * 1024, { privateCopy });
+    hashes[name] = createHash('sha256').update(bytes).digest('hex');
+    if (name === 'desktop/runtime.json') manifest = JSON.parse(bytes.toString('utf8'));
   }
-  const manifest = JSON.parse(readFileSync(join(root, 'desktop/runtime.json'), 'utf8'));
   if (
     manifest.schema !== 'winhoo.desktop-runtime/1' ||
     manifest.version !== version ||
@@ -100,7 +97,7 @@ export function resolveWinhooRuntime({
   const root = join(cacheRoot, id.slice(7));
   const cached = () => {
     const hashes = validateBundle(root, version);
-    const marker = JSON.parse(readFileSync(join(root, 'image.json'), 'utf8'));
+    const marker = JSON.parse(readRuntimeFile(join(root, 'image.json'), 4096).toString('utf8'));
     if (marker.image !== id || JSON.stringify(marker.hashes) !== JSON.stringify(hashes)) {
       throw new Error(`WinHoo controller cache is damaged: ${root}`);
     }
@@ -118,9 +115,8 @@ export function resolveWinhooRuntime({
     mkdirSync(join(temporary, 'desktop'), { mode: 0o700 });
     for (const file of files) {
       invoke(['cp', `${name}:${bundlePath}/${file}`, join(temporary, file)]);
-      chmodSync(join(temporary, file), 0o600);
     }
-    const hashes = validateBundle(temporary, version);
+    const hashes = validateBundle(temporary, version, true);
     writeFileSync(join(temporary, 'image.json'), `${JSON.stringify({ image: id, hashes })}\n`, {
       mode: 0o600,
     });

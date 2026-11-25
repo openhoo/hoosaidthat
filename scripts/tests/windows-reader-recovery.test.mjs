@@ -16,7 +16,7 @@ function dockerFixture(t, reader) {
   });
   for (const p of ['shared/bootstrap', 'shared/secrets', 'oem']) mkdirSync(join(root, p), { recursive: true });
   writeFileSync(join(root, 'winhoo-docker.json'), JSON.stringify(config));
-  writeFileSync(join(root, 'shared/secrets/control-token'), 'fixture');
+  writeFileSync(join(root, 'shared/secrets/control-token'), 'a'.repeat(64) + '\n', { mode: 0o600 });
   writeFileSync(join(root, 'oem/runtime-lock.json'), JSON.stringify({ jaws: { version: '1' }, chrome: { version: '2' } }));
   const preload = join(root, 'fixture.mjs');
   writeFileSync(preload, `
@@ -94,6 +94,15 @@ test('failed JAWS provisioning remains inspectable and cannot mask live recovery
   utimesSync(receipt, new Date(0), new Date(0));
   assert.equal(JSON.parse(run('status', false).stdout).previousBoot, true);
   assert.match(run('wait', false).stderr, /readiness timed out: bridge is starting/);
+});
+
+test('JAWS readiness rejects a malformed control credential before contacting the bridge', (t) => {
+  const {root, run} = dockerFixture(t, 'jaws');
+  writeFileSync(join(root, 'shared/secrets/control-token'), 'invalid fixture credential');
+  const result = run('wait', true);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Invalid JAWS control token file/);
+  assert.doesNotMatch(result.stderr, /invalid fixture credential/);
 });
 
 test('only public NVDA parity delegates readiness to its bundled runner', t => {

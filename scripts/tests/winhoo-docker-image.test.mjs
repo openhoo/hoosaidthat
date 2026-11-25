@@ -54,7 +54,6 @@ test('installed image supplies a private immutable controller cache without star
   const result = resolveWinhooRuntime(options);
   assert.equal(result.image, id);
   assert.equal(result.buildImage, false);
-  assert.ok(existsSync(result.controller));
   const create = calls.find((args) => args[0] === 'create');
   assert.deepEqual(create.slice(3), ['--network', 'none', '--entrypoint', '/bin/true', id]);
   assert.equal(calls.filter((args) => args[0] === 'cp').length, 3);

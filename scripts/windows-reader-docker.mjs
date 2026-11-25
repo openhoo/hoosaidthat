@@ -24,6 +24,7 @@ import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
+import { readRuntimeFile } from '../oracle/windows-nvda/runtime-file.mjs';
 import { resolveWinhooRuntime } from '../oracle/windows-nvda/winhoo-image.mjs';
 
 const project = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -520,6 +521,13 @@ export function jawsReady(health, chrome, lock) {
     /^\/devtools\/browser\/[^/]+$/.test(socket.pathname)
   );
 }
+function jawsControlToken(root) {
+  // init creates exactly 48 random bytes encoded as base64url, plus a newline.
+  const bytes = readRuntimeFile(join(root, 'shared/secrets/control-token'), 66, { ownerOnly: true });
+  const match = /^([A-Za-z0-9_-]{64})(?:\r?\n)?$/u.exec(bytes.toString('utf8'));
+  if (!match) throw new Error('Invalid JAWS control token file.');
+  return match[1];
+}
 async function jsonEndpoint(url, headers, signal) {
   const response = await fetch(url, { headers, signal, redirect: 'error' });
   if (!response.ok) {
@@ -581,7 +589,7 @@ async function wait(reader, root, config, expected, signal, retryAfter, nativeCh
     if (code !== 0) throw new Error('NVDA guest readiness failed (exit ' + code + ')');
     return;
   }
-  const token = readFileSync(join(root, 'shared/secrets/control-token'), 'utf8').trim();
+  const token = jawsControlToken(root);
   const lock = json(join(config.oem, 'runtime-lock.json'));
   const limit = Number(process.env.HST_JAWS_READY_TIMEOUT_MS ?? 4 * 60 * 60 * 1000);
   if (!Number.isSafeInteger(limit) || limit < 1000 || limit > 4 * 60 * 60 * 1000)
@@ -909,7 +917,7 @@ export async function runWindowsReader(reader, argv) {
         HST_NATIVE_TOKEN_FILE: tokenFile,
         [prefix + '_CONTROL_ENDPOINT']: 'http://127.0.0.1:' + controlPort,
         [prefix + '_CDP_ENDPOINT']: 'http://127.0.0.1:' + cdpPort,
-        [prefix + '_CONTROL_TOKEN']: readFileSync(tokenFile, 'utf8').trim(),
+        [prefix + '_CONTROL_TOKEN']: reader === 'jaws' ? jawsControlToken(root) : readFileSync(tokenFile, 'utf8').trim(),
         ...(reader === 'nvda' ? { HST_NVDA_CONTAINER_ID: instance.id } : {}),
       };
       const code = await child(args[1], args.slice(2), childEnv, abort.signal);
