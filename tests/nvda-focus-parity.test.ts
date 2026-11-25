@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import test from 'node:test';
 import { runInNewContext } from 'node:vm';
+import { expect } from '@playwright/test';
 
 // npm test builds the shipped parity suite before running unit tests. Execute
 // its actual preparation functions and semantic map without registering a
@@ -18,11 +19,13 @@ function section(startMarker: string, endMarker: string, includeEnd = false): st
 
 const parity = runInNewContext([
   section('const reviewActions = ', ';', true),
+  section('async function restoreNativeSelection(', 'async function focusFixture('),
   section('async function focusFixture(', 'async function prepareAction('),
   section('async function prepareAction(', 'async function installFixture('),
   section('const semanticExpectations = new Map(', '\n]);', true),
-  '({ focusFixture, prepareAction, semanticExpectations })',
-].join('\n'), { coverage: JSON.parse(readFileSync(resolve('oracle/parity/coverage.json'), 'utf8')) }) as {
+  '({ restoreNativeSelection, focusFixture, prepareAction, semanticExpectations })',
+].join('\n'), { expect, coverage: JSON.parse(readFileSync(resolve('oracle/parity/coverage.json'), 'utf8')) }) as {
+  restoreNativeSelection(enabled: SelectionResult, toggle: () => Promise<SelectionResult>): Promise<void>;
   focusFixture(screenReader: unknown, locator: unknown, label?: string): Promise<unknown>;
   prepareAction(page: unknown, screenReader: unknown, action: string): Promise<void>;
   semanticExpectations: Map<string, RegExp>;
@@ -81,4 +84,35 @@ test('activateWithSpace parity continues to prepare its checkbox target', async 
   assert.deepEqual(await preparedFocus('activateWithSpace'), {
     role: 'checkbox', name: 'Parity check',
   });
+});
+
+interface SelectionResult { speech: string; timedOut: boolean; braille?: string }
+
+test('an unsupported, stale or unconfirmed enable never sends a second native-selection toggle', async () => {
+  const enabled = 'Native app selection mode enabled';
+  const invalid: SelectionResult[] = [
+    { speech: 'Native selection mode unsupported in this document', timedOut: false },
+    { speech: '', braille: enabled, timedOut: false },
+    { speech: enabled, timedOut: true },
+    { speech: enabled + ' Native app selection mode disabled', timedOut: false },
+  ];
+  let toggles = 0;
+  for (const result of invalid) {
+    await assert.rejects(parity.restoreNativeSelection(result, async () => { toggles++; return result; }));
+  }
+  assert.equal(toggles, 0);
+});
+
+test('confirmed native selection is reset once and requires the matching spoken result', async () => {
+  for (const [enabled, disabled] of [
+    ['Native app selection mode enabled', 'Native app selection mode disabled'],
+    ['Nativer Auswahlmodus aktiviert', 'Nativer Auswahlmodus deaktiviert'],
+  ] as const) {
+    let toggles = 0;
+    const observed = { speech: enabled, timedOut: false };
+    await parity.restoreNativeSelection(observed, async () => { toggles++; return { speech: disabled, timedOut: false }; });
+    assert.equal(toggles, 1);
+    await assert.rejects(parity.restoreNativeSelection(observed, async () => ({ speech: enabled, timedOut: false })));
+    await assert.rejects(parity.restoreNativeSelection(observed, async () => ({ speech: disabled, timedOut: true })));
+  }
 });

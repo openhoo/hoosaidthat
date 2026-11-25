@@ -4,6 +4,7 @@ import {
   SCREEN_READER_ACTIONS,
   test,
   type ScreenReaderAction,
+  type ScreenReaderObservation,
   type ScreenReaderSession,
 } from "@openhoo/hoosaidthat";
 
@@ -369,7 +370,12 @@ actionsTest(
         ),
         `${action} completed evidence`,
       ).toBe(true);
-      assertSemanticOutput(action, observation.speech, observation.braille);
+      if (action === "toggleNativeSelection") {
+        await restoreNativeSelection(observation, () => screenReader.act("toggleNativeSelection"));
+        await page.goto("about:blank");
+      } else {
+        assertSemanticOutput(action, observation.speech, observation.braille);
+      }
       if (action === "braillePreviousLine" || action === "brailleNextLine") {
         const target = action === "braillePreviousLine" ? "Alpha beta" : "Omega last";
         expect(observation.brailleEvents.map(frame => frame.text.trim()), action).toContain(target);
@@ -433,12 +439,6 @@ actionsTest(
         await screenReader.act("toggleFocusMode");
       if (action === "toggleSingleLetterNavigation") {
         await screenReader.act("toggleSingleLetterNavigation");
-      }
-      if (action === "toggleNativeSelection") {
-        const reset = await screenReader.act("toggleNativeSelection");
-        expect(reset.timedOut).toBe(false);
-        expect(reset.speech).toMatch(/Native app selection mode disabled|Nativer Auswahlmodus deaktiviert/iu);
-        await page.goto("about:blank");
       }
       if (action === "leftMouseLock" || action === "rightMouseLock") {
         await screenReader.act(action);
@@ -616,6 +616,21 @@ function assertSemanticOutput(
         /Not in a table cell|Nicht in einer Tabellenzelle|no (?:next|previous|more) |not found|0 matches|Keine (?:nächste|vorherige)|nicht gefunden/iu,
       );
   }
+}
+
+// Sending this toggle a second time is a reset only if NVDA confirmed the first transition.
+async function restoreNativeSelection(
+  enabled: Pick<ScreenReaderObservation, "timedOut" | "speech">,
+  toggle: () => Promise<Pick<ScreenReaderObservation, "timedOut" | "speech">>,
+): Promise<void> {
+  expect(enabled.timedOut, "native selection enable timed out").toBe(false);
+  expect(enabled.speech, "NVDA must announce that native selection is enabled")
+    .toMatch(semanticExpectations.get("toggleNativeSelection")!);
+  const disabled = await toggle();
+  expect(disabled.timedOut, "native selection disable timed out").toBe(false);
+  expect(disabled.speech, "NVDA must announce that native selection is disabled")
+    .toBe(enabled.speech === "Native app selection mode enabled"
+      ? "Native app selection mode disabled" : "Nativer Auswahlmodus deaktiviert");
 }
 
 async function focusFixture(
@@ -1276,7 +1291,7 @@ const semanticExpectations = new Map<ScreenReaderAction, RegExp>([
   ],
   [
     "toggleNativeSelection",
-    /Native app selection mode enabled|Nativer Auswahlmodus aktiviert/iu,
+    /^(?:Native app selection mode enabled|Nativer Auswahlmodus aktiviert)$/u,
   ],
   ["previousTableColumn", /Column A/iu],
   ["nextTableColumn", /Column B/iu],
