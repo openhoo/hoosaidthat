@@ -299,13 +299,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          source scripts/release-index-digest.sh
           promote() {
-            source_ref=$1
-            destination_ref=$2
-            expected_digest=${source_ref##*@}
+            local source_ref=$1 destination_ref=$2
             docker buildx imagetools create --tag "$destination_ref" "$source_ref"
-            actual_digest=$(docker buildx imagetools inspect "$destination_ref" | awk '$1 == "Digest:" { print $2; exit }')
-            test "$actual_digest" = "$expected_digest"
+            verify_index_digest "$destination_ref" "${source_ref##*@}"
           }
           promote "$ENGINE_CANDIDATE" "${ENGINE_IMAGE}:${RELEASE_VERSION}"
           promote "$HOOVDA_CANDIDATE" "${HOOVDA_IMAGE}:${RELEASE_VERSION}"
