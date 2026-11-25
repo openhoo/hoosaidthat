@@ -3,6 +3,8 @@
 On November 25, 2026, both tests in
 [`talkback.spec.mjs`](../../oracle/android-talkback/talkback.spec.mjs) passed
 on a cold managed AVD and on a separately prepared, already running emulator.
+The final cold run of commit `3235fb1` passed both tests in 43.4 seconds
+after setup; the repository suite passed all 445 tests.
 
 | Component | Tested configuration |
 | --- | --- |
@@ -38,7 +40,7 @@ asynchronous observation are separate tests.
 | --- | --- |
 | Start of document | “Start”, “heading 1” |
 | Next heading | “Checkout summary”, “heading 2” |
-| Next button | “Continue checkout”, “button”, “Press select to activate” |
+| Next button | “Continue checkout”, “button”, “Press Alt + ENTER to activate” |
 | Activate current element | “Checkout is ready” |
 | Observe an asynchronous status update after a Playwright click | “Continue checkout”, “button”, “Checkout is ready”, “Press select to activate” |
 
