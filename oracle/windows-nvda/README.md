@@ -240,11 +240,12 @@ atomic per-file replacement. It then validates the staged `sshd_config`,
 restarts OpenSSH out of band, and waits for key-only control to recover. Restart
 the screenreader runtime after plugin or runtime-script changes.
 
-Locale commands atomically select the process locale, restart the owned
-NVDA/Chrome task, and publish the active locale in runtime status. NVDA starts
-with its official `--lang` override; session creation rejects a requested locale
-that does not match the running NVDA process. `nvda:windows:parity` performs this
-switch and attestation for every matrix cell automatically.
+The `locale-en-US` and `locale-de-DE` commands record the requested language
+and start the supervisor if it is stopped. When the language changes on a
+running desktop, the supervisor asks its NVDA process to exit, waits for it,
+and starts NVDA with the new `--lang` value. Chrome and its open tabs stay
+in place. Session creation checks the active NVDA language and rejects a
+mismatch. `nvda:windows:parity` checks the language for each matrix profile.
 
 Client key, pinned `known_hosts`, VM disk, and Windows password stay outside the
 repository under `~/VMs/hoosaidthat-nvda`. A changed guest host key fails closed;
