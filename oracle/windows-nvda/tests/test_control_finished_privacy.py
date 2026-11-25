@@ -9,16 +9,18 @@ import base64
 import hashlib
 import io
 import json
+import threading
 from types import SimpleNamespace
 import unittest
 from unittest import mock
+from urllib.parse import parse_qs
 
 from test_control_privacy import CELLS, PLUGIN_PATH, SENTINEL, load_capture
 
 
 def load_finish_handler(namespace):
     tree = ast.parse(PLUGIN_PATH.read_text(encoding="utf-8"))
-    required = {"require_session", "finish_session", "artifact", "json_response"}
+    required = {"require_session", "events", "finish_session", "artifact", "json_response"}
     handler = next(
         node for node in tree.body
         if isinstance(node, ast.ClassDef) and node.name == "Handler"
@@ -37,6 +39,7 @@ def load_finish_handler(namespace):
     ))
     namespace.update(
         json=json,
+        parse_qs=parse_qs,
         hashlib=hashlib,
         NVDA_VERSION="public-test-version",
         PROFILE="public-test-profile",
@@ -136,6 +139,42 @@ class FinishedArtifactPrivacyTests(unittest.TestCase):
             if event["kind"] == "braille":
                 self.assertEqual(base64.b64decode(event["brailleCells"]), bytes(CELLS))
                 self.assertEqual(event["brailleCursor"], 1)
+
+    def test_read_from_zero_begins_at_the_session_boundary(self):
+        self.state.append("speech", "first test")
+        self.state.active_session["startSequence"] = self.state.sequence
+        self.state.append("speech", "second test")
+        self.handler.events(self.session_id, "after=0&timeoutMs=1000&quietMs=1")
+        result = json.loads(self.handler.wfile.getvalue())
+        self.assertEqual([event["text"] for event in result["events"]], ["second test"])
+        self.assertFalse(result["timedOut"])
+
+    def test_finish_wakes_a_pending_read_before_another_test_can_be_observed(self):
+        waiting = threading.Event()
+        original_wait = self.state.condition.wait
+
+        def wait(timeout):
+            waiting.set()
+            return original_wait(timeout)
+
+        poll = load_finish_handler(self.namespace)
+        errors = []
+
+        def read():
+            try:
+                poll.events(self.session_id, "after=0&timeoutMs=30000&quietMs=5000")
+            except PermissionError as error:
+                errors.append(str(error))
+
+        with mock.patch.object(self.state.condition, "wait", wait):
+            thread = threading.Thread(target=read, daemon=True)
+            thread.start()
+            self.assertTrue(waiting.wait(2))
+            self.handler.finish_session(self.session_id)
+            thread.join(2)
+        self.assertFalse(thread.is_alive(), "closing the session must release its event reader")
+        self.assertEqual(errors, ["session is not active"])
+        self.assertEqual(poll.wfile.getvalue(), b"")
 
 
 if __name__ == "__main__":

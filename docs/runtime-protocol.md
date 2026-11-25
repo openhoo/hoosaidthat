@@ -217,3 +217,14 @@ Native AX focus and VoiceOver cursor membership are verified before web entry is
 accepted. Captured speech uses `screenReaderOutput` provenance; lifecycle events
 remain separate. Finished event artifacts are bound to their SHA-256 digests.
 See [the VoiceOver guide](native-screen-readers.md) for setup and qualification.
+
+
+## JAWS on Windows
+
+The `jaws-web` adapter uses protocol v2. Health identifies the Windows process, browser,
+`screenReader: "jaws"` and `capture: "jaws-speech-output"`. Speech events come from
+`interaction.capturedOutput` in JAWS Remote Command Server. Actions advertised by
+`GET /v2/actions` are delivered as emulated keyboard input. The Windows UI Automation
+probe identifies which browser document has keyboard focus; its names do not become
+speech events. The adapter does not expose NVDA settings, braille cells or original
+audio. See [Windows readers in Docker](windows-readers.md).

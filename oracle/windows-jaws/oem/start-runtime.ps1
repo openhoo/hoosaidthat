@@ -1,0 +1,46 @@
+# Interactive scheduled task, owned only by the dedicated HstJaws Windows user.
+$ErrorActionPreference = 'Stop'
+if ($env:USERNAME -ine 'HstJaws') { throw 'Start the JAWS bridge only in the interactive HstJaws desktop' }
+$root = 'C:\HooSaidThat-JAWS'
+$mutex = [Threading.Mutex]::new($false, 'Local\HoosaidthatJawsRuntime')
+if (!$mutex.WaitOne(0)) { exit 0 }
+try {
+  $lock = Get-Content "$root\runtime-lock.json" -Raw | ConvertFrom-Json
+  $directory = Join-Path $env:ProgramFiles ('Freedom Scientific\JAWS\' + $lock.jaws.version.Split('.')[0])
+  $jfw = Join-Path $directory 'jfw.exe'
+  if (!(Test-Path $jfw) -or !(Test-Path "$directory\RemoteCommandServer.dll")) { throw 'JAWS with the Remote Command Server component is required' }
+  $info = (Get-Item $jfw).VersionInfo
+  $actual = '{0}.{1}.{2}.{3}' -f $info.ProductMajorPart,$info.ProductMinorPart,$info.ProductBuildPart,$info.ProductPrivatePart
+  if ($actual -cne $lock.jaws.version) { throw 'Installed JAWS version differs from the runtime lock' }
+  $session = (Get-Process -Id $PID).SessionId
+  $existing = @(Get-Process -Name jfw -ErrorAction SilentlyContinue | Where-Object SessionId -eq $session)
+  if ($existing.Count -gt 1 -or ($existing.Count -eq 1 -and $existing[0].Path -ine $jfw)) { throw 'A different JAWS installation is already running' }
+  # An existing /default process without RCS is left alone. Its operator can exit it and restart this task.
+  if (!$existing) { Start-Process $jfw -ArgumentList '/default /startrcs' }
+  $deadline = [DateTime]::UtcNow.AddMinutes(2)
+  do {
+    $listener = @(Get-NetTCPConnection -LocalPort 9002 -State Listen -ErrorAction SilentlyContinue)
+    $jawsPid = @(Get-Process -Name jfw -ErrorAction SilentlyContinue | Where-Object { $_.SessionId -eq $session -and $_.Path -ieq $jfw } | ForEach-Object { $_.Id })
+    if ($listener.Count -gt 0 -and @($listener | Where-Object { $_.OwningProcess -in $jawsPid }).Count -eq $listener.Count) { break }
+    if ([DateTime]::UtcNow -ge $deadline) { throw 'JAWS did not open its Remote Command Server; check the interactive desktop, license or demonstration prompt, and /startrcs' }
+    Start-Sleep -Seconds 1
+  } while ($true)
+  $node = "$root\node\node-v$($lock.node.version)-win-x64\node.exe"
+  $chrome = "$root\browser\chrome-win64\chrome.exe"
+  $script = "$root\app\node_modules\@openhoo\hoosaidthat\scripts\native-screen-reader.mjs"
+  & $node $script --screen-reader jaws --token-file '\\host.lan\Data\secrets\control-token' --browser-executable $chrome *>> "$root\runtime.log"
+  if ($LASTEXITCODE -ne 0) { throw 'JAWS bridge exited; see runtime.log in the guest' }
+} catch {
+  $reason = $_.Exception.Message
+  Add-Content "$root\runtime.log" $reason
+  # The host can report an actionable startup failure even when the loopback API never opened.
+  # Publish only controlled diagnoses; arbitrary native process output stays in the guest.
+  $publicReason = if ($reason -like 'JAWS did not open its Remote Command Server*') { 'JAWS did not open its Remote Command Server; inspect licensing, /startrcs and the interactive desktop' }
+    elseif ($reason -like 'Installed JAWS version differs*') { 'Installed JAWS version differs from the runtime lock' }
+    else { 'JAWS bridge failed to start; inspect C:\HooSaidThat-JAWS\runtime.log in the dedicated guest' }
+  $status = '\\host.lan\Data\bootstrap\status.json'
+  $receipt = @{ phase='failed'; error=$publicReason; utc=[DateTime]::UtcNow.ToString('o') } | ConvertTo-Json -Compress
+  [IO.File]::WriteAllText("$status.tmp", $receipt, [Text.UTF8Encoding]::new($false))
+  Move-Item "$status.tmp" $status -Force
+  throw
+} finally { $mutex.ReleaseMutex(); $mutex.Dispose() }

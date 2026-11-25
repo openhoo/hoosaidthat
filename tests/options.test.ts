@@ -102,7 +102,7 @@ test('rejects unsafe timeout and viewport values', () => {
 
 test('rejects invalid runtime options received from JavaScript', () => {
   assert.throws(() => resolveOptions({ runtime: 'invalid' as never }), /runtime/);
-  assert.throws(() => resolveOptions({ screenReader: 'jaws' as never }), /screenReader/);
+  assert.throws(() => resolveOptions({ screenReader: 'unsupported-reader' as never }), /screenReader/);
   assert.throws(() => resolveOptions({ image: ' ' }), /image/);
   assert.throws(() => resolveOptions({ containerEngineArgs: [''] }), /containerEngineArgs/);
   assert.throws(

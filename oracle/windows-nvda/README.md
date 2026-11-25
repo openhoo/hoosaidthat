@@ -277,6 +277,17 @@ keeps visible page controls reachable by NVDA's mouse commands. The native
 core test starts with a displaced window and checks that NVDA actually clicks
 the fixture button.
 
+If Windows gives Explorer focus between tests, the adapter restores the
+supervised Chrome window before sending F6. It checks the process identity
+against the browser that owns the test's CDP listener. If several Chrome
+windows are visible and none is active, it reports the ambiguity instead of
+sending F6 to an unrelated window. Run `sync` and restart the runtime when
+upgrading an existing guest so the supervisor and NVDA plugin agree.
+
+Event polls and braille refreshes are scoped to each test. An unchanged
+braille frame is recorded again at the start of a new session, and moving
+the cursor within the same text produces a new frame.
+
 Live-region semantics use the object handler or the exact native IA2 report
 callback's queued presentation call. The latter retains reported politeness and
 processed speech across queue delay, without matching unrelated earlier speech.

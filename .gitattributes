@@ -1,0 +1,2 @@
+# Stage the vendor's settings with Windows line endings on every controller.
+oracle/windows-jaws/oem/additionalsettings.ini text eol=crlf

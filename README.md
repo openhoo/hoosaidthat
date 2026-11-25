@@ -2,7 +2,9 @@
 
 Normal Playwright tests with real screenreader actions and evidence. Supported
 adapters: Orca protocol v1, independent Go HooVDA protocol v2, and real NVDA
-2026.1.1 through an externally managed Windows reference oracle.
+2026.1.1 through a Windows reference oracle. The Windows runner also has a JAWS
+2027 adapter for English desktop speech. See [Windows readers in Docker](docs/windows-readers.md)
+for setup and the scope of the checks.
 HooVDA targets the immutable `nvda-web-2026.1.1` web profile through pinned
 public behavior assertions and native-Linux observations; it contains no NVDA
 code or binary.
@@ -345,22 +347,22 @@ for each observed output plus a JSON manifest. Each result includes its ordered
 
 ## Options
 
-- `screenReader`: `orca`, `hoovda`, or `nvda`; default `orca`
-- `profile`: `nvda-web-2026.1.1`
-- `locale`: `en-US` or `de-DE`
-- `keyboardLayout`: `desktop` or `laptop`
+- `screenReader`: `orca` (default), `hoovda`, `nvda`, `jaws`, `voiceover`, or `talkback`
+- `profile`: selected from the reader; Windows uses `nvda-web-2026.1.1` or `jaws-web`
+- `locale`: `en-US` or `de-DE` (JAWS: `en-US` only)
+- `keyboardLayout`: `desktop` or `laptop` (JAWS: `desktop` only)
 - `runtime`: `auto`, `docker`, `podman`, or `external`
 - `image`: OCI image reference
 - `recording`: `on` or `off`; default `on`
 - `startupTimeoutMs`: default `60000`, maximum `600000`
-- `actionTimeoutMs`: default `5000` for Orca and `15000` for HooVDA/NVDA; maximum `30000`
+- `actionTimeoutMs`: default `5000` for Orca and `15000` for protocol v2 readers; maximum `30000`
 - `quietMs`: default `300`, maximum `5000`
 - `overlay`: default `true`
 - `actionScreenshots`: `off` or `on`
 - `webReport`: `off` or `on`; default `off`; portable annotated HTML per test
 - `keepContainer`: retain stopped container for diagnosis
 - `viewport`: Xvfb dimensions; default `1280x720`
-- `containerEngineArgs`: extra trusted Docker/Podman arguments; rejected for external NVDA
+- `containerEngineArgs`: extra trusted Docker/Podman arguments; rejected for native Windows, macOS and Android readers
 
 Externally managed runtimes require `controlEndpoint`, `cdpEndpoint`, and
 `controlToken`. Plain HTTP endpoints must target host loopback; use HTTPS for
@@ -375,6 +377,11 @@ is stronger than asserting against a browser accessibility snapshot. It still
 does not certify WCAG conformance, simulate disabled people's lived experience,
 or prove unrestricted NVDA parity. The passing provenance-pinned gate proves
 only its declared browser-profile cases.
+
+JAWS reports the speech text that its Remote Command Server emits. The
+Windows runner checks the JAWS and Chrome versions before starting the suite.
+The JAWS adapter currently supports US English and the desktop layout; it
+does not capture braille or record the synthesizer's audio.
 
 Real NVDA evidence is captured at `speech.extensions.pre_speechQueued` and
 `braille.pre_writeCells`. It proves NVDA presentation requests and braille
@@ -412,7 +419,7 @@ passed heading navigation, keyboard button focus and asynchronous live-region
 speech checks from an installed package. Last-phrase sampling may miss identical
 consecutive phrases and phrases replaced between polls. This is bounded smoke
 coverage. See [the VoiceOver guide](docs/native-screen-readers.md) for setup,
-configuration, capture limits and qualification details. JAWS remains deferred.
+configuration, capture limits and qualification details.
 
 ## VoiceOver in iPhone Simulator
 

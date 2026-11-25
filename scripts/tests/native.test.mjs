@@ -56,14 +56,14 @@ async function fixture(t, reader, options = {}) {
     blur() { foreground = false; } };
 }
 
-for (const reader of ['voiceover', 'talkback']) {
+for (const reader of ['voiceover', 'talkback', 'jaws']) {
   test(`${reader}: HTTP client round trip preserves native identity, actual driver speech and artifact integrity`, async t => {
     const f = await fixture(t, reader);
     const health = await f.client.health();
     assert.equal(health.screenReader.name, reader);
     assert.equal(health.profile, `${reader}-web`);
-    assert.equal(health.platform, reader === 'talkback' ? 'android' : 'macos');
-    assert.equal(health.screenReader.capture, reader === 'talkback' ? 'talkback-tts-output' : 'voiceover-speech-output');
+    assert.equal(health.platform, reader === 'talkback' ? 'android' : reader === 'jaws' ? 'windows' : 'macos');
+    assert.equal(health.screenReader.capture, reader === 'talkback' ? 'talkback-tts-output' : reader === 'jaws' ? 'jaws-speech-output' : 'voiceover-speech-output');
     const caps = await f.client.capabilities();
     assert(caps.actions.some(({ action }) => action === 'nextHeading'));
     assert(!caps.actions.some(({ action }) => action === 'brailleRoute'));

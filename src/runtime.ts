@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:net';
 import { randomBytes } from 'node:crypto';
-import type { ResolvedScreenReaderOptions, RuntimeEndpoints } from './types.js';
+import { requiresNativeHost, type ResolvedScreenReaderOptions, type RuntimeEndpoints } from './types.js';
 
 const MAX_COMMAND_OUTPUT = 64 * 1024;
 
@@ -48,7 +48,7 @@ export class ScreenReaderRuntime {
     if (options.screenReader === 'nvda') {
       throw new Error('NVDA requires an externally managed Windows reference VM');
     }
-    if (options.screenReader === 'voiceover' || options.screenReader === 'talkback') {
+    if (requiresNativeHost(options.screenReader)) {
       throw new Error(`${options.screenReader} requires an externally managed native host`);
     }
 
@@ -159,7 +159,7 @@ export function buildContainerArguments(
     cdpPort: number;
   },
 ): string[] {
-  if (options.screenReader === 'nvda' || options.screenReader === 'voiceover' || options.screenReader === 'talkback') {
+  if (requiresNativeHost(options.screenReader)) {
     throw new Error(`${options.screenReader.toUpperCase()} cannot be launched as a Linux container`);
   }
   return [
@@ -255,11 +255,11 @@ async function waitUntilReady(
           ((screenReader === 'orca' &&
             controlValue.protocolVersion === 1 &&
             controlValue.status === 'ready') ||
-            ((screenReader === 'hoovda' || screenReader === 'nvda' || screenReader === 'voiceover' || screenReader === 'talkback') &&
+            ((screenReader === 'hoovda' || requiresNativeHost(screenReader)) &&
               controlValue.protocolVersion === '2.0' &&
               controlValue.status === 'ok' &&
               controlValue.ready === true &&
-              ((screenReader !== 'nvda' && screenReader !== 'voiceover' && screenReader !== 'talkback') || controlValue.screenReader === screenReader))) &&
+              (!requiresNativeHost(screenReader) || controlValue.screenReader === screenReader))) &&
           isObject(cdpValue) &&
           typeof cdpValue.webSocketDebuggerUrl === 'string' &&
           cdpValue.webSocketDebuggerUrl.length > 0

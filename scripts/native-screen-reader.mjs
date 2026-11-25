@@ -24,7 +24,8 @@ export function parseArguments(args) {
     }
     options[name] = value;
   }
-  if (!['voiceover'].includes(options['screen-reader'])) throw new Error('--screen-reader voiceover is required');
+  if (!['jaws', 'voiceover'].includes(options['screen-reader'])) throw new Error('--screen-reader jaws or voiceover is required');
+  if (options['screen-reader'] === 'jaws' && options.locale && options.locale !== 'en-US') throw new Error('JAWS currently requires an en-US desktop');
   if (!options['token-file']) throw new Error('--token-file is required (an existing token is reused; a new token is written privately)');
   for (const [key, fallback] of [['control-port', '3003'], ['cdp-port', '9225']]) {
     options[key] ??= fallback;
@@ -55,10 +56,10 @@ async function main() {
   const options = parseArguments(process.argv.slice(2));
   if (options.help) {
     console.log(`Usage: hoosaidthat-native --doctor
-       hoosaidthat-native --screen-reader voiceover --token-file PATH [options]
+       hoosaidthat-native --screen-reader jaws|voiceover --token-file PATH [options]
 
-Run on a dedicated Mac desktop or in a macOS guest with VoiceOver running and
-Chrome installed. The bridge brings Chrome to the front and sends real keyboard
+Run in the dedicated Windows guest with JAWS Remote Command Server enabled,
+or on a Mac with VoiceOver running and Chrome installed. The bridge brings Chrome to the front and sends real keyboard
 input. VoiceOver uses its native scripting API; --at-driver-endpoint selects
 the experimental AT Driver transport.
 Node.js 22+ is required for this host command. See docs/native-screen-readers.md.
@@ -111,14 +112,18 @@ Use one Playwright worker per native desktop. Ctrl+C closes the owned browser.`)
     // Attest native identity first; cursor membership is required after entry.
     const state = await nativeProbe(screenReader, browserPid);
     if (!state.browserWindowActive) throw new Error('the owned browser must be foreground in the interactive desktop');
-    driver = options['at-driver-endpoint']
-      ? await ATDriver.connect(options['at-driver-endpoint'], screenReader)
+    const atEndpoint = options['at-driver-endpoint'] ?? (screenReader === 'jaws' ? 'ws://127.0.0.1:9002/session' : undefined);
+    driver = atEndpoint
+      ? await ATDriver.connect(atEndpoint, screenReader)
       : await VoiceOverDriver.connect();
+    if (screenReader === 'jaws' && driver.capabilities.atVersion !== state.version) {
+      throw new Error('JAWS AT Driver version differs from the running JAWS process');
+    }
     // Establish actual web interaction before readiness. An AX-focused web
     // area alone can leave VoiceOver's cursor in Chrome's toolbar. Native Tab
     // enters our button and supplies a verifiable native announcement.
     let captured = false;
-    driver.onSpeech(text => { if (/^screen reader ready\b/i.test(text.trim())) captured = true; });
+    driver.onSpeech(text => { if ((screenReader === 'jaws' ? /\bscreen reader ready\b/i : /^screen reader ready\b/i).test(text.trim())) captured = true; });
     // Allow the reader's initial browser/window announcement to settle before
     // the first Tab. Twenty gestures also cover a full Chrome toolbar cycle.
     await new Promise(resolve => setTimeout(resolve, 1000));
@@ -131,7 +136,7 @@ Use one Playwright worker per native desktop. Ctrl+C closes the owned browser.`)
       }
     }
     if (!captured) {
-      throw new Error('the native reader did not announce the bootstrap web control; check scripting, keyboard navigation and the configured capture voice');
+      throw new Error('the native reader did not announce the bootstrap web control; check scripting, keyboard navigation and the JAWS Remote Command Server');
     }
     // The sampled announcement can arrive after another Tab has already moved
     // keyboard focus into browser chrome. Establish and verify native web

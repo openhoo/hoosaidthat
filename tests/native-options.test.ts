@@ -4,7 +4,7 @@ import { resolveOptions } from '../src/types.js';
 import { buildContainerArguments } from '../src/runtime.js';
 import { isRuntimeBootstrapURL, NATIVE_BOOTSTRAP_URL } from '../src/bootstrap.js';
 
-for (const screenReader of ['voiceover'] as const) {
+for (const screenReader of ['voiceover', 'jaws'] as const) {
   test(`${screenReader} has a distinct external native profile`, () => {
     const options = resolveOptions({ screenReader, controlEndpoint: 'http://127.0.0.1:3003',
       cdpEndpoint: 'http://127.0.0.1:9225', controlToken: 'native-test-token' });
@@ -23,4 +23,10 @@ for (const screenReader of ['voiceover'] as const) {
 test('native bootstrap retirement matches only the exact owned page', () => {
   assert.equal(isRuntimeBootstrapURL(NATIVE_BOOTSTRAP_URL), true);
   assert.equal(isRuntimeBootstrapURL(NATIVE_BOOTSTRAP_URL + 'unowned'), false);
+});
+
+
+test('JAWS rejects unsupported locales and layouts before connecting to the guest', () => {
+  assert.throws(() => resolveOptions({ screenReader: 'jaws', locale: 'de-DE' }), /locale "en-US"/);
+  assert.throws(() => resolveOptions({ screenReader: 'jaws', keyboardLayout: 'laptop' }), /keyboardLayout "desktop"/);
 });

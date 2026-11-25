@@ -105,6 +105,10 @@ function Start-Chrome {
                 -not $info -or $info.CommandLine -notmatch $profileArg) {
                 throw 'The Chrome listener belongs to a different program, profile, or session'
             }
+            Write-AtomicJson (Join-Path $env:ProgramData 'HooSaidThat\browser-owner.json') ([ordered]@{
+                pid = $browser.Id
+                createdFileTime = $browser.StartTime.ToUniversalTime().ToFileTimeUtc()
+            })
             return $browser
         }
         Start-Sleep -Milliseconds 250

@@ -16,7 +16,38 @@ export function nativeCommands(screenReader) {
     activateWithSpace: [[k.space]], escape: [[k.escape]],
     returnToPage: [[k.f6]], stopSpeech: [[k.control]],
   };
-  if (screenReader !== 'voiceover') throw new Error('native reader must be voiceover or talkback');
+  if (screenReader === 'jaws') {
+    const commands = {
+      ...common, activate: [[k.enter]],
+      readCurrent: [[k.insert, k.tab]], reportTitle: [[k.insert, 't']],
+      reportCurrentLine: [[k.insert, k.up]], sayAll: [[k.insert, k.down]],
+      documentStart: [[k.control, k.home]], documentEnd: [[k.control, k.end]],
+      nextLine: [[k.down]], previousLine: [[k.up]],
+      nextCharacter: [[k.right]], previousCharacter: [[k.left]],
+      nextWord: [[k.control, k.right]], previousWord: [[k.control, k.left]],
+      nextTableColumn: [[k.control, k.alt, k.right]],
+      previousTableColumn: [[k.control, k.alt, k.left]],
+      nextTableRow: [[k.control, k.alt, k.down]],
+      previousTableRow: [[k.control, k.alt, k.up]],
+      elementsList: [[k.insert, k.f3]],
+    };
+    // JAWS K is PlaceMarker, and C includes list boxes and tree views.
+    // Neither shortcut implements a generic link-only or combo-box-only action.
+    const quick = {
+      Heading: 'h', Landmark: 'r', Button: 'b', FormField: 'f',
+      RadioButton: 'a', Entry: 'e', Image: 'g', ListItem: 'i', List: 'l',
+      Frame: 'm', NotLinkBlock: 'n', Article: 'o', Paragraph: 'p',
+      Table: 't', UnvisitedLink: 'u', VisitedLink: 'v', Checkbox: 'x',
+      Separator: '-', Tab: "'",
+    };
+    for (let level = 1; level <= 6; level++) quick[`Heading${level}`] = String(level);
+    for (const [name, key] of Object.entries(quick)) {
+      commands[`next${name}`] = [[key]];
+      commands[`previous${name}`] = [[k.shift, key]];
+    }
+    return commands;
+  }
+  if (screenReader !== 'voiceover') throw new Error('native reader must be jaws, voiceover or talkback');
   const vo = [k.control, k.alt];
   const commands = {
     ...common, activate: [[...vo, k.space]],

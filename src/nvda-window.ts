@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test';
 
-/** Keep a newly adopted Windows test window reachable by NVDA's physical pointer. */
+/** Keep the test browser inside the Windows desktop work area. */
 export async function fitNvdaWindow(page: Page): Promise<void> {
   const cdp = await page.context().newCDPSession(page);
   try {
@@ -10,7 +10,7 @@ export async function fitNvdaWindow(page: Page): Promise<void> {
     if (bounds.windowState && bounds.windowState !== 'normal') return;
     const { left, top, width, height } = bounds;
     if (left === undefined || top === undefined || width === undefined || height === undefined) {
-      throw new Error('Chrome did not report the NVDA test window bounds');
+      throw new Error('Chrome did not report the Windows test window bounds');
     }
     const work = await page.evaluate(() => {
       const display = window.screen as Screen & { availLeft: number; availTop: number };
