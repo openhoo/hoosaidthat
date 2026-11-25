@@ -40,6 +40,9 @@ jobs:
       - name: Verify status heartbeat after process and session diagnostics
         shell: powershell
         run: ./oracle/windows-nvda/tests/test_ssh_dispatch_status.ps1
+      - name: Verify NVDA locale changes preserve the owned browser
+        shell: powershell
+        run: ./oracle/windows-nvda/tests/test_locale_switch.ps1
 
   hoovda-image:
     runs-on: ubuntu-latest

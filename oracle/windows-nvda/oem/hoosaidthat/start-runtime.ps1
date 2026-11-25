@@ -63,11 +63,58 @@ function Start-Nvda([string]$Locale) {
     if (Test-Path -LiteralPath 'C:\ProgramData\HooSaidThat\winhoo-owner.json') {
         $env:HST_NVDA_LOCAL_ONLY = '1'
     }
-    return Start-Process -FilePath $Nvda -ArgumentList @(
+    $reader = Start-Process -FilePath $Nvda -ArgumentList @(
         "--config-path=$NvdaConfig",
         "--lang=$nvdaLanguage",
         "--log-file=$NvdaLog"
     ) -WindowStyle Hidden -PassThru
+    # Retain this process identity even if it exits before the next supervisor poll.
+    $null = $reader.Handle
+    return $reader
+}
+
+function Initialize-NvdaWindow {
+    if ('HstNvdaWindow' -as [type]) { return }
+    $null = Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+public static class HstNvdaWindow {
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
+    public static extern IntPtr FindWindowW(string className, string title);
+    [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr window, out uint pid);
+    [DllImport("user32.dll", ExactSpelling = true, SetLastError = true)]
+    private static extern bool PostMessageW(IntPtr window, uint message, UIntPtr wParam, IntPtr lParam);
+    public static void RequestQuit(int pid) {
+        // NVDA 2026.1.1 source/nvda.pyw:122-150. Its --quit escalates to TerminateProcess.
+        IntPtr window = FindWindowW("wxWindowClassNR", "NVDA");
+        uint owner;
+        if (window == IntPtr.Zero || GetWindowThreadProcessId(window, out owner) == 0 || owner != (uint)pid)
+            throw new InvalidOperationException("The NVDA quit window does not belong to the managed reader");
+        if (!PostMessageW(window, 0x0012 /* WM_QUIT */, UIntPtr.Zero, IntPtr.Zero))
+            throw new Win32Exception(Marshal.GetLastWin32Error(), "Could not request graceful NVDA shutdown");
+    }
+}
+'@
+}
+
+function Switch-NvdaLocale([Diagnostics.Process]$Reader, [Diagnostics.Process]$Browser, [string]$Locale) {
+    # Both Process objects hold handles acquired when the supervisor accepted their identities.
+    $session = [Diagnostics.Process]::GetCurrentProcess().SessionId
+    if ($Reader.HasExited -or $Reader.SessionId -ne $session -or $Reader.Path -ine $Nvda) {
+        throw 'The managed NVDA process changed before the language switch'
+    }
+    if ($Browser.HasExited -or $Browser.SessionId -ne $session -or $Browser.Path -ine $Chrome) {
+        throw 'The managed Chrome browser changed before the language switch'
+    }
+    [HstNvdaWindow]::RequestQuit($Reader.Id)
+    if (-not $Reader.WaitForExit(12000)) { throw 'NVDA did not exit gracefully within 12 seconds on language change' }
+    # Starting NVDA can terminate an existing instance. Refuse a different reader on this desktop.
+    if ([HstNvdaWindow]::FindWindowW('wxWindowClassNR','NVDA') -ne [IntPtr]::Zero) {
+        throw 'Another NVDA window appeared during the language switch'
+    }
+    if ($Browser.HasExited) { throw 'The managed Chrome browser exited during the language switch' }
+    return Start-Nvda $Locale
 }
 
 function Set-OracleBrowserForeground([Diagnostics.Process]$Browser) {
@@ -136,6 +183,7 @@ function Start-Chrome {
         foreach ($browserId in $listeners) {
             $browser = Get-Process -Id $browserId -ErrorAction SilentlyContinue
             if (-not $browser) { continue }
+            $null = $browser.Handle
             $info = Get-CimInstance Win32_Process -Filter "ProcessId = $browserId"
             $profileArg = '(?:^|\s)"?--user-data-dir="?' + [regex]::Escape($ChromeProfile) + '"?(?:\s|$)'
             if ($browser.SessionId -ne $session -or $browser.Path -ine $Chrome -or
@@ -171,18 +219,16 @@ try {
     while (-not $RuntimeStop.WaitOne(0)) {
         $requested = Get-RequestedLocale
         if ($requested -cne $runtimeLocale) {
-            # Closing the foreground browser hands native keyboard input to
-            # Explorer. Only the reader needs a new language.
-            if (-not $nvdaProcess.HasExited) {
-                $nvdaProcess.Kill()
-                if (-not $nvdaProcess.WaitForExit(12000)) { throw 'Previous reader did not exit on language change' }
-            }
-            $nvdaProcess = Start-Nvda $requested
+            Initialize-NvdaWindow
+            $previousReader = $nvdaProcess
+            $nvdaProcess = Switch-NvdaLocale $previousReader $chromeProcess $requested
+            $previousReader.Dispose()
+            if ($chromeProcess.HasExited) { throw 'The managed Chrome browser exited during the language switch' }
             $runtimeLocale = $requested
-        } elseif ($nvdaProcess.HasExited) {
-            $nvdaProcess = Start-Nvda $runtimeLocale
+        } else {
+            if ($nvdaProcess.HasExited) { $nvdaProcess = Start-Nvda $runtimeLocale }
+            if ($chromeProcess.HasExited) { $chromeProcess = Start-Chrome }
         }
-        if ($chromeProcess.HasExited) { $chromeProcess = Start-Chrome }
         Write-AtomicJson $StatusPath ([ordered]@{
             schema = 'hoosaidthat.nvda-runtime-status'
             version = 1
