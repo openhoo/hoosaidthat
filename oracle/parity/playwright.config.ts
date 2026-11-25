@@ -3,7 +3,6 @@ import { defineConfig } from '@openhoo/hoosaidthat';
 const locale = process.env.SCREEN_READER_LOCALE;
 const keyboardLayout = process.env.SCREEN_READER_KEYBOARD_LAYOUT;
 const requestedAdapter = process.env.HOOSAIDTHAT_PARITY_ADAPTER ?? 'nvda';
-const controlToken = process.env.HOOSAIDTHAT_NVDA_CONTROL_TOKEN;
 const artifactRun = process.env.HOOSAIDTHAT_NVDA_PARITY_ARTIFACTS === '1';
 if (locale !== 'en-US' && locale !== 'de-DE') throw new Error('parity locale is required');
 if (keyboardLayout !== 'desktop' && keyboardLayout !== 'laptop')
@@ -11,7 +10,7 @@ if (keyboardLayout !== 'desktop' && keyboardLayout !== 'laptop')
 if (requestedAdapter !== 'nvda' && requestedAdapter !== 'hoovda') {
   throw new Error('HOOSAIDTHAT_PARITY_ADAPTER must be "nvda" or "hoovda"');
 }
-if (requestedAdapter === 'nvda' && !controlToken) throw new Error('NVDA control token is required');
+if (requestedAdapter === 'nvda' && !process.env.HOOSAIDTHAT_NVDA_CONTROL_TOKEN) throw new Error('NVDA control token is required');
 
 const screenReaderOptions =
   requestedAdapter === 'nvda'
@@ -22,7 +21,6 @@ const screenReaderOptions =
           ? 'http://127.0.0.1:3000' : 'http://127.0.0.1:3002',
         cdpEndpoint: process.env.HST_WINHOO_GUEST && process.platform === 'win32'
           ? 'http://127.0.0.1:9223' : 'http://127.0.0.1:9224',
-        controlToken: controlToken!,
       }
     : {
         screenReader: 'hoovda' as const,

@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { resolveOptions } from '../src/types.js';
 import { buildContainerArguments } from '../src/runtime.js';
 import { isRuntimeBootstrapURL, NATIVE_BOOTSTRAP_URL } from '../src/bootstrap.js';
@@ -29,4 +32,17 @@ test('native bootstrap retirement matches only the exact owned page', () => {
 test('JAWS rejects unsupported locales and layouts before connecting to the guest', () => {
   assert.throws(() => resolveOptions({ screenReader: 'jaws', locale: 'de-DE' }), /locale "en-US"/);
   assert.throws(() => resolveOptions({ screenReader: 'jaws', keyboardLayout: 'laptop' }), /keyboardLayout "desktop"/);
+});
+
+test('the worker reads the current token from the private file when connecting', (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'hst-native-token-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const controlTokenFile = join(directory, 'credential');
+  const options = { screenReader: 'jaws' as const, controlEndpoint: 'http://127.0.0.1:3004',
+    cdpEndpoint: 'http://127.0.0.1:9226', controlTokenFile };
+  for (const token of ['fixture-first', 'fixture-rotated']) {
+    writeFileSync(controlTokenFile, token + '\n', { mode: 0o600 });
+    assert.equal(resolveOptions(options).controlToken, token);
+    assert(!JSON.stringify(options).includes(token));
+  }
 });

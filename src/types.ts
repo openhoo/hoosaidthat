@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import type { Locator } from '@playwright/test';
 
@@ -277,7 +278,10 @@ export interface ScreenReaderOptions {
   image?: string;
   controlEndpoint?: string;
   cdpEndpoint?: string;
+  /** For programmatic use. Playwright reporters can serialize literal project options. */
   controlToken?: string;
+  /** Path to a private token file. The worker reads it when it connects. */
+  controlTokenFile?: string;
   startupTimeoutMs?: number;
   actionTimeoutMs?: number;
   quietMs?: number;
@@ -604,6 +608,7 @@ export function resolveOptions(options: ScreenReaderOptions = {}): ResolvedScree
       (requiresNativeHost(screenReader) ? process.env[`HOOSAIDTHAT_${screenReader.toUpperCase()}_CDP_ENDPOINT`] : undefined),
     controlToken:
       options.controlToken ??
+      (options.controlTokenFile ? readFileSync(options.controlTokenFile, 'utf8').trim() : undefined) ??
       (requiresNativeHost(screenReader) ? process.env[`HOOSAIDTHAT_${screenReader.toUpperCase()}_CONTROL_TOKEN`] : undefined),
     startupTimeoutMs: options.startupTimeoutMs ?? 60_000,
     actionTimeoutMs:

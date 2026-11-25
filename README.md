@@ -145,7 +145,7 @@ export default defineConfig({
 });
 ```
 
-Real NVDA uses the same fixtures against external endpoints:
+Real NVDA uses the same fixtures against external endpoints. Set `HOOSAIDTHAT_NVDA_CONTROL_TOKEN` in the worker environment or pass a private file path as `controlTokenFile`. Playwright reporters can export literal values from project options.
 
 ```ts
 export default defineConfig({
@@ -158,7 +158,6 @@ export default defineConfig({
       keyboardLayout: 'desktop',
       controlEndpoint: 'http://127.0.0.1:3002',
       cdpEndpoint: 'http://127.0.0.1:9224',
-      controlToken: process.env.HOOSAIDTHAT_NVDA_CONTROL_TOKEN,
     },
   },
 });
@@ -369,8 +368,7 @@ for each observed output plus a JSON manifest. Each result includes its ordered
 - `viewport`: Xvfb dimensions; default `1280x720`
 - `containerEngineArgs`: extra trusted Docker/Podman arguments; rejected for native Windows, macOS and Android readers
 
-Externally managed runtimes require `controlEndpoint`, `cdpEndpoint`, and
-`controlToken`. Plain HTTP endpoints must target host loopback; use HTTPS for
+Externally managed runtimes require control and CDP endpoints and a control token. Supply the token in the reader’s environment variable or use `controlTokenFile` in Playwright projects. Plain HTTP endpoints must target host loopback; use HTTPS for
 non-loopback endpoints, normally behind an SSH tunnel or equivalent secure
 transport.
 

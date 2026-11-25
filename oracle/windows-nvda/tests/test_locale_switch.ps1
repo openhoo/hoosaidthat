@@ -45,10 +45,25 @@ $testDir = Join-Path ([IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString('N')
 $null = [IO.Directory]::CreateDirectory($testDir)
 function Start-Fixture([string]$Signal) {
     $literal = $Signal.Replace("'", "''")
-    $body = "while (-not [IO.File]::Exists('$literal')) { Start-Sleep -Milliseconds 80 }"
+    $ready = "$Signal.ready"
+    $body = "[IO.File]::WriteAllText('$literal.ready.tmp', [string]`$PID); [IO.File]::Move('$literal.ready.tmp', '$literal.ready'); while (-not [IO.File]::Exists('$literal')) { Start-Sleep -Milliseconds 80 }"
     $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($body))
     $p = Start-Process -FilePath $binary -ArgumentList @('-NoProfile','-NonInteractive','-EncodedCommand',$encoded) -PassThru
-    $null = $p.Handle; return $p
+    try {
+        # On Windows a new process can have a handle before its executable path is available.
+        # A child-written marker proves this specific fixture reached its wait loop.
+        $null = $p.Handle
+        $timer = [Diagnostics.Stopwatch]::StartNew()
+        while (-not [IO.File]::Exists($ready) -or [IO.File]::ReadAllText($ready) -ne [string]$p.Id) {
+            if ($p.HasExited -or $timer.Elapsed.TotalSeconds -gt 15) { throw 'Fixture did not signal readiness' }
+            Start-Sleep -Milliseconds 50
+        }
+        return $p
+    } catch {
+        if (-not $p.HasExited) { $p.Kill(); $p.WaitForExit() }
+        $p.Dispose()
+        throw
+    }
 }
 function Start-Nvda([string]$Locale) {
     if ($Locale -ne 'de-DE' -or -not $reader.HasExited -or $reader.ExitCode -ne 0 -or $browser.HasExited) { throw 'Replacement started before graceful exit, or Chrome changed' }
@@ -57,8 +72,9 @@ function Start-Nvda([string]$Locale) {
 try {
     foreach ($case in 'success','foreign','timeout','readerGone','chromeGone','chromeLost','foreignReplacement','wrongBinary') {
         $signal = Join-Path $testDir $case
-        $reader = Start-Fixture $signal; $browser = Start-Fixture ($signal+'-chrome')
+        $reader=$null; $browser=$null
         try {
+            $reader = Start-Fixture $signal; $browser = Start-Fixture ($signal+'-chrome')
             $Nvda=$binary; $Chrome=$binary; $script:starts=0
             [FixtureNvdaWindow]::ExpectedPid=$reader.Id; [FixtureNvdaWindow]::Signal=$signal
             [FixtureNvdaWindow]::Requests=0; [FixtureNvdaWindow]::Foreign=$case -eq 'foreign'; [FixtureNvdaWindow]::Timeout=$case -eq 'timeout'
@@ -81,7 +97,13 @@ try {
             if ($case -eq 'timeout' -and ($reader.HasExited -or $browser.HasExited -or $time.Elapsed.TotalSeconds -lt 11 -or $time.Elapsed.TotalSeconds -gt 25)) { throw 'Timeout killed a process or missed its deadline' }
             if ($case -in 'readerGone','chromeGone','wrongBinary' -and [FixtureNvdaWindow]::Requests -ne 0) { throw 'Sent a quit message without verifying both owners' }
             if ($case -eq 'foreign' -and ($reader.HasExited -or $browser.HasExited)) { throw 'Wrong owner was disturbed' }
-        } finally { foreach ($p in $reader,$browser) { if (-not $p.HasExited) { $p.Kill(); $p.WaitForExit() }; $p.Dispose() } }
+        } finally {
+            foreach ($p in $reader,$browser) {
+                if ($null -eq $p) { continue }
+                if (-not $p.HasExited) { $p.Kill(); $p.WaitForExit() }
+                $p.Dispose()
+            }
+        }
     }
 } finally { [IO.Directory]::Delete($testDir,$true) }
 Write-Output 'Verified graceful replacement, timeout, wrong owner, lost processes and no unsafe relaunch.'
