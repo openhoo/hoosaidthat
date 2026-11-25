@@ -26,7 +26,7 @@ test('packaged checks load from another cwd and write reports only in fresh priv
   const cwd = mkdtempSync(join(tmpdir(), 'windows reader checks '));
   t.after(() => rmSync(cwd, { recursive: true, force: true }));
   const tokenFile = join(cwd, 'fixture-token');
-  writeFileSync(tokenFile, 'fixture-private-credential', { mode: 0o600 });
+  writeFileSync(tokenFile, 'fixture-private-credential'.padEnd(43, '0'), { mode: 0o600 });
   const seen = new Set();
   for (const [reader, args, spec] of [
     ['nvda', [], 'native.spec.mjs'],

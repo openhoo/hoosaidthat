@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { closeSync, constants, fstatSync, openSync, readSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import type { Locator } from '@playwright/test';
 
@@ -553,6 +553,33 @@ export interface ScanResult {
 // reach the TTS engine over half a second apart.
 export const TALKBACK_QUIET_MS = 1500;
 
+// Accept the native bridge's token format, never the contents of an arbitrary
+// file as an Authorization header. Windows shares use ACLs, not Unix modes.
+function workerControlToken(path: string): string {
+  const flags = constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0);
+  const fd = openSync(path, flags);
+  try {
+    const stat = fstatSync(fd);
+    if (!stat.isFile() || stat.size < 32 || stat.size > 130 ||
+        (process.platform !== 'win32' && (stat.mode & 0o077) !== 0)) {
+      throw new Error('Expected a private native control token file');
+    }
+    const data = Buffer.alloc(131);
+    let length = 0;
+    while (length < data.length) {
+      const n = readSync(fd, data, length, data.length - length, null);
+      if (!n) break;
+      length += n;
+    }
+    // Every accepted byte is part of a single URL-safe token or its final EOL.
+    const match = /^([A-Za-z0-9_-]{32,128})(?:\r?\n)?$/u.exec(data.toString('utf8', 0, length));
+    if (length !== stat.size || !match || match[0].length !== length) throw new Error('Invalid native control token file');
+    return match[1]!;
+  } finally {
+    closeSync(fd);
+  }
+}
+
 export function resolveOptions(options: ScreenReaderOptions = {}): ResolvedScreenReaderOptions {
   const screenReader = options.screenReader ?? 'orca';
   if (!SCREEN_READERS.includes(screenReader)) {
@@ -608,7 +635,7 @@ export function resolveOptions(options: ScreenReaderOptions = {}): ResolvedScree
       (requiresNativeHost(screenReader) ? process.env[`HOOSAIDTHAT_${screenReader.toUpperCase()}_CDP_ENDPOINT`] : undefined),
     controlToken:
       options.controlToken ??
-      (options.controlTokenFile ? readFileSync(options.controlTokenFile, 'utf8').trim() : undefined) ??
+      (options.controlTokenFile ? workerControlToken(options.controlTokenFile) : undefined) ??
       (requiresNativeHost(screenReader) ? process.env[`HOOSAIDTHAT_${screenReader.toUpperCase()}_CONTROL_TOKEN`] : undefined),
     startupTimeoutMs: options.startupTimeoutMs ?? 60_000,
     actionTimeoutMs:

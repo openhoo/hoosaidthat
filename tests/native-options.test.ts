@@ -40,9 +40,11 @@ test('the worker reads the current token from the private file when connecting',
   const controlTokenFile = join(directory, 'credential');
   const options = { screenReader: 'jaws' as const, controlEndpoint: 'http://127.0.0.1:3004',
     cdpEndpoint: 'http://127.0.0.1:9226', controlTokenFile };
-  for (const token of ['fixture-first', 'fixture-rotated']) {
+  for (const token of ['fixture-first'.padEnd(43, '1'), 'fixture-rotated'.padEnd(43, '2')]) {
     writeFileSync(controlTokenFile, token + '\n', { mode: 0o600 });
     assert.equal(resolveOptions(options).controlToken, token);
     assert(!JSON.stringify(options).includes(token));
   }
+  writeFileSync(controlTokenFile, 'this is not a credential'.repeat(3));
+  assert.throws(() => resolveOptions(options), /Invalid native control token file/);
 });
