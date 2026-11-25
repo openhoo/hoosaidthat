@@ -179,6 +179,7 @@ function invoke(command, scenario, acceleration = 'tcg') {
         if (scenario === 'slow-sync-banner') handshake = 20_000;
         let dispatch = scenario === 'slow-status' ? 240_000 : 100;
         if (scenario.startsWith('kvm-status-')) dispatch = Number(scenario.split('-')[2]);
+        if (scenario === 'qualified-cold-inventory' && command === 'status') dispatch = 22_000;
         if (scenario === 'slow-sync-update' && command.startsWith('update ')) {
           handshake = 20_000;
           dispatch = 25_000;
@@ -321,7 +322,7 @@ function invoke(command, scenario, acceleration = 'tcg') {
     const env = { ...process.env, HST_NVDA_RUNTIME_ROOT: runtimeRoot };
     if (docker) { env.HST_NVDA_ENGINE = 'docker'; env.HST_NVDA_CONTAINER_ID = 'a'.repeat(64); }
     if (scenario.endsWith('-clamped')) env.HST_NVDA_READY_TIMEOUT_MS = '10000';
-    if (scenario.startsWith('console-')) env.HST_NVDA_QUALIFICATION = '1';
+    if (scenario.startsWith('console-') || scenario === 'qualified-cold-inventory') env.HST_NVDA_QUALIFICATION = '1';
     if (acceleration === null) delete env.HST_NVDA_ACCELERATION;
     else env.HST_NVDA_ACCELERATION = acceleration;
     const result = spawnSync(process.execPath, ['--import', pathToFileURL(preload).href, resolve(packageRoot, 'scripts/nvda-windows.mjs'), ...command], {
@@ -363,6 +364,14 @@ test('Docker sync restarts NVDA and verifies the plugin loaded by that process',
     if (exit) assert.match(result.stderr, /did not load the synchronized plugin/);
     else assert.match(result.stdout, /synchronized plugin in process 1234: [0-9a-f]{64}/);
   }
+});
+
+test('a cold retained KVM inventory can finish without overlapping SSH polls', () => {
+  const r = invoke(['wait-ssh'], 'qualified-cold-inventory', 'kvm');
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.calls.length, 1);
+  assert.equal(r.calls[0].connect, 5);
+  assert.match(r.stdout, /SSH control ready/);
 });
 
 test('Retained KVM guest reports a persistently locked sign-in screen before the boot deadline', () => {

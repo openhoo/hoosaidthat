@@ -697,10 +697,13 @@ function trySshControl(remoteCommand, deadline = Infinity) {
   } catch (error) {
     return { status: 1, stdout: '', stderr: '', error };
   }
-  // Automatic status runs the same full Windows diagnostics as manual
-  // control status. Keep its connection and outer readiness deadlines separate.
-  const fullDockerStatus = dockerGuest && process.env.HST_NVDA_ACCELERATION === 'kvm' && remoteCommand === 'status';
-  const timeout = sshTimeoutMs(remoteCommand, fullDockerStatus ? 30_000 : 15_000, deadline);
+  // The Windows status query includes CIM inventory. Keep one request in
+  // flight, capped by the remaining readiness deadline.
+  const kvmStatus = remoteCommand === 'status' && process.env.HST_NVDA_ACCELERATION === 'kvm';
+  let statusBudgetMs = 15_000;
+  if (kvmStatus && process.env.HST_NVDA_QUALIFICATION === '1') statusBudgetMs = 60_000;
+  else if (kvmStatus && dockerGuest) statusBudgetMs = 30_000;
+  const timeout = sshTimeoutMs(remoteCommand, statusBudgetMs, deadline);
   if (timeout <= 0) {
     return { status: 1, stdout: '', stderr: '', error: new Error('SSH readiness deadline exhausted') };
   }
@@ -878,9 +881,13 @@ async function finalizeGuestShutdown(expectedId) {
     if (id !== expectedId) throw new Error('NVDA container changed during guest shutdown');
     if (state === 'exited' || state === 'stopped') return;
     if (state !== 'running') throw new Error(`Cannot confirm guest shutdown: NVDA container is ${state}`);
-    if (readQemuState(guestEngine, id, deadline) === 'ended') {
-      requireRunningOracle(guestEngine, deadline, expectedId);
-      compose(['stop']);
+    if (readQemuState('podman', id, deadline) === 'ended') {
+      requireRunningOracle('podman', deadline, expectedId);
+      // Windows has shut down. Stop only its verified container wrapper without
+      // relying on a separate Compose API service or resolving a project by name.
+      execFileSync('podman', ['stop', '--time', '15', expectedId], {
+        stdio: 'inherit', timeout: Math.min(25_000, Math.max(1, deadline - Date.now())),
+      });
       console.log('NVDA oracle VM shut down; persistent state retained.');
       return;
     }

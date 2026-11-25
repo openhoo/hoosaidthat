@@ -1,0 +1,101 @@
+name: Complete the qualified VoiceOver 0.1.2 release
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: Finish GHCR promotion and stage the original 0.1.2 archive for npm MFA
+        type: boolean
+        default: false
+        required: true
+
+permissions: {}
+
+concurrency:
+  group: release-0.1.2
+  cancel-in-progress: false
+
+jobs:
+  recover:
+    if: github.repository == 'openhoo/hoosaidthat' && github.ref == 'refs/heads/main' && inputs.confirm
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    permissions:
+      contents: read
+      actions: read
+      packages: write
+      id-token: write
+    env:
+      RELEASE_VERSION: 0.1.2
+      NPM_PUBLISH_MODE: bootstrap-stage
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - name: Verify the original qualification and recover its exact archive
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/verify-recovery-012.py "$RUNNER_TEMP/recovery012"
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      - run: npm install --global npm@11.20.0
+      - name: Check the npm account and staging queue
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          source scripts/release-absence-guards.sh
+          npm whoami --registry=https://registry.npmjs.org
+          require_unused_npm_version
+      - name: Authenticate to GHCR
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+        run: printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+      - name: Keep matching tags and finish the missing Orca promotion
+        shell: bash
+        run: |
+          set -euo pipefail
+          source scripts/release-index-digest.sh
+          source scripts/release-absence-guards.sh
+          manifest="$RUNNER_TEMP/recovery012/release-candidates.json"
+          for name in engine hoovda orca; do
+            src=$(jq -er --arg name "$name" '.images[] | select(.name == $name).reference' "$manifest")
+            verify_index_digest "$src" "${src##*@}"
+          done
+          for name in engine hoovda orca; do
+            dest=$(jq -er --arg name "$name" '.images[] | select(.name == $name).versionTag' "$manifest")
+            src=$(jq -er --arg name "$name" '.images[] | select(.name == $name).reference' "$manifest")
+            if [[ "$name" != orca ]]; then
+              verify_index_digest "$dest" "${src##*@}"
+            elif ! verify_index_digest "$dest" "${src##*@}"; then
+              require_unused_image_tag "$dest"
+              docker buildx imagetools create --tag "$dest" "$src"
+            fi
+          done
+          for name in engine hoovda orca; do
+            dest=$(jq -er --arg name "$name" '.images[] | select(.name == $name).versionTag' "$manifest")
+            digest=$(jq -er --arg name "$name" '.images[] | select(.name == $name).digest' "$manifest")
+            verify_index_digest "$dest" "$digest"
+          done
+      - name: Stage the qualified tarball with this workflow's provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          source scripts/release-absence-guards.sh
+          require_unused_npm_version
+          bundle="$RUNNER_TEMP/recovery012"
+          npm stage publish "$bundle/package.tgz" --registry=https://registry.npmjs.org --access public --tag latest --provenance --ignore-scripts --json > "$RUNNER_TEMP/stage-response.json"
+          mkdir recovery-evidence
+          cp "$bundle"/{release-candidates,qualification}.json recovery-evidence/
+          node scripts/recovery-stage-receipt.mjs "$RUNNER_TEMP/stage-response.json" "$bundle" recovery-evidence/npm-publication-receipt.json
+      - name: Preserve the original build identity and actual staging invocation
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: recovery-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: recovery-evidence/
+          if-no-files-found: error
+          retention-days: 30

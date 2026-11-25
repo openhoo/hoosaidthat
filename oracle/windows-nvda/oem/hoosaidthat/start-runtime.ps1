@@ -70,6 +70,43 @@ function Start-Nvda([string]$Locale) {
     ) -WindowStyle Hidden -PassThru
 }
 
+function Set-OracleBrowserForeground([Diagnostics.Process]$Browser) {
+    # Chrome's CDP listener can be ready while Explorer still owns native input.
+    # WinHoo desktops already focus the verified browser through their host.
+    if (Test-Path -LiteralPath 'C:\ProgramData\HooSaidThat\winhoo-owner.json') { return }
+    if (-not ('HstOracleBrowserWindow' -as [type])) {
+        $null = Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class HstOracleBrowserWindow {
+    [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr window, out uint pid);
+    public static bool IsActive(int pid) {
+        uint actual;
+        return GetWindowThreadProcessId(GetForegroundWindow(), out actual) != 0 && actual == (uint)pid;
+    }
+}
+'@
+    }
+    $shell = $null
+    try {
+        $timer = [Diagnostics.Stopwatch]::StartNew()
+        do {
+            $Browser.Refresh()
+            if ($Browser.HasExited) { throw 'The verified Chrome browser exited before its window became active' }
+            if ([HstOracleBrowserWindow]::IsActive($Browser.Id)) { return }
+            if ($Browser.MainWindowHandle -ne [IntPtr]::Zero) {
+                if (-not $shell) { $shell = New-Object -ComObject WScript.Shell }
+                $null = $shell.AppActivate([int]$Browser.Id)
+            }
+            Start-Sleep -Milliseconds 250
+        } while ($timer.Elapsed.TotalSeconds -lt 8)
+        throw 'The owned Chrome window did not receive native foreground focus on the oracle console'
+    } finally {
+        if ($shell) { $null = [Runtime.InteropServices.Marshal]::FinalReleaseComObject($shell) }
+    }
+}
+
 function Start-Chrome {
     if (-not (Test-Path -LiteralPath $Chrome -PathType Leaf)) { throw 'Chrome executable missing' }
     [System.IO.Directory]::CreateDirectory($ChromeProfile) | Out-Null
@@ -105,6 +142,7 @@ function Start-Chrome {
                 -not $info -or $info.CommandLine -notmatch $profileArg) {
                 throw 'The Chrome listener belongs to a different program, profile, or session'
             }
+            Set-OracleBrowserForeground $browser
             Write-AtomicJson (Join-Path $env:ProgramData 'HooSaidThat\browser-owner.json') ([ordered]@{
                 pid = $browser.Id
                 createdFileTime = $browser.StartTime.ToUniversalTime().ToFileTimeUtc()
