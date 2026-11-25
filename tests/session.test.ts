@@ -585,3 +585,40 @@ test('finish retains captured flow evidence when an ARIA snapshot is unavailable
   assert(attachments.includes('screen-reader-flow.txt'));
   assert(attachments.includes('screen-reader-flow.json'));
 });
+
+function cursorModeRace(events: unknown[], timedOut = false) {
+  const session = Object.create(ScreenReaderSession.prototype) as ScreenReaderSession;
+  let toggles = 0;
+  Object.defineProperties(session, {
+    client: { value: {
+      state: async () => ({ cursorMode: toggles === 2 ? 'browse' : 'focus', lastSequence: toggles ? 71 : 53 }),
+      readEvents: async (after: number) => { assert.equal(after, 53); return { events }; },
+    } },
+    act: { value: async (action: string) => {
+      assert.equal(action, 'toggleFocusMode');
+      toggles++;
+      return { timedOut, events: [{ kind: 'mode', command: action, mode: toggles === 1 ? 'focus' : 'browse', sequence: toggles === 1 ? 67 : 74 }] };
+    } },
+  });
+  return { session, toggles: () => toggles };
+}
+
+test('ensureBrowseMode corrects a toggle overtaken by automatic document focus', async () => {
+  // A replaced page took focus after the SDK saw its password field, but before
+  // the physical toggle ran. The first toggle therefore re-entered focus mode.
+  const h = cursorModeRace([{ kind: 'mode', mode: 'browse', sequence: 63, reason: 'automaticFocusMode' }]);
+  await h.session.ensureBrowseMode();
+  assert.equal(h.toggles(), 2);
+});
+
+test('ensureBrowseMode does not repeat an unconfirmed or ineffective physical toggle', async () => {
+  for (const [events, timedOut] of [
+    [[], false],
+    [[{ kind: 'mode', mode: 'browse', sequence: 69, reason: 'automaticFocusMode' }], false],
+    [[{ kind: 'mode', mode: 'browse', sequence: 63, reason: 'automaticFocusMode' }], true],
+  ] as const) {
+    const h = cursorModeRace([...events], timedOut);
+    await assert.rejects(() => h.session.ensureBrowseMode(), /did not become browse/);
+    assert.equal(h.toggles(), 1);
+  }
+});
