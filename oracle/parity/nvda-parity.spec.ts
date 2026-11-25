@@ -4,6 +4,7 @@ import {
   SCREEN_READER_ACTIONS,
   test,
   type ScreenReaderAction,
+  type HttpScreenReaderClient,
   type ScreenReaderSession,
 } from "@openhoo/hoosaidthat";
 
@@ -317,19 +318,24 @@ actionsTest(
       if (!reviewActions.has(action) && action !== "toggleNativeSelection") {
         await screenReader.ensureBrowseMode();
       }
-      const beforeFormat = action === "brailleReportFormatting" ? await screenReader.checkpoint() : undefined;
+      const usesDisplayCell = action === "brailleRoute" || action === "brailleReportFormatting";
+      const beforeFocus = usesDisplayCell ? await screenReader.checkpoint() : undefined;
       await prepareAction(page, screenReader, action);
-      let formatCell: number | undefined;
-      if (beforeFormat !== undefined) {
-        // NVDA may still be displaying the previous tether announcement even
-        // after speaking the new focus. A formatting request needs a text cell.
-        await expect.poll(async () => {
-          const { events } = await screenReaderClient.readEvents(beforeFormat, { timeoutMs: 400, quietMs: 80 });
-          const frame = events.filter(event => event.kind === "braille").at(-1);
-          formatCell = frame && frame.text.includes("Gamma delta") &&
-            frame.cursor >= 0 && frame.cursor < frame.cells.length ? frame.cursor : undefined;
-          return formatCell;
-        }, { timeout: 12_000, message: "the braille display must show the focused review text and its cursor" }).toBeDefined();
+      const targetFrame = beforeFocus === undefined ? undefined : await reviewTextFrame(screenReaderClient, beforeFocus);
+      if (action === "brailleRoute") {
+        // The target cell is the one the reader displayed at the d in "delta".
+        // Start routing from G in the same line so that a no-op cannot pass.
+        const editor = page.locator("#reviewText");
+        await screenReader.observe("Leave the route target", () => page.locator("#activateButton").focus(), "focus");
+        const beforeStart = await screenReader.checkpoint();
+        await screenReader.observe("Focus the route start", async () => {
+          await editor.evaluate(element => (element as HTMLTextAreaElement).setSelectionRange(11, 11));
+          await editor.focus();
+        }, "focus");
+        const startFrame = await reviewTextFrame(screenReaderClient, beforeStart);
+        expect(startFrame.text).toBe(targetFrame!.text);
+        expect(startFrame.cursor).not.toBe(targetFrame!.cursor);
+        expect(await editor.evaluate(element => (element as HTMLTextAreaElement).selectionStart)).toBe(11);
       }
       const observation =
         action === "returnToPage"
@@ -337,9 +343,9 @@ actionsTest(
           : action === "find"
             ? await screenReader.findText("Parity needle")
             : action === "brailleRoute"
-              ? await screenReader.brailleRoute(0)
+              ? await screenReader.brailleRoute(targetFrame!.cursor)
               : action === "brailleReportFormatting"
-                ? await screenReader.brailleFormatting(formatCell!)
+                ? await screenReader.brailleFormatting(targetFrame!.cursor)
                 : await screenReader.act(action);
       expect(observation.timedOut, action).toBe(false);
       expect(
@@ -370,6 +376,14 @@ actionsTest(
         `${action} completed evidence`,
       ).toBe(true);
       assertSemanticOutput(action, observation.speech, observation.braille);
+      if (action === "brailleRoute") {
+        const editor = page.locator("#reviewText");
+        await expect(editor).toBeFocused();
+        await expect.poll(() => editor.evaluate(element => {
+          const field = element as HTMLTextAreaElement;
+          return [field.selectionStart, field.selectionEnd];
+        }), { message: "routing the displayed text cell must move the browser caret to the d in delta" }).toEqual([17, 17]);
+      }
       if (action === "braillePreviousLine" || action === "brailleNextLine") {
         const target = action === "braillePreviousLine" ? "Alpha beta" : "Omega last";
         expect(observation.brailleEvents.map(frame => frame.text.trim()), action).toContain(target);
@@ -618,6 +632,18 @@ function assertSemanticOutput(
   }
 }
 
+async function reviewTextFrame(client: HttpScreenReaderClient, since: number) {
+  let displayed: { text: string; cursor: number } | undefined;
+  await expect.poll(async () => {
+    const { events } = await client.readEvents(since, { timeoutMs: 400, quietMs: 80 });
+    const frame = events.filter(event => event.kind === "braille").at(-1);
+    displayed = frame && frame.text.includes("Gamma delta") && frame.cursor >= 0 && frame.cursor < frame.cells.length
+      ? { text: frame.text, cursor: frame.cursor } : undefined;
+    return displayed;
+  }, { timeout: 12_000, message: "the braille display must show the focused review text and its cursor" }).toBeDefined();
+  return displayed!;
+}
+
 async function focusFixture(
   screenReader: ScreenReaderSession,
   locator: Parameters<ScreenReaderSession["focus"]>[0],
@@ -860,8 +886,9 @@ async function prepareAction(
   ) {
     const reviewText = page.locator("#reviewText");
     await reviewText.scrollIntoViewIfNeeded();
-    await reviewText.evaluate((element) =>
-      (element as HTMLTextAreaElement).setSelectionRange(11, 11),
+    const offset = action === "brailleRoute" ? 17 : 11;
+    await reviewText.evaluate((element, offset) =>
+      (element as HTMLTextAreaElement).setSelectionRange(offset, offset), offset,
     );
     await screenReader.observe(
       "Focus braille fixture",
