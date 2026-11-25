@@ -12,6 +12,18 @@ function Publish-RuntimeStatus([string]$phase, [string]$errorMessage = '') {
   } catch { [Console]::Error.WriteLine('Could not publish JAWS runtime status to the private share.') }
   finally { Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue }
 }
+function Test-JawsActivationDialog([int[]]$readerPids) {
+  try {
+    # Only inspect the top-level window identity, never license fields or controls.
+    Add-Type -AssemblyName UIAutomationClient
+    $children = [System.Windows.Automation.AutomationElement]::RootElement.FindAll(
+      [System.Windows.Automation.TreeScope]::Children, [System.Windows.Automation.Condition]::TrueCondition)
+    foreach ($w in $children) {
+      if ($w.Current.ProcessId -in $readerPids -and $w.Current.Name -ceq 'JAWS Activation') { return $true }
+    }
+  } catch { }
+  return $false
+}
 $mutex = [Threading.Mutex]::new($false, 'Local\HoosaidthatJawsRuntime')
 # Stopping/replacing a scheduled task can abandon its mutex. Windows grants
 # ownership to this caller when WaitOne throws AbandonedMutexException.
@@ -29,14 +41,17 @@ try {
   $session = (Get-Process -Id $PID).SessionId
   $existing = @(Get-Process -Name jfw -ErrorAction SilentlyContinue | Where-Object SessionId -eq $session)
   if ($existing.Count -gt 1 -or ($existing.Count -eq 1 -and $existing[0].Path -ine $jfw)) { throw 'A different JAWS installation is already running' }
-  # An existing /default process without RCS is left alone. Its operator can exit it and restart this task.
-  if (!$existing) { Start-Process $jfw -ArgumentList '/default /startrcs' }
+  # Use the ARIA-AT harness's exact startup switch. Leave an existing reader alone.
+  if (!$existing) { Start-Process $jfw -ArgumentList '/startrcs' }
   $deadline = [DateTime]::UtcNow.AddMinutes(2)
   do {
     $listener = @(Get-NetTCPConnection -LocalPort 9002 -State Listen -ErrorAction SilentlyContinue)
     $jawsPid = @(Get-Process -Name jfw -ErrorAction SilentlyContinue | Where-Object { $_.SessionId -eq $session -and $_.Path -ieq $jfw } | ForEach-Object { $_.Id })
     if ($listener.Count -gt 0 -and @($listener | Where-Object { $_.OwningProcess -in $jawsPid }).Count -eq $listener.Count) { break }
-    if ([DateTime]::UtcNow -ge $deadline) { throw 'JAWS did not open its Remote Command Server; check the interactive desktop, license or demonstration prompt, and /startrcs' }
+    if ([DateTime]::UtcNow -ge $deadline) {
+      if (Test-JawsActivationDialog $jawsPid) { throw 'JAWS Activation is open in the guest. Activate a license that permits automated testing, then run jaws sync.' }
+      throw 'JAWS did not open its Remote Command Server; inspect /startrcs and the interactive desktop'
+    }
     Start-Sleep -Seconds 1
   } while ($true)
   $node = "$root\node\node-v$($lock.node.version)-win-x64\node.exe"
@@ -51,6 +66,7 @@ try {
   # The host can report an actionable startup failure even when the loopback API never opened.
   # Publish only controlled diagnoses; arbitrary native process output stays in the guest.
   $publicReason = if ($reason -like 'JAWS did not open its Remote Command Server*') { 'JAWS did not open its Remote Command Server; inspect licensing, /startrcs and the interactive desktop' }
+    elseif ($reason -ceq 'JAWS Activation is open in the guest. Activate a license that permits automated testing, then run jaws sync.') { $reason }
     elseif ($reason -like 'Installed JAWS version differs*') { 'Installed JAWS version differs from the runtime lock' }
     else { 'JAWS bridge failed to start; inspect C:\HooSaidThat-JAWS\runtime.log in the dedicated guest' }
   Publish-RuntimeStatus 'failed' $publicReason

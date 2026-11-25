@@ -7,7 +7,7 @@
     "sha256": "973c84121357e61c3a78af8d05ae14034370e11318b98c74d4adc7d33a6356b4",
     "bytes": 15368592,
     "installer": "Vendor network installer; downloaded payloads are vendor verified, not independently locked here. The bridge attests the running product version.",
-    "license": "No activation or licensing bypass. Use an existing valid JAWS license or the vendor's time-limited demonstration mode."
+    "license": "Provide a JAWS license that permits automated accessibility testing on this VM. The unactivated 40-minute installation demonstration is not a substitute for a testing license."
   },
   "node": {
     "version": "26.13.0",
