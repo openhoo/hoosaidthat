@@ -12,7 +12,7 @@ test('failed JAWS provisioning remains inspectable and cannot mask live recovery
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'hst-jaws-retry-')));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const config = readerConfig('jaws', {
-    root, arch: 'arm64', acceleration: 'tcg', image: 'sha256:' + 'a'.repeat(64), cloned: false,
+    root, arch: process.arch === 'x64' ? 'amd64' : 'arm64', acceleration: 'tcg', image: 'sha256:' + 'a'.repeat(64), cloned: false,
   });
   for (const p of ['shared/bootstrap', 'shared/secrets', 'oem']) mkdirSync(join(root, p), { recursive: true });
   writeFileSync(join(root, 'winhoo-docker.json'), JSON.stringify(config));
@@ -34,8 +34,8 @@ test('failed JAWS provisioning remains inspectable and cannot mask live recovery
       let value;
       switch(args[0]){
         case 'context': value='unix:///fixture'; break;
-        case 'info': value={OSType:'linux',Architecture:'arm64',ID:'fixture'}; break;
-        case 'image': value=[{Id:cfg.image,Os:'linux',Architecture:'arm64',Config:{Labels:{'io.openhoo.winhoo.desktop.runtime':'winhoo.desktop-runtime/1','io.openhoo.winhoo.desktop.version':'0.4.0','io.openhoo.winhoo.desktop.applications':'none'}}}];break;
+        case 'info': value={OSType:'linux',Architecture:cfg.architecture,ID:'fixture'}; break;
+        case 'image': value=[{Id:cfg.image,Os:'linux',Architecture:cfg.architecture,Config:{Labels:{'io.openhoo.winhoo.desktop.runtime':'winhoo.desktop-runtime/1','io.openhoo.winhoo.desktop.version':'0.4.0','io.openhoo.winhoo.desktop.applications':'none'}}}];break;
         case 'compose': value='compose';break;
         case 'create': case 'rm': case 'volume': value='';break;
         case 'cp':
