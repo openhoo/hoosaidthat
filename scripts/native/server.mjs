@@ -70,8 +70,10 @@ export async function startNativeServer({ screenReader, token, driver, probe,
       fault ??= new Error('native identity or focus probe failed; restart the bridge');
       throw error;
     }
+    // JAWS exposes browser focus through UI Automation, but neither that probe
+    // nor its speech stream reports whether the virtual buffer is active.
     return { ...state, lastSequence: sequence, cursor: { mode: 'unknown' },
-      cursorInDocument: false };
+      ...(screenReader === 'jaws' ? {} : { cursorInDocument: false }) };
   }
   async function settle(after, timeoutMs, requestedQuietMs, requireOutput) {
     const started = Date.now();

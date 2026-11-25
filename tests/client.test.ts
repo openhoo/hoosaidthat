@@ -1063,3 +1063,33 @@ test('JAWS health identifies its Windows driver and rejects the wrong speech sou
   health.outputSource = 'browser-accessibility-tree';
   await assert.rejects(client.health(), /invalid JAWS health response/);
 });
+
+test('JAWS leaves the virtual buffer unknown while NVDA and HooVDA require a measured boolean', async (t) => {
+  const state: Record<string, unknown> = {
+    lastSequence: 0, browserWindowActive: true, webContentFocused: true, cursor: { mode: 'unknown' },
+  };
+  const server = createServer((request, response) => request.url === '/v2/sessions'
+    ? send(response, 201, { id: 'buffer', startSequence: 0 }) : send(response, 200, state));
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => server.close());
+  const address = server.address();
+  assert(address && typeof address !== 'string');
+  const endpoints = { controlEndpoint: `http://127.0.0.1:${address.port}`, cdpEndpoint: 'http://127.0.0.1:9226', controlToken: token };
+  for (const reader of ['jaws', 'nvda', 'hoovda'] as const) {
+    const client = new HttpScreenReaderClient(endpoints, reader, 1000, {
+      profile: reader === 'jaws' ? 'jaws-web' : 'nvda-web-2026.1.1', locale: 'en-US', keyboardLayout: 'desktop',
+    });
+    await client.beginSession('buffer', false);
+    delete state.cursorInDocument;
+    if (reader === 'jaws') assert.equal(Object.hasOwn(await client.state(), 'virtualBufferActive'), false);
+    else await assert.rejects(client.state(), /invalid .* state response/);
+    state.cursorInDocument = null;
+    await assert.rejects(client.state(), /invalid .* state response/);
+    for (const value of [false, true]) {
+      state.cursorInDocument = value;
+      const observed = await client.state();
+      if (reader === 'jaws') assert.equal(Object.hasOwn(observed, 'virtualBufferActive'), false);
+      else assert.equal(observed.virtualBufferActive, value);
+    }
+  }
+});

@@ -226,5 +226,7 @@ The `jaws-web` adapter uses protocol v2. Health identifies the Windows process, 
 `interaction.capturedOutput` in JAWS Remote Command Server. Actions advertised by
 `GET /v2/actions` are delivered as emulated keyboard input. The Windows UI Automation
 probe identifies which browser document has keyboard focus; its names do not become
-speech events. The adapter does not expose NVDA settings, braille cells or original
+speech events. JAWS does not report whether its virtual buffer is active: the state
+response omits `cursorInDocument`, and `screenReader.state()` omits `virtualBufferActive`.
+The adapter does not expose NVDA settings, braille cells or original
 audio. See [Windows readers in Docker](windows-readers.md).

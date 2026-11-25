@@ -189,7 +189,7 @@ export class HttpScreenReaderClient {
   async state(): Promise<ScreenReaderState> {
     if (this.usesV2()) {
       const value = await this.requestJSON(`${this.sessionPath()}/state`);
-      if (!isHooVDAState(value)) {
+      if (!isV2State(value, this.screenReaderName)) {
         throw new ScreenReaderProtocolError(`invalid ${this.adapterLabel()} state response`);
       }
       const focus = runtimeObject(value.focus);
@@ -199,7 +199,9 @@ export class HttpScreenReaderClient {
         protocolVersion: 2,
         lastSequence: value.lastSequence,
         cursorMode: value.cursor.mode,
-        virtualBufferActive: value.cursorInDocument,
+        // Older JAWS bridges always sent false, even when JAWS was browsing.
+        ...(this.screenReaderName !== 'jaws' && value.cursorInDocument !== undefined
+          ? { virtualBufferActive: value.cursorInDocument } : {}),
         focus: {
           id: focus?.id ?? null,
           ...(focus?.documentUrlSha256
@@ -1093,11 +1095,11 @@ function isPresentationSettings(value: unknown): value is ScreenReaderPresentati
   );
 }
 
-function isHooVDAState(value: unknown): value is {
+function isV2State(value: unknown, reader: ScreenReaderName): value is {
   lastSequence: number;
   browserWindowActive: boolean;
   webContentFocused: boolean;
-  cursorInDocument: boolean;
+  cursorInDocument?: boolean;
   cursor: { mode: string };
   focus?: unknown;
   browse?: unknown;
@@ -1112,7 +1114,7 @@ function isHooVDAState(value: unknown): value is {
     !isSequence(value.lastSequence) ||
     typeof value.browserWindowActive !== 'boolean' ||
     typeof value.webContentFocused !== 'boolean' ||
-    typeof value.cursorInDocument !== 'boolean' ||
+    (typeof value.cursorInDocument !== 'boolean' && !(reader === 'jaws' && value.cursorInDocument === undefined)) ||
     !isObject(value.cursor) ||
     typeof value.cursor.mode !== 'string' ||
     value.cursor.mode.length < 1 ||

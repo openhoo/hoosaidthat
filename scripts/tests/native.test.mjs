@@ -67,10 +67,15 @@ for (const reader of ['voiceover', 'talkback', 'jaws']) {
     const caps = await f.client.capabilities();
     assert(caps.actions.some(({ action }) => action === 'nextHeading'));
     assert(!caps.actions.some(({ action }) => action === 'brailleRoute'));
-    await f.client.beginSession('native-checkout', false);
+    const session = await f.client.beginSession('native-checkout', false);
     const state = await f.client.state();
     assert.equal(state.focus.webContentFocused, true);
     assert.equal(state.cursorMode, 'unknown');
+    if (reader === 'jaws') {
+      const raw = await (await f.request(`/v2/sessions/${session.id}/state`)).json();
+      assert.equal(Object.hasOwn(raw, 'cursorInDocument'), false);
+      assert.equal(Object.hasOwn(state, 'virtualBufferActive'), false);
+    }
     const action = await f.client.perform('nextHeading');
     assert.equal(action.delivery, 'emulated');
     assert.equal(action.timedOut, false);
