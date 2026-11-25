@@ -642,7 +642,11 @@ function trySshControl(remoteCommand, deadline = Infinity) {
   } catch (error) {
     return { status: 1, stdout: '', stderr: '', error };
   }
-  const timeout = sshTimeoutMs(remoteCommand, 15_000, deadline);
+  // A cold Windows CIM inventory can take longer than the SSH connection itself.
+  // Keep one outstanding request and the outer readiness deadline.
+  const inventory = remoteCommand === 'status' && process.env.HST_NVDA_QUALIFICATION === '1' &&
+    process.env.HST_NVDA_ACCELERATION === 'kvm';
+  const timeout = sshTimeoutMs(remoteCommand, inventory ? 60_000 : 15_000, deadline);
   if (timeout <= 0) {
     return { status: 1, stdout: '', stderr: '', error: new Error('SSH readiness deadline exhausted') };
   }
@@ -821,7 +825,11 @@ async function finalizeGuestShutdown(expectedId) {
     if (state !== 'running') throw new Error(`Cannot confirm guest shutdown: NVDA container is ${state}`);
     if (readQemuState('podman', id, deadline) === 'ended') {
       requireRunningOracle('podman', deadline, expectedId);
-      compose(['stop']);
+      // Windows has shut down. Stop only its verified container wrapper without
+      // relying on a separate Compose API service or resolving a project by name.
+      execFileSync('podman', ['stop', '--time', '15', expectedId], {
+        stdio: 'inherit', timeout: Math.min(25_000, Math.max(1, deadline - Date.now())),
+      });
       console.log('NVDA oracle VM shut down; persistent state retained.');
       return;
     }

@@ -163,6 +163,7 @@ function invoke(command, scenario, acceleration = 'tcg') {
         let handshake = scenario === 'slow-banner' ? 30_000 : 100;
         if (scenario === 'slow-sync-banner') handshake = 20_000;
         let dispatch = scenario === 'slow-status' ? 240_000 : 100;
+        if (scenario === 'qualified-cold-inventory' && command === 'status') dispatch = 22_000;
         if (scenario === 'slow-sync-update' && command.startsWith('update ')) {
           handshake = 20_000;
           dispatch = 25_000;
@@ -302,7 +303,7 @@ function invoke(command, scenario, acceleration = 'tcg') {
         httpRequests, httpOverlaps, httpActive, httpMaxActive })));
     `);
     const env = { ...process.env, HST_NVDA_RUNTIME_ROOT: runtimeRoot };
-    if (scenario.startsWith('console-')) env.HST_NVDA_QUALIFICATION = '1';
+    if (scenario.startsWith('console-') || scenario === 'qualified-cold-inventory') env.HST_NVDA_QUALIFICATION = '1';
     if (acceleration === null) delete env.HST_NVDA_ACCELERATION;
     else env.HST_NVDA_ACCELERATION = acceleration;
     const result = spawnSync(process.execPath, ['--import', pathToFileURL(preload).href, resolve(packageRoot, 'scripts/nvda-windows.mjs'), ...command], {
@@ -318,6 +319,14 @@ function invoke(command, scenario, acceleration = 'tcg') {
     rmSync(temporary, { recursive: true, force: true });
   }
 }
+
+test('a cold retained KVM inventory can finish without overlapping SSH polls', () => {
+  const r = invoke(['wait-ssh'], 'qualified-cold-inventory', 'kvm');
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.calls.length, 1);
+  assert.equal(r.calls[0].connect, 5);
+  assert.match(r.stdout, /SSH control ready/);
+});
 
 test('Retained KVM guest reports a persistently locked sign-in screen before the boot deadline', () => {
   const r = invoke(['wait'], 'console-locked', 'kvm');
