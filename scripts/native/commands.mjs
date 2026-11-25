@@ -78,7 +78,7 @@ export function talkbackCommands() {
     nextFocusable: [[61]], previousFocusable: [[shift, 61]],
     activate: [[alt, 66]], activateWithSpace: [[62]], escape: [[111]],
     returnToPage: 'focusWeb', readCurrent: 'readCurrent',
-    documentStart: [[alt, ctrl, 21]], documentEnd: [[alt, ctrl, 22]],
+    documentStart: 'documentStart', documentEnd: 'documentEnd',
     sayAll: [[alt, ctrl, shift, 66]],
     nextCharacter: [[alt, shift, 22]], previousCharacter: [[alt, shift, 21]],
     nextWord: [[alt, ctrl, shift, 22]], previousWord: [[alt, ctrl, shift, 21]],

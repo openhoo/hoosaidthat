@@ -545,6 +545,10 @@ export interface ScanResult {
   stopReason: 'boundary' | 'repeat' | 'max';
 }
 
+// On a busy emulator a control name, role and resulting live update can
+// reach the TTS engine over half a second apart.
+export const TALKBACK_QUIET_MS = 1500;
+
 export function resolveOptions(options: ScreenReaderOptions = {}): ResolvedScreenReaderOptions {
   const screenReader = options.screenReader ?? 'orca';
   if (!SCREEN_READERS.includes(screenReader)) {
@@ -605,7 +609,7 @@ export function resolveOptions(options: ScreenReaderOptions = {}): ResolvedScree
     actionTimeoutMs:
       options.actionTimeoutMs ??
       (screenReader !== 'orca' ? 15_000 : 5_000),
-    quietMs: options.quietMs ?? 300,
+    quietMs: options.quietMs ?? (screenReader === 'talkback' ? TALKBACK_QUIET_MS : 300),
     overlay: options.overlay ?? true,
     recording: options.recording ?? 'on',
     actionScreenshots: options.actionScreenshots ?? 'off',

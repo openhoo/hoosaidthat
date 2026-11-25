@@ -102,21 +102,26 @@ for a configured HooVDA runtime image.
 
 ### Android TalkBack
 
-Install the helper APKs and select the capture TTS engine on a prepared Android
-14+ device with TalkBack and Chrome. Then run its device checks:
+Run real TalkBack and Chrome in a disposable Android emulator. Create the Google
+Play virtual device once as described in the [TalkBack guide](oracle/android-talkback/README.md),
+then run:
 
 ```bash
+npm run build
 npm run talkback:android:build
-npm run talkback:android:doctor -- --serial emulator-5554
-npm run talkback:android:run -- --serial emulator-5554 --token-file /tmp/hst-talkback/control-token
+npm run talkback:android:run -- --avd HST_TalkBack_API35 --token-file ~/.hst/talkback-token
 ```
+
+Use `--serial SERIAL` instead to attach to a device you have prepared yourself.
 
 Consumer tests use `screenReader: 'talkback'`, `runtime: 'external'`,
 `workers: 1` and the distinct `talkback-web` profile. The run command supplies
 the `HOOSAIDTHAT_TALKBACK_*` endpoints and token to a child suite. Android uses
 Chrome's persistent device context; see the [guide](oracle/android-talkback/README.md)
-for isolation and speech-capture boundaries. Real device qualification remains
-required; package tests use synthetic Android transport.
+for isolation and speech-capture boundaries. The [emulator test record](docs/evidence/android-talkback-api35.md)
+covers heading and button navigation, activation, and live-region announcements on
+Android 15 with TalkBack 15.0 and Chrome 124 in English. Physical devices and
+other versions or locales still need their own run.
 
 
 ```ts

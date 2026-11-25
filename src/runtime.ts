@@ -236,7 +236,10 @@ async function waitUntilReady(
         fetch(`${endpoints.controlEndpoint}/${screenReader === 'orca' ? 'v1' : 'v2'}/health`, {
           redirect: 'error',
           headers: { authorization: `Bearer ${endpoints.controlToken}` },
-          signal: AbortSignal.timeout(1_000),
+          // Android health starts an instrumentation process. Retrying at
+          // one second can interrupt the previous probe on a cold emulator.
+          signal: AbortSignal.timeout(Math.min(Math.max(1, deadline - Date.now()),
+            screenReader === 'talkback' ? 15_000 : 1_000)),
         }),
         fetch(`${endpoints.cdpEndpoint}/json/version`, {
           redirect: 'error',
