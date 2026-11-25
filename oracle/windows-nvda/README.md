@@ -1,8 +1,10 @@
 # Windows NVDA reference oracle
 
-Dedicated real-NVDA parity oracle. Not npm runtime and not a Windows product
-dependency. Normal Orca/HooVDA tests remain Linux containers. This VM provides
-the reference traces used to prove the declared `nvda-web-2026.1.1` profile.
+This Windows guest runs real NVDA and records the reference output for the
+`nvda-web-2026.1.1` browser profile. To use it with Docker and WinHoo, start
+with [NVDA and JAWS in Docker](../../docs/windows-readers.md). That guide covers
+the installed package's smoke check, the full English/German matrix, and how to
+replay a single failed block. Orca and HooVDA continue to run in Linux containers.
 
 ## Local Mac with WinHoo
 
