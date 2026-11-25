@@ -5,6 +5,7 @@ import {
   test,
   type ScreenReaderAction,
   type HttpScreenReaderClient,
+  type ScreenReaderObservation,
   type ScreenReaderSession,
 } from "@openhoo/hoosaidthat";
 
@@ -375,7 +376,12 @@ actionsTest(
         ),
         `${action} completed evidence`,
       ).toBe(true);
-      assertSemanticOutput(action, observation.speech, observation.braille);
+      if (action === "toggleNativeSelection") {
+        await restoreNativeSelection(observation, () => screenReader.act("toggleNativeSelection"));
+        await page.goto("about:blank");
+      } else {
+        assertSemanticOutput(action, observation.speech, observation.braille);
+      }
       if (action === "brailleRoute") {
         const editor = page.locator("#reviewText");
         await expect(editor).toBeFocused();
@@ -447,12 +453,6 @@ actionsTest(
         await screenReader.act("toggleFocusMode");
       if (action === "toggleSingleLetterNavigation") {
         await screenReader.act("toggleSingleLetterNavigation");
-      }
-      if (action === "toggleNativeSelection") {
-        const reset = await screenReader.act("toggleNativeSelection");
-        expect(reset.timedOut).toBe(false);
-        expect(reset.speech).toMatch(/Native app selection mode disabled|Nativer Auswahlmodus deaktiviert/iu);
-        await page.goto("about:blank");
       }
       if (action === "leftMouseLock" || action === "rightMouseLock") {
         await screenReader.act(action);
@@ -642,6 +642,21 @@ async function reviewTextFrame(client: HttpScreenReaderClient, since: number) {
     return displayed;
   }, { timeout: 12_000, message: "the braille display must show the focused review text and its cursor" }).toBeDefined();
   return displayed!;
+}
+
+// Sending this toggle a second time is a reset only if NVDA confirmed the first transition.
+async function restoreNativeSelection(
+  enabled: Pick<ScreenReaderObservation, "timedOut" | "speech">,
+  toggle: () => Promise<Pick<ScreenReaderObservation, "timedOut" | "speech">>,
+): Promise<void> {
+  expect(enabled.timedOut, "native selection enable timed out").toBe(false);
+  expect(enabled.speech, "NVDA must announce that native selection is enabled")
+    .toMatch(semanticExpectations.get("toggleNativeSelection")!);
+  const disabled = await toggle();
+  expect(disabled.timedOut, "native selection disable timed out").toBe(false);
+  expect(disabled.speech, "NVDA must announce that native selection is disabled")
+    .toBe(enabled.speech === "Native app selection mode enabled"
+      ? "Native app selection mode disabled" : "Nativer Auswahlmodus deaktiviert");
 }
 
 async function focusFixture(
@@ -1303,7 +1318,7 @@ const semanticExpectations = new Map<ScreenReaderAction, RegExp>([
   ],
   [
     "toggleNativeSelection",
-    /Native app selection mode enabled|Nativer Auswahlmodus aktiviert/iu,
+    /^(?:Native app selection mode enabled|Nativer Auswahlmodus aktiviert)$/u,
   ],
   ["previousTableColumn", /Column A/iu],
   ["nextTableColumn", /Column B/iu],

@@ -98,3 +98,5 @@ JAWS speech events are text. Braille assertions, including negative assertions, 
 On November 25, 2026, native Windows tests captured English and German heading, button and table announcements, live-region speech, and braille updates from NVDA 2026.1.1 with Chrome 151.0.7922.47. Speech evidence is the text NVDA queued; braille evidence comes from the display write hook.
 
 JAWS 2027.2610.428.400 installed and started in its dedicated Windows account. It showed the activation dialog, and its Remote Command Server did not open port 9002. No testing license was available, so native JAWS speech and navigation remain unverified. The installed runner includes four default checks and three additional navigation checks for use with a licensed guest.
+
+The adapter also replayed three recorded JAWS 2025 sessions for a mixed-state checkbox, an enabled button and a disabled button. Across those recordings, it matched 102 protocol requests, submitted 54 keys for 14 distinct actions, and reproduced 416 speech messages in order. The recordings do not cover heading or table navigation.
