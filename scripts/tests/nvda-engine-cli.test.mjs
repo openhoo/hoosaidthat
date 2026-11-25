@@ -113,6 +113,12 @@ test('failed QEMU inspection cannot cause a restart', () => {
   assert.match(r.stderr, /state unknown/i);
   assert.deepEqual(r.actions, []);
 });
+test('a simulated control-port collision prevents VM startup before any engine mutation', () => {
+  const r = cli(['up'], 'port-in-use');
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /required loopback ports occupied: 3002\s*$/);
+  assert.deepEqual(r.actions, []);
+});
 for (const command of ['wait', 'wait-ssh', 'status']) {
   test(command + ' reports engine loss before using guest or HTTP endpoints', () => {
     const r = cli([command], 'engine-loss');
