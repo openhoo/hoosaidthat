@@ -25,7 +25,7 @@ Run the controller inside x64 Linux or a WSL2 distribution with a local Linux Do
    node scripts/windows-reader-docker.mjs "$reader" check
    ```
 
-   The first boot installs Windows and the reader. Later runs reuse the disk. The check navigates by heading, focuses a button and waits for an asynchronous status announcement. JAWS also reads table cells and announces a checkbox's state after activation. Each assertion uses captured reader output. The wrapper waits for the reader and browser and supplies the matching endpoints and control token to the test process. Use one Playwright worker per desktop.
+   The first boot installs Windows and the reader. Later runs reuse the disk. The check navigates by heading, focuses a button and waits for an asynchronous status announcement. For NVDA it also checks the heading on the braille display. JAWS also reads table cells and announces a checkbox's state after activation. The checks assert against captured reader output. The wrapper waits for the reader and browser and supplies the matching endpoints and control token to the test process. Use one Playwright worker per desktop.
 
 For a manual investigation, run `up`, `status`, and `wait` separately. `up` means that the VM started; `wait` checks the reader. A manual `up` leaves the guest available across test runs; finish with `down` to stop it and retain its disk. Private state defaults to `~/VMs/hoosaidthat-<reader>-docker`. Choose a different location with `HST_NVDA_RUNTIME_ROOT` or `HST_JAWS_RUNTIME_ROOT` before initialization. Keep it outside the repository.
 
