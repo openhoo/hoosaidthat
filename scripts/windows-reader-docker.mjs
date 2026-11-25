@@ -36,7 +36,7 @@ const help =
   '\n\nRun inside Linux or WSL2 with a local Docker engine and the WinHoo desktop image.\n' +
   'doctor checks the host; init prepares a private runtime; up boots Windows; wait checks real reader readiness.\n' +
   'check runs the packaged speech tests and saves reports in a fresh private directory under the current directory.\n' +
-  'jaws check --navigation runs the extended JAWS navigation tests instead.\n' +
+  'nvda check selects English and the desktop keyboard layout; jaws check --navigation runs extended JAWS tests.\n' +
   'nvda parity runs all 40 profile blocks. nvda parity-shard replays one block. Each saves its own evidence.\n' +
   'run starts a test with the reader endpoints and token and stops any VM it started. A manual up stays running.\n' +
   'sync updates the installed reader bridge on a running guest. down stops the desktop and retains its disk.';
@@ -564,11 +564,11 @@ async function child(file, args, env, signal) {
     signal.removeEventListener('abort', abort);
   }
 }
-async function wait(reader, root, config, expected, signal, retryAfter = 0) {
+async function wait(reader, root, config, expected, signal, retryAfter, nativeCheck) {
   if (reader === 'nvda') {
     const code = await child(
       process.execPath,
-      [join(project, 'scripts/nvda-windows.mjs'), 'docker-readiness'],
+      [join(project, 'scripts/nvda-windows.mjs'), 'docker-readiness', ...(nativeCheck ? ['--native-check'] : [])],
       {
         ...process.env,
         HST_NVDA_RUNTIME_ROOT: root,
@@ -890,7 +890,7 @@ export async function runWindowsReader(reader, argv) {
         if (code !== 0) throw new Error('NVDA payload sync failed (exit ' + code + ')');
       } else refreshJaws(root, runtime.controller, path, config, instance.id);
     }
-    await wait(reader, root, config, instance.id, abort.signal, retryAfter);
+    await wait(reader, root, config, instance.id, abort.signal, retryAfter, Boolean(check));
     if (op === 'run') {
       if (!state(root, config, instance.id).running)
         throw new Error('The reader VM stopped after readiness.');

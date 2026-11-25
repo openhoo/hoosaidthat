@@ -134,10 +134,15 @@ if (command === 'docker' || (dockerGuest && ['doctor','init','up','status','wait
     if (!dockerGuest) throw new Error('Docker OEM preparation requires HST_NVDA_ENGINE=docker');
     initialize();
     break;
-  case 'docker-readiness':
+  case 'docker-readiness': {
     if (!dockerGuest || !/^[a-f0-9]{64}$/.test(process.env.HST_NVDA_CONTAINER_ID ?? '')) throw new Error('Docker readiness requires the owned container identity');
-    await waitUntilReady();
+    const flags = process.argv.slice(3);
+    if (flags.length && !(flags.length === 1 && flags[0] === '--native-check'))
+      throw new Error('Unexpected Docker readiness arguments');
+    const active = await waitUntilReady();
+    if (flags.length) await ensureProcessLocale(active, 'en-US');
     break;
+  }
   case 'winhoo': {
     const result = spawnSync('python3', [join(deploymentRoot, 'winhoo-local.py'), ...process.argv.slice(3)], { stdio: 'inherit' });
     process.exitCode = result.status ?? 1;
@@ -893,6 +898,17 @@ async function runParityMatrix() {
   console.log('NVDA full declared-profile matrix passed.');
 }
 
+async function ensureProcessLocale(active, locale) {
+  if (active.locale === locale) return;
+  runSshControl(`locale-${locale}`);
+  const changed = await waitUntilReady(locale);
+  if (![active, changed].every(s => [s.chromePid,s.nvdaPid].every(pid => Number.isInteger(pid) && pid > 0)) ||
+      active.chromePid !== changed.chromePid || active.nvdaPid === changed.nvdaPid) {
+    throw new Error('A runtime language change must preserve Chrome and replace NVDA before sending native keys');
+  }
+  console.log(`NVDA locale ${active.locale} -> ${locale}; Chrome PID ${changed.chromePid}, NVDA PID ${active.nvdaPid} -> ${changed.nvdaPid}`);
+}
+
 async function runParityCell(locale, keyboardLayout, options = {}) {
   if (!['en-US', 'de-DE'].includes(locale) || !['desktop', 'laptop'].includes(keyboardLayout)) {
     throw new Error('parity-cell requires locale en-US|de-DE and layout desktop|laptop');
@@ -907,15 +923,7 @@ async function runParityCell(locale, keyboardLayout, options = {}) {
   }
   const token = options.token ?? readControlToken();
   console.log(`NVDA parity ${locale}/${keyboardLayout}`);
-  if (active.locale !== locale) {
-    runSshControl(`locale-${locale}`);
-    const changed = await waitUntilReady(locale);
-    if (![active, changed].every(s => [s.chromePid,s.nvdaPid].every(pid => Number.isInteger(pid) && pid > 0)) ||
-        active.chromePid !== changed.chromePid || active.nvdaPid === changed.nvdaPid) {
-      throw new Error('A runtime language change must preserve Chrome and replace NVDA before sending native keys');
-    }
-    console.log(`NVDA locale ${active.locale} -> ${locale}; Chrome PID ${changed.chromePid}, NVDA PID ${active.nvdaPid} -> ${changed.nvdaPid}`);
-  }
+  await ensureProcessLocale(active, locale);
   if (options.shard) {
     const root = join(invocationRoot, 'test-results');
     mkdirSync(root, { recursive: true });

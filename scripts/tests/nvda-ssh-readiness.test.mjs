@@ -33,6 +33,17 @@ function invoke(command, scenario, acceleration = 'tcg') {
     cpSync(resolve(root, 'oracle/windows-nvda/engine-state.mjs'), resolve(packageRoot, 'oracle/windows-nvda/engine-state.mjs'));
     cpSync(resolve(root, 'oracle/windows-nvda/winhoo-local.mjs'), resolve(packageRoot, 'oracle/windows-nvda/winhoo-local.mjs'));
     cpSync(resolve(root, 'oracle/parity/coverage.json'), resolve(packageRoot, 'oracle/parity/coverage.json'));
+    const docker = command[0] === 'docker-readiness';
+    if (docker) {
+      // Ownership is covered by the Docker controller tests. Only this exact guest may reach readiness.
+      writeFileSync(resolve(packageRoot, 'scripts/windows-reader-docker.mjs'), `
+        import assert from 'node:assert/strict';
+        export function ownedDockerGuest(reader, root, id) {
+          assert.equal(reader, 'nvda'); assert.equal(root, ${JSON.stringify(runtimeRoot)});
+          assert.equal(id, 'a'.repeat(64)); return id;
+        }
+      `);
+    }
     const generationHash = createHash('sha256');
     const payloadEntries = payloadFiles.map(name => {
       const source = resolve(root, 'oracle/windows-nvda/oem/hoosaidthat', name);
@@ -70,7 +81,7 @@ function invoke(command, scenario, acceleration = 'tcg') {
       const runs = [];
       let now = 0;
       let fetches = 0;
-      let locale = 'en-US';
+      let locale = scenario.startsWith('retained-german') ? 'de-DE' : 'en-US';
       const httpRequests = [];
       const httpOverlaps = [];
       let httpActive = 0;
@@ -119,7 +130,7 @@ function invoke(command, scenario, acceleration = 'tcg') {
             core: options.env.HOOSAIDTHAT_NVDA_PARITY_CORE, settings: options.env.HOOSAIDTHAT_NVDA_PARITY_SETTINGS });
           return { status: 0, stdout: '', stderr: '' };
         }
-        if (program === 'podman') {
+        if (program === ${JSON.stringify(docker ? 'docker' : 'podman')}) {
           assert.equal(args[0], 'ps');
           return { status: 0, stdout: 'a'.repeat(64) + '\t' + 'hoosaidthat-nvda-oracle' + '\trunning', stderr: '' };
         }
@@ -129,8 +140,8 @@ function invoke(command, scenario, acceleration = 'tcg') {
         const connect = Number(args.find(value => value.startsWith('ConnectTimeout=')).split('=')[1]);
         calls.push({ command, timeout: options.timeout, connect, started: now });
         const payload = { schema: 'hoosaidthat.nvda-ssh-control', version: 1, command, status: 'ready', ready: true, runtimeFresh: true,
-          runtime: { locale, nvdaPid: locale === 'en-US' || scenario === 'reader-unchanged' ? 42 : 56,
-            chromePid: locale === 'de-DE' && scenario === 'browser-replaced' ? 88 : 72 } };
+          runtime: { locale, nvdaPid: locale === 'en-US' || ['reader-unchanged', 'retained-german-reader-unchanged'].includes(scenario) ? 42 : 56,
+            chromePid: locale === 'de-DE' && ['browser-replaced', 'retained-german-browser-replaced'].includes(scenario) ? 88 : 72 } };
         if (scenario.startsWith('console-') && now < (scenario === 'console-locked' ? Infinity : 150_000)) {
           const account = scenario === 'console-occupied' ? 'ORACLE\\\\other' : null;
           const lockState = scenario === 'console-unknown' ? 'unknown' : 'locked';
@@ -295,13 +306,14 @@ function invoke(command, scenario, acceleration = 'tcg') {
         clearTimeout(signalTimers.get(options?.signal));
         if (scenario === 'fetch-exhausts-deadline' && fetches === 1) now += 45 * 60_000;
         return new Response(JSON.stringify(String(url).includes('/v2/health')
-          ? { protocolVersion: '2.0', screenReader: 'nvda', version: '2026.1.1', ready: true }
-          : { webSocketDebuggerUrl: 'ws://127.0.0.1/devtools/browser/fixture' }));
+          ? { protocolVersion: '2.0', screenReader: 'nvda', version: '2026.1.1', ready: true, status: 'ok', profile: 'nvda-web-2026.1.1', captureBoundary: 'nvda-presentation-hooks' }
+          : { Browser: 'Chrome/151.0.7922.47', webSocketDebuggerUrl: 'ws://127.0.0.1/devtools/browser/fixture' }));
       };
       process.on('exit', () => writeFileSync(${JSON.stringify(receiptPath)}, JSON.stringify({ calls, now, fetches, playwrightCalls, runs,
         httpRequests, httpOverlaps, httpActive, httpMaxActive })));
     `);
     const env = { ...process.env, HST_NVDA_RUNTIME_ROOT: runtimeRoot };
+    if (docker) { env.HST_NVDA_ENGINE = 'docker'; env.HST_NVDA_CONTAINER_ID = 'a'.repeat(64); }
     if (scenario.startsWith('console-')) env.HST_NVDA_QUALIFICATION = '1';
     if (acceleration === null) delete env.HST_NVDA_ACCELERATION;
     else env.HST_NVDA_ACCELERATION = acceleration;
@@ -449,6 +461,26 @@ for (const scenario of ['locale-stale', 'locale-mismatch']) {
     assert.equal(r.status, 1);
     assert.equal(r.playwrightCalls, 0);
     assert.match(r.stderr, /locale|fresh/i);
+  });
+}
+
+test('the packaged NVDA check selects English on a retained German guest; wait preserves its locale', () => {
+  const check = invoke(['docker-readiness', '--native-check'], 'retained-german');
+  assert.equal(check.status, 0, check.stderr);
+  assert.deepEqual(check.calls.map(c => c.command), ['status', 'locale-en-US', 'status']);
+  assert.match(check.stdout, /de-DE -> en-US/);
+  for (const [args, scenario] of [[[], 'retained-german'], [['--native-check'], 'ready']]) {
+    const unchanged = invoke(['docker-readiness', ...args], scenario);
+    assert.equal(unchanged.status, 0, unchanged.stderr);
+    assert.deepEqual(unchanged.calls.map(c => c.command), ['status']);
+  }
+});
+
+for (const scenario of ['retained-german-browser-replaced', 'retained-german-reader-unchanged']) {
+  test(`the packaged NVDA check rejects an unverified transition: ${scenario}`, () => {
+    const failed = invoke(['docker-readiness', '--native-check'], scenario);
+    assert.equal(failed.status, 1);
+    assert.match(failed.stderr, /preserve Chrome and replace NVDA/);
   });
 }
 
