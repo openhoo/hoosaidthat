@@ -1,6 +1,8 @@
 # NVDA and JAWS in Docker with WinHoo
 
-Run the controller inside x64 Linux or a WSL2 distribution with a local Linux Docker daemon, Docker Compose, Node, npm, Python 3 and accessible `/dev/kvm` and `/dev/net/tun`. Each reader has its own Windows desktop, disk and credentials. Tests can connect from the same Linux distribution; the reader and Chrome run together inside Windows. The Windows workstation's own screen reader and Docker Desktop do not need to be running.
+Run the controller inside x64 Linux or WSL2 with a local Linux Docker daemon, Docker Compose, Node, npm, Python 3.9 or later, and accessible `/dev/kvm` and `/dev/net/tun`. Each reader has its own Windows desktop, disk and credentials. Tests run from Linux; the reader and Chrome run together inside Windows. The workstation's own screen reader and Docker Desktop can stay closed.
+
+On a provisioned host with this package installed, run `hoosaidthat-windows-reader nvda check` from a writable directory. It starts the desktop if needed, selects US English and the desktop keyboard layout, and prints the directory containing the results. A check stops the desktop if it started it; a manually started desktop stays running. For JAWS, first [activate a license that permits testing](#first-jaws-startup).
 
 ## Run a speech check
 
@@ -20,7 +22,7 @@ Run the controller inside x64 Linux or a WSL2 distribution with a local Linux Do
 3. Start a reader and run the packaged check in one command. For NVDA, set `reader=nvda`; for JAWS, use `reader=jaws`:
 
    ```sh
-   reader=jaws
+   reader=nvda
    node scripts/windows-reader-docker.mjs "$reader" doctor
    node scripts/windows-reader-docker.mjs "$reader" check
    ```
@@ -38,7 +40,7 @@ node scripts/windows-reader-docker.mjs "$reader" sync
 
 NVDA updates its authenticated control plugin. JAWS verifies the staged tarball and scripts, installs them into a fresh application directory and restarts its dedicated bridge task. Both wait for real reader and browser readiness. A new JAWS, Chrome or Node pin requires a newly provisioned guest.
 
-From an installed npm package, use the same subcommands: `hoosaidthat-windows-reader nvda check` or `hoosaidthat-windows-reader jaws check`. Each check prints a fresh private output directory under the current working directory. Open its `report.json` for the Playwright results and `artifacts/` for the captured reader events and per-test reports.
+In the output directory, open `report.json` for the Playwright results or look under `artifacts/` for captured reader events and a portable HTML report for each test.
 
 ## Run your own tests
 
@@ -60,7 +62,7 @@ Run `hoosaidthat-windows-reader jaws run -- npx playwright test` from your proje
 
 For a longer JAWS navigation check, run `hoosaidthat-windows-reader jaws check --navigation`. This checks forward and backward movement across heading levels, controls, graphics, list items and unvisited links. It compares the name of the target with what JAWS actually said.
 
-To exercise NVDA's English and German profiles with both keyboard layouts, run the full 40-block matrix from your project, or replay a single block:
+To exercise all 190 declared NVDA commands in each of the four language and keyboard combinations, run the 40-block matrix from your project, or replay a single block:
 
 ```sh
 npx hoosaidthat-windows-reader nvda parity
@@ -87,3 +89,9 @@ Run `hoosaidthat-windows-reader jaws sync` to restart the bridge, then `jaws che
 A new guest can reuse verified installers in `shared/cache`: `jaws-installer.exe`, `node.zip` and `chrome.zip`. Their SHA-256 hashes are in the JAWS runtime lock.
 
 JAWS speech events are text. Braille assertions, including negative assertions, report that braille capture is unavailable. Its advertised keyboard actions are a subset of the NVDA matrix. For NVDA's separate 40-block release qualification, see the [Windows NVDA oracle](../oracle/windows-nvda/README.md). A smoke-check result is not that qualification.
+
+## What has been verified
+
+On November 25, 2026, native Windows tests captured English and German heading, button and table announcements, live-region speech, and braille updates from NVDA 2026.1.1 with Chrome 151.0.7922.47. Speech evidence is the text NVDA queued; braille evidence comes from the display write hook.
+
+JAWS 2027.2610.428.400 installed and started in its dedicated Windows account. It showed the activation dialog, and its Remote Command Server did not open port 9002. No testing license was available, so native JAWS speech and navigation remain unverified. The installed runner includes four default checks and three additional navigation checks for use with a licensed guest.
