@@ -601,6 +601,14 @@ export class ScreenReaderSession {
     return results;
   }
 
+  async nextButton(): Promise<ScreenReaderObservation> {
+    return await this.act('nextButton');
+  }
+
+  async previousButton(): Promise<ScreenReaderObservation> {
+    return await this.act('previousButton');
+  }
+
   async nextHeading(): Promise<ScreenReaderObservation> {
     return await this.act('nextHeading');
   }

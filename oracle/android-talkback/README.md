@@ -5,15 +5,66 @@ device or emulator. It uses protocol v2, the `talkback-web` profile, and the
 `talkback-tts-output` capture boundary. It has no NVDA parity claim.
 
 The Node bridge runs on the computer connected to the device through `adb`.
-The screen reader and Chrome run on Android. This adapter does not install,
-download or emulate TalkBack and does not start an emulator automatically.
+The screen reader and Chrome run on Android. Use `--avd` to launch and prepare
+a disposable instance of a named Android Virtual Device (AVD), or `--serial` to attach to a device you prepared yourself.
 
-## Prepare a dedicated test device
+## Run on an Android emulator
+
+On the emulator host, install the Android SDK command-line tools, JDK 17+ and
+Node 22+. Set `ANDROID_HOME` and `JAVA_HOME`, and put the SDK's `cmdline-tools/latest/bin`,
+`platform-tools` and `emulator` directories on PATH. Use an emulator host with
+hardware acceleration. The following example is for x86-64 Linux; choose an
+available ABI matching your emulator host on other platforms.
+
+```bash
+sdkmanager "platform-tools" "emulator" "platforms;android-35" "build-tools;35.0.0" "system-images;android-35;google_apis_playstore;x86_64"
+avdmanager create avd --name HST_TalkBack_API35 --device pixel_6 --package "system-images;android-35;google_apis_playstore;x86_64"
+```
+
+The verified Pixel 6 AVD used 4 CPU cores, 4096 MiB RAM, a 10 GiB data
+partition and hardware keyboard input. To reproduce it, set
+`hw.cpu.ncore=4`, `hw.ramSize=4096M`, `disk.dataPartition.size=10G` and
+`hw.keyboard=yes` in the new AVD's `config.ini` before its first boot.
+Use TalkBack's Default keymap with Alt as its modifier. The default smoke
+suite expects an English device and reader. For a German consumer suite,
+configure the base AVD's language first: `--locale de-DE` tells the bridge
+which locale to report; it does not change Android or TalkBack's language.
+
+From the HooSaidThat checkout:
+
+```bash
+npm ci
+npm run build
+npm run talkback:android:build
+npm run talkback:android:run -- --avd HST_TalkBack_API35 --token-file ~/.hst/talkback-token
+```
+
+The CLI starts a headless instance, waits for Android to boot, checks its AVD
+name, installs the two helper APKs, selects the capture engine and enables
+TalkBack. The Google Play image must include Chrome and Android Accessibility
+Suite. If TalkBack is absent, install it in the base AVD through Google Play
+or supply a trusted, compatible standalone APK with `--talkback-apk PATH`.
+The CLI does not download third-party APKs. If your image presents an onboarding
+screen it cannot dismiss, complete setup once in the base AVD and close it.
+
+With WSL2 on a KVM-enabled host, set `HST_EMULATOR_GPU=lavapipe` if
+the default software renderer stalls during boot. This selects Lavapipe and
+disables the guest Vulkan feature. Set `HST_EMULATOR_BIN` to override the
+SDK emulator executable.
+
+The managed instance uses `-read-only -no-snapshot`: changes made during the
+test are discarded when it stops. Other connected devices keep their settings.
+Use `start --avd NAME` to serve a session until Ctrl+C, or append
+`-- <command> [args...]` to `run` for a consumer suite. The default `run`
+checks native navigation and async live-region speech. Set `HST_TALKBACK_RESULTS`
+to an absolute directory to retain the test attachments on the host.
+
+## Attach to a prepared device with `--serial`
 
 Requirements:
 
-- Android 14 / API 34 or newer. Keyboard combinations use Android's native
-  `input keyboard keycombination` command.
+- Android 14 / API 34 or newer. Emulators must expose Android's shell `uinput`
+  utility for virtual keyboard input.
 - Google TalkBack (`com.google.android.marvin.talkback`) enabled, its tutorial
   completed, and **Default keymap**, **Alt modifier**, default shortcuts selected
   in TalkBack's physical keyboard settings. Classic and customized keymaps are
@@ -82,8 +133,10 @@ npm run talkback:android:run -- --serial emulator-5554 --token-file /tmp/hst-tal
 `doctor` checks the Android API, installed reader/browser versions, enabled
 TalkBack, selected capture engine and native Chrome window. It reports speech
 as **not tested**. `run` additionally opens an owned bootstrap tab, captures a
-new TalkBack utterance, starts authenticated control, and runs the packaged
-heading/button/live-region smoke tests. Silent startup or failed native focus
+fresh title from TalkBack, starts authenticated control, and runs the packaged
+heading/button/live-region smoke tests. During cold startup the bridge can
+reattach to the capture engine up to twice, with a new title each time. Once
+the session starts, a capture failure invalidates it. Silent startup or failed native focus
 prevents the bridge from reporting ready.
 
 To run a consumer suite instead:
@@ -104,7 +157,6 @@ export default defineConfig({
       runtime: 'external',
       locale: 'en-US',
       keyboardLayout: 'desktop',
-      quietMs: 500,
       webReport: 'on',
     },
   },
@@ -125,8 +177,8 @@ so it can be removed after checking that the old bridge has stopped.
 
 Host development servers are not automatically reachable as Android localhost.
 Use an emulator's host gateway or create a specific `adb -s SERIAL reverse`
-mapping for your application's port. The bridge never changes application
-networking or the device's accessibility/TTS settings automatically.
+mapping for your application's port. The bridge does not change application
+networking. With `--serial`, it also leaves accessibility and TTS settings alone.
 
 ## Actions and capture boundaries
 
@@ -137,8 +189,13 @@ controls, checkboxes, combo boxes, edit fields, graphics, links, lists, list
 items and tables. Structural shortcuts use TalkBack's Default Alt keymap.
 `returnToPage` requests native WebView accessibility focus; `readCurrent`
 clears and restores the currently focused native accessible object's focus.
-Both require Android to accept the action. They do not derive announcements
-from DOM text. Normal Playwright locators and speech assertions remain available.
+Document start/end place native accessibility focus on the first/last readable
+node in Chrome's web content, so navigation stays out of its toolbar. On
+emulators, mapped shortcuts use Android's `uinput` tool to send virtual USB
+keyboard events through TalkBack. The prepared physical-device path retains
+Android shell keyboard input; it has not been qualified here.
+These actions require Android to accept the focus request or keyboard input.
+They do not derive announcements from DOM text. Normal Playwright locators and speech assertions remain available.
 
 The native probe verifies the foreground package and whether native focus is
 inside Chrome's WebView. It returns no input values or password text. It does
@@ -155,6 +212,10 @@ TTS process; restart the bridge after restarting the capture engine for a fresh
 run. After a reader/probe/device failure, finish retains already collected
 events with artifact integrity metadata.
 
+TalkBack's default quiet interval is 1.5 seconds: Android can send the name,
+role, and resulting live update in separate synthesis requests. For observations
+of slower application updates, set `quietMs` in the fixture options.
+
 These are actual **synthesis requests**, not proof of audible playback or
 utterance completion. The test engine returns short silent PCM and does not
 preserve natural voice timing. Interruptions and continuous-reading behavior
@@ -168,9 +229,13 @@ HTML reports use the existing evidence path.
 capture corruption/loss, event attribution, Android gestures and CDP forwarding.
 `npm run talkback:android:build` compiles both Java helpers against Android 35 and
 verifies their APK signatures. These checks alone do not qualify real TalkBack
-behavior. Run the device smoke suite above on the intended TalkBack/Chrome/OS
-versions and retain its Playwright attachments before claiming that combination
-works. The initial adapter has not yet been qualified on a real Android runtime.
+behavior. The [Android 15 emulator test record](../../docs/evidence/android-talkback-api35.md)
+includes actual TalkBack speech requests from the unchanged smoke suite, run
+both from a cold managed AVD and against a prepared emulator. It covers the
+Google Play x86_64 API 35 revision 9 image with TalkBack 15.0.0.639625893,
+Chrome 124.0.6367.219, and en-US. Physical devices, other versions and German
+speech were not tested. Run the suite and retain its attachments for each
+additional configuration you need to support.
 
 Primary implementation references: Android `TextToSpeechService`,
 `SynthesisRequest.getCallerUid()`, `UiAutomation` and `AccessibilityNodeInfo`;

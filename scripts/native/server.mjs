@@ -80,6 +80,15 @@ export async function startNativeServer({ screenReader, token, driver, probe,
       const events = active.events.filter(event => event.sequence > after);
       const hasSpeech = events.some(event => event.kind === 'speech');
       if ((!requireOutput || hasSpeech) && Date.now() - Math.max(started, active.lastEventAt) >= requestedQuietMs) {
+        if (screenReader === 'talkback' && driver.drain) {
+          // ADB samples the TTS log asynchronously. Before declaring silence,
+          // consume any in-flight sample with this command still owning its speech.
+          const beforeDrain = sequence;
+          await driver.drain();
+          ready();
+          if (Date.now() - started >= timeoutMs) break;
+          if (sequence !== beforeDrain) continue; // A new utterance restarts the quiet window.
+        }
         return { events, cursor: sequence, timedOut: false };
       }
       await delay(Math.min(25, requestedQuietMs));

@@ -8,7 +8,7 @@ export default defineConfig({
   use: { screenReaderOptions: {
     screenReader: 'talkback', runtime: 'external',
     locale: process.env.SCREEN_READER_LOCALE === 'de-DE' ? 'de-DE' : 'en-US',
-    keyboardLayout: 'desktop', quietMs: 500, actionTimeoutMs: 15000,
+    keyboardLayout: 'desktop', actionTimeoutMs: 15000,
     webReport: 'on', overlay: true,
   } },
 });
