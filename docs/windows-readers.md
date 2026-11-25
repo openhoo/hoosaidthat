@@ -85,6 +85,8 @@ For a new private runtime on a WinHoo image supporting sparse backups, `HST_WINH
 
 Use a JAWS license that permits your testing. If Windows shows **JAWS Activation**, start the guest with `hoosaidthat-windows-reader jaws up` so it stays open. In the viewer on port 8009, complete the vendor’s activation in the dedicated Windows account. An existing installation also offers **JAWS → Help → License → Update Activation**. Keep activation details in the guest.
 
+If you launched JAWS manually without `/startrcs` to complete activation, exit JAWS normally inside Windows once activation is complete. The bridge reuses a running reader; it adds `/startrcs` only when it starts JAWS itself.
+
 Run `hoosaidthat-windows-reader jaws sync` to restart the bridge, then `jaws check` with the same runner. The `jaws-web` profile uses US English and the desktop keyboard layout. Readiness requires speech from a bootstrap control, followed by a match on reader version, speech source and Chrome identity. If startup fails, run `hoosaidthat-windows-reader jaws status` and inspect `C:\HooSaidThat-JAWS\runtime.log` inside Windows. An installed `RemoteCommandServer.dll` by itself does not mean that JAWS opened its server on port 9002.
 
 A new guest can reuse verified installers in `shared/cache`: `jaws-installer.exe`, `node.zip` and `chrome.zip`. Their SHA-256 hashes are in the JAWS runtime lock.

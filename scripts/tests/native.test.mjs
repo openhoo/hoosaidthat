@@ -29,7 +29,11 @@ async function fixture(t, reader, options = {}) {
   const driver = {
     onSpeech(callback) { speak = callback; },
     assertReady() { if (failure) throw failure; },
-    async press(chords) { delivered.push(chords); if (!options.silent) speak('Checkout summary heading level 2'); },
+    async press(chords) {
+      delivered.push(chords);
+      if (options.press) await options.press(speak);
+      else if (!options.silent) speak('Checkout summary heading level 2');
+    },
     close() {},
     ...(options.drainSpeech ? { async drain() { speak('Pending asynchronous output'); } } : {}),
   };
@@ -38,6 +42,7 @@ async function fixture(t, reader, options = {}) {
   const bridge = await startNativeServer({ screenReader: reader, token, driver,
     quietMs: 5, actionTimeoutMs: 50,
     probe: async () => {
+      options.beforeProbe?.();
       if (probeFailure) throw new Error('private native probe error');
       return { version: '26.6.2',
       browserWindowActive: foreground, webContentFocused: foreground,
@@ -119,14 +124,47 @@ test('native sessions reject overlap, mismatches, stale cursors and unsupported 
   assert.deepEqual(await first.json(), await retry.json());
 });
 
-test('missing speech times out and never manufactures successful reader output', async t => {
-  const f = await fixture(t, 'voiceover', { silent: true });
-  await f.client.beginSession('silent', false);
-  const action = await f.client.perform('nextHeading');
-  assert.equal(action.timedOut, true);
-  assert.equal(action.events.filter(event => event.kind === 'speech').length, 0);
+test('JAWS waits through the focus probe, key acknowledgement and late speech without repeating the key', async t => {
+  // Advance only the action request's deadline. HTTP, session ownership and
+  // the bridge's speech capture and settlement still run over loopback.
+  let elapsed = 0, deadline;
+  const controller = new AbortController();
+  function spend(ms) {
+    if (deadline === undefined) return;
+    elapsed += ms;
+    if (elapsed >= deadline) controller.abort(new Error('action request deadline expired'));
+  }
+  const f = await fixture(t, 'jaws', {
+    beforeProbe: () => spend(9_000),
+    press(speak) {
+      spend(9_000);
+      setImmediate(() => { spend(14_000); speak('Delayed heading level two'); });
+    },
+  });
+  await f.client.beginSession('late-jaws-speech', false);
+  const timeout = t.mock.method(AbortSignal, 'timeout', ms => { deadline = ms; return controller.signal; });
+  const pending = f.client.perform('nextHeading');
+  timeout.mock.restore();
+  const result = await pending;
+  assert.equal(elapsed, 32_000);
+  assert.equal(result.timedOut, false);
+  assert.deepEqual(result.events.filter(e => e.kind === 'speech').map(e => e.text), ['Delayed heading level two']);
+  assert.deepEqual(f.delivered, [nativeCommands('jaws').nextHeading]);
   await f.client.finishSession();
 });
+
+for (const reader of ['voiceover', 'jaws']) {
+  test(`${reader}: missing speech times out without repeating the key or faulting the session`, async t => {
+    const f = await fixture(t, reader, { silent: true });
+    await f.client.beginSession('silent', false);
+    const action = await f.client.perform('nextHeading');
+    assert.equal(action.timedOut, true);
+    assert.equal(action.events.filter(event => event.kind === 'speech').length, 0);
+    assert.deepEqual(f.delivered, [nativeCommands(reader).nextHeading]);
+    const [artifact] = await f.client.finishSession();
+    assert.equal(JSON.parse(Buffer.from(artifact.body).toString('utf8')).fault, null);
+  });
+}
 
 test('native disconnect fails closed but preserves completed evidence on finish', async t => {
   const f = await fixture(t, 'voiceover');

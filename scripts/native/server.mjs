@@ -2,6 +2,7 @@ import { createServer } from 'node:http';
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import { SCREEN_READER_ACTIONS } from '../../dist/types.js';
+import { NATIVE_ACTION_SETTLE_TIMEOUT_MS } from '../../dist/native-timeouts.js';
 import { nativeCommands } from './commands.mjs';
 
 const MAX_EVENTS = 20000;
@@ -11,7 +12,7 @@ const MAX_EVENT_BYTES = 8 * 1024 * 1024;
 // platform independent and can be regression-tested in a Linux container.
 export async function startNativeServer({ screenReader, token, driver, probe,
   port = 0, locale = 'en-US', keyboardLayout = 'desktop', quietMs = 300,
-  actionTimeoutMs = 15000, browser }) {
+  actionTimeoutMs = NATIVE_ACTION_SETTLE_TIMEOUT_MS, browser }) {
   if (!['jaws', 'voiceover', 'talkback'].includes(screenReader)) throw new Error('native reader must be jaws, voiceover or talkback');
   if (typeof token !== 'string' || Buffer.byteLength(token) < 16 || Buffer.byteLength(token) > 4096 || /[\u0000-\u0020\u007f]/.test(token)) {
     throw new Error('native control token must contain 16 to 4096 bytes without whitespace or control characters');

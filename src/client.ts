@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { jawsActionBudgetMs } from './native-timeouts.js';
 import type {
   BrailleEvent,
   CaptureBoundary,
@@ -320,13 +321,15 @@ export class HttpScreenReaderClient {
       }
     }
     if (this.usesV2()) {
+      const actionBudgetMs = this.screenReaderName === 'jaws'
+        ? jawsActionBudgetMs(this.actionTimeoutMs) : this.actionTimeoutMs;
       const value = await this.requestJSON(`${this.sessionPath()}/actions`, {
         method: 'POST',
         body: JSON.stringify({
           command: action,
           ...(argument === undefined ? {} : { argument }),
         }),
-        timeoutMs: this.actionTimeoutMs + 2_000,
+        timeoutMs: actionBudgetMs + 2_000,
       });
       if (
         !isObject(value) ||

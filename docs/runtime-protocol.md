@@ -226,7 +226,16 @@ The `jaws-web` adapter uses protocol v2. Health identifies the Windows process, 
 `interaction.capturedOutput` in JAWS Remote Command Server. Actions advertised by
 `GET /v2/actions` are delivered as emulated keyboard input. The Windows UI Automation
 probe identifies which browser document has keyboard focus; its names do not become
-speech events. JAWS does not report whether its virtual buffer is active: the state
-response omits `cursorInDocument`, and `screenReader.state()` omits `virtualBufferActive`.
+speech events. The adapter does not infer virtual-buffer activity from keyboard
+focus or speech. The state response omits `cursorInDocument`, and
+`screenReader.state()` omits `virtualBufferActive`.
 The adapter does not expose NVDA settings, braille cells or original
 audio. See [Windows readers in Docker](windows-readers.md).
+
+For each JAWS action, the bridge checks foreground focus (up to 10 seconds), sends
+one key chord and waits for its acknowledgement (up to 10 seconds), then waits
+for speech to settle (up to 15 seconds). The client's default HTTP deadline is
+37 seconds including transport overhead. A shorter client `actionTimeoutMs`
+does not shorten the guest's speech window. A completed action that expected speech
+but received none returns `timedOut: true`. If the key acknowledgement expires,
+delivery is uncertain: the bridge requires a restart and never repeats the key.

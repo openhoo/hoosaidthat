@@ -54,8 +54,25 @@ test('JAWS rejects a mismatched reader, another platform, and a driver outside t
   await assert.rejects(ATDriver.connect('wss://other.invalid/session', 'jaws'), /same Windows guest/);
 });
 
+test('JAWS stops accepting keys when the Remote Command Server does not acknowledge delivery', async t => {
+  const Socket = host();
+  const driver = await ATDriver.connect(endpoint, 'jaws', { WebSocketClass: Socket });
+  t.after(() => driver.close());
+  const sent = t.mock.method(Socket.instance, 'send', () => {}); // The RCS receives the key but never responds.
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const action = nativeCommands('jaws').nextHeading;
+  const first = assert.rejects(driver.press(action), /command timed out; restart the bridge/);
+  t.mock.timers.tick(10_000);
+  await first;
+  await assert.rejects(driver.press(action), /command timed out; restart the bridge/);
+  assert.equal(sent.mock.callCount(), 1);
+  assert.deepEqual(JSON.parse(sent.mock.calls[0].arguments[0]).params, { name: 'pressKeys', keys: ['h'] });
+});
+
 test('JAWS advertises desktop keys only when they implement that action', () => {
   const actions = nativeCommands('jaws');
+  // The action deadline allows one AT Driver acknowledgement per command.
+  assert(Object.values(actions).every(chords => chords.length === 1));
   assert.deepEqual(actions.nextHeading, [['h']]);
   assert.deepEqual(actions.previousTableRow, [[KEY.control, KEY.alt, KEY.up]]);
   assert.deepEqual(actions.elementsList, [[KEY.insert, KEY.f3]]);

@@ -1,3 +1,5 @@
+import { AT_DRIVER_REQUEST_TIMEOUT_MS } from '../../dist/native-timeouts.js';
+
 // JAWS uses the W3C AT Driver userIntent command; the experimental VoiceOver
 // transport predates that command. Both report real interaction.capturedOutput events.
 export class ATDriver {
@@ -95,7 +97,7 @@ export class ATDriver {
     this.assertReady();
     const id = this.#nextId++;
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => this.#fail(new Error('AT Driver command timed out; restart the bridge')), 10000);
+      const timer = setTimeout(() => this.#fail(new Error('AT Driver command timed out; restart the bridge')), AT_DRIVER_REQUEST_TIMEOUT_MS);
       this.#pending.set(id, { resolve, reject, timer });
       try { this.#socket.send(JSON.stringify({ id, method, params })); }
       catch (error) { this.#fail(error); }

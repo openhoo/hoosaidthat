@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
+import { NATIVE_FOCUS_PROBE_TIMEOUT_MS } from '../../dist/native-timeouts.js';
 const executeFile = promisify(execFile);
 async function executeProbe(stage, binary, args, options) {
   try { return await executeFile(binary, args, options); }
@@ -73,7 +74,7 @@ export async function nativeProbe(screenReader, browserPid, { voiceOverCursor = 
       if (error.nativeScriptNumber !== -1728) throw error;
     }
   }
-  const probeOptions = { timeout: 10000, maxBuffer: 65536, windowsHide: true };
+  const probeOptions = { timeout: NATIVE_FOCUS_PROBE_TIMEOUT_MS, maxBuffer: 65536, windowsHide: true };
   const { stdout } = screenReader === 'jaws' ? await executeFile(command, args, probeOptions)
     : await executeProbe('AX_FOCUS', command, args, probeOptions);
   const value = JSON.parse(stdout.replace(/^\uFEFF/, ''));
