@@ -2,6 +2,7 @@
 import { execFile, spawn } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
 import { promisify } from 'node:util';
+import { existsSync, realpathSync } from 'node:fs';
 import { mkdir, rm } from 'node:fs/promises';
 import { createHash, randomInt } from 'node:crypto';
 import { tmpdir } from 'node:os';
@@ -249,6 +250,9 @@ async function runOnDevice(options, adb, signal) {
   }
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+// npm links the installed POSIX bin to this module. Older Node versions
+// lack import.meta.main, so compare the actual file behind that link.
+const entry = process.argv[1];
+if (import.meta.main ?? (entry && existsSync(entry) && pathToFileURL(realpathSync(entry)).href === import.meta.url)) {
   main().catch(error => { console.error(`TalkBack Android bridge failed: ${error.message}`); process.exitCode = 1; });
 }

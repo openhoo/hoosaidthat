@@ -1,10 +1,26 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { mkdtemp, readFile, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import test from 'node:test';
 import { parseTalkBackArguments, runTalkBackConsumer } from '../talkback-android.mjs';
+
+test('the installed TalkBack bin handles help and rejects invalid arguments', { skip: process.platform === 'win32' }, async t => {
+  const dir = await mkdtemp(join(tmpdir(), 'hst-talkback-bin-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const bin = join(dir, 'hoosaidthat-talkback-android');
+  await symlink(fileURLToPath(new URL('../talkback-android.mjs', import.meta.url)), bin);
+  const run = (...args) => spawnSync(process.execPath, [bin, ...args], { encoding: 'utf8' });
+  const help = run('--help');
+  assert.equal(help.status, 0);
+  assert.match(help.stdout, /Usage: hoosaidthat-talkback-android/);
+  const invalid = run('doctor');
+  assert.equal(invalid.status, 1);
+  assert.match(invalid.stderr, /select exactly one device/);
+});
 
 test('pass child help flags through after the delimiter', () => {
   const prefix = ['run', '--avd', 'HST', '--token-file', 'token'];
