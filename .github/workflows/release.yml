@@ -11,6 +11,10 @@ on:
         description: Full 40-character HooVDA commit containing complete oracle corpus
         required: true
         type: string
+      expected_package_sha256:
+        description: SHA-256 of the qualified npm archive (required to publish or stage)
+        required: false
+        type: string
       npm_publish_mode:
         description: Trusted OIDC publishes publicly; bootstrap stages for maintainer MFA approval
         required: true
@@ -40,6 +44,7 @@ concurrency:
 env:
   RELEASE_VERSION: ${{ inputs.version }}
   HOOVDA_REF: ${{ inputs.hoovda_ref }}
+  EXPECTED_PACKAGE_SHA256: ${{ inputs.expected_package_sha256 }}
   NPM_PUBLISH_MODE: ${{ inputs.npm_publish_mode }}
   ENGINE_IMAGE: ghcr.io/openhoo/hoosaidthat-hoovda-engine
   HOOVDA_IMAGE: ghcr.io/openhoo/hoosaidthat-hoovda
@@ -93,6 +98,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          source scripts/release-package-sha256.sh
+          require_package_sha256
           test -z "${REHEARSAL_CANDIDATE:-}" || { echo "Cannot publish a rehearsal." >&2; exit 1; }
           if [[ ! "$RELEASE_VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]] || (( ${#RELEASE_VERSION} > 128 )); then
             echo "version must be valid SemVer, fit an OCI tag, omit build metadata, and have no v prefix" >&2
@@ -137,6 +144,7 @@ jobs:
           go run ./cmd/hoovda conformance --manifest oracle/corpus/manifest.json
       - name: Verify npm package
         run: |
+          umask 022
           npm ci
           npm audit --audit-level=high
           npm test
@@ -144,10 +152,15 @@ jobs:
           npm run pack:check
       - name: Pack tested npm files
         id: pack
+        shell: bash
         run: |
+          set -euo pipefail
+          umask 022
+          source scripts/release-package-sha256.sh
           mkdir -p "$RUNNER_TEMP/bundle"
           package=$(npm pack --json --pack-destination "$RUNNER_TEMP/bundle" | jq -er '.[0].filename')
           mv "$RUNNER_TEMP/bundle/$package" "$RUNNER_TEMP/bundle/package.tgz"
+          verify_package_sha256 "$RUNNER_TEMP/bundle/package.tgz"
           printf 'sha512=%s\n' "$(sha512sum "$RUNNER_TEMP/bundle/package.tgz" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
       - name: Authenticate GHCR
         shell: bash
@@ -271,9 +284,13 @@ jobs:
           path: ${{ runner.temp }}/bundle
           merge-multiple: true
       - name: Verify publication inputs
+        shell: bash
         run: |
+          set -euo pipefail
+          source scripts/release-package-sha256.sh
+          verify_package_sha256 "$RUNNER_TEMP/bundle/package.tgz"
           test "$BUILD_ATTEMPT" = "$GITHUB_RUN_ATTEMPT" || { echo 'Rerun all jobs to qualify this release attempt.' >&2; exit 1; }
-          printf '%s  %s\n' "$TARBALL_SHA512" "$RUNNER_TEMP/bundle/package.tgz" | sha512sum --check --status
+          printf '%s  %s\n' "$TARBALL_SHA512" "$RUNNER_TEMP/bundle/package.tgz" | sha512sum -c - >/dev/null
           mkdir -p test-results
           cp "$RUNNER_TEMP/bundle/release-candidates.json" test-results/
           jq -e --arg run "$GITHUB_RUN_ID" --arg attempt "$BUILD_ATTEMPT" --arg sha "$GITHUB_SHA" \
