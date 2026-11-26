@@ -1,0 +1,6 @@
+# Refresh this UTC snapshot when updating the image or its security dependencies.
+Types: deb
+URIs: https://snapshot.ubuntu.com/ubuntu/20261126T100000Z/
+Suites: noble noble-updates noble-backports noble-security
+Components: main restricted universe multiverse
+Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg

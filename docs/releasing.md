@@ -2,8 +2,9 @@
 
 Releases are manual and fail closed. Run `.github/workflows/release.yml` from
 the exact `v<package-version>` tag. Supply the full lowercase 40-character SHA
-of an immutable HooVDA commit and explicitly confirm publication. The commit
-must also match `images/hoovda/source.json`, which is exercised by the native
+of an immutable HooVDA commit, the SHA-256 of the npm archive tested on
+Windows (`expected_package_sha256`), and explicitly confirm publication. The
+HooVDA commit must also match `images/hoovda/source.json`, which is exercised by the native
 HooVDA image CI job and records the consumer's engine dependency. Release
 versions may include a SemVer prerelease suffix but not build metadata, because
 the same value is also an OCI tag.
@@ -64,6 +65,50 @@ The workflow also checks that all three destination image tags are absent
 before promotion. Only explicit registry not-found responses count as absence;
 authentication, network, and malformed responses stop the release. Stable npm
 versions use the explicit `latest` dist-tag; prereleases use `next`.
+
+### Pack the archive to qualify
+
+Use Node 24 and npm 11.20.0 on a POSIX filesystem. Start from a fresh checkout
+of the signed candidate with a **022 umask during checkout, build and pack**.
+npm preserves file modes in the tarball: a 077 checkout can produce different
+bytes even when every file has the same contents. Keep the checkout inside a
+private directory. Preserve Git's normal file modes (0644 for regular files,
+0755 for executables); changing the umask after checkout does not restore them.
+
+With `repo` set to the source repository and `candidate` to the full signed
+commit, use the trusted Git signers configured for the project:
+
+```sh
+git -C "$repo" verify-commit "$candidate" || exit 1
+private=$(mktemp -d) || exit 1    # parent directory stays 0700
+(
+  set -eu
+  umask 022
+  git clone --no-checkout -- "$repo" "$private/sdk"
+  cd "$private/sdk"
+  git fetch --no-tags origin "$candidate"
+  git checkout --detach "$candidate"
+  test "$(git rev-parse HEAD)" = "$candidate"
+  test "$(node -p 'process.versions.node.split(".")[0]')" = 24
+  test "$(npm --version)" = 11.20.0
+  npm ci
+  npm test
+  npm run typecheck
+  npm run pack:check
+  mkdir "$private/bundle"
+  npm pack --pack-destination "$private/bundle"
+)
+```
+
+Install the tarball in the consumer environment used for qualification. With
+the Docker runner this is the host, which drives NVDA in the Windows guest. Take
+`expected_package_sha256` from the verified evidence for the same archive
+(`packageSha256` for the Docker verifier below). Use all 64 lowercase hex
+digits for either npm mode. The build checks its tarball against this hash
+before pushing any candidate image. The publishing job checks the downloaded
+tarball again before promoting images or submitting the package to npm.
+
+### Verify the Windows evidence
 
 Before tagging, run the [owned Windows qualification](../oracle/windows-nvda/README.md#run-and-observe-a-qualification)
 against the exact candidate. On an Apple Silicon Mac, use the [guest-local WinHoo runner](../oracle/windows-nvda/README.md#local-mac-with-winhoo) with `--mode matrix --candidate <full-commit>`. It records installed guest hashes, the 40 block results and confirmed VM shutdown. Alternatively, use `qualification start` on a retained WSL2
@@ -155,7 +200,8 @@ To time this on GitHub, open **Actions → Release → Run workflow**. Select
 the branch with the workflow to measure, fill in the version and HooVDA pin,
 and copy the existing candidate tag from the original run's
 `release-candidates.json` (just `candidate-<source SHA>-<run ID>-<attempt>`).
-Enter it as **rehearsal_candidate** and leave **confirm_release** unchecked.
+Enter it as **rehearsal_candidate**, leave **expected_package_sha256** empty,
+and leave **confirm_release** unchecked.
 The rehearsal resolves the existing HooVDA and Orca indexes and runs the same
 qualification against their digests with read-only permissions. It performs no
 build or publication and does not take the lock for a real release.

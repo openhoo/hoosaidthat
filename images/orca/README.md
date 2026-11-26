@@ -13,8 +13,11 @@ Speech Dispatcher `0.12.0~rc2`, Ubuntu base digest, Matchbox, Xvfb, and
 WebKit, headless shell, build tools, headers, locale catalogs, help, desktop
 launchers, icons, and Orca development files stay outside it.
 No Orca fork or source patch is used.
-Ubuntu dependency repositories remain time-varying. Published image digest,
-SBOM, and provenance are the exact artifact lock for a release build.
+Both package installs use the same signed [Ubuntu snapshot](https://snapshot.ubuntu.com/).
+To pick up security updates, change the UTC timestamp in the source repository's
+`images/orca/ubuntu.sources`, then rebuild and smoke-test the image before release.
+The installed image retains Ubuntu's normal update sources. Its published
+digest, SBOM, and provenance identify the released artifact.
 
 Build and smoke-test:
 
