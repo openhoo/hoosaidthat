@@ -1,6 +1,8 @@
 # Releasing
 
-Releases are manual and fail closed. Run `.github/workflows/release.yml` from
+For the partial 0.1.5 release, use [Recover the 0.1.5 npm publication](recover-npm-015.md).
+
+For a new release, run `.github/workflows/release.yml` from
 the exact `v<package-version>` tag. Supply the full lowercase 40-character SHA
 of an immutable HooVDA commit, the SHA-256 of the npm archive tested on
 Windows (`expected_package_sha256`), and explicitly confirm publication. The
@@ -12,7 +14,7 @@ the same value is also an OCI tag.
 ## Publishing from GitHub Actions
 
 All release builds and registry uploads run in GitHub Actions. The workflow
-pins Node 24 and npm 11.20.0 and offers two explicit npm modes:
+pins Node 24 and npm 11.20.0 and offers two npm modes for new releases:
 
 - `trusted` (default): `npm publish --access public --provenance` uses GitHub
   OIDC. Configure the package's trusted publisher on npmjs.com with organization
