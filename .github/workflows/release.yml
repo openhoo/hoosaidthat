@@ -16,19 +16,24 @@ on:
         required: false
         type: string
       npm_publish_mode:
-        description: Trusted OIDC publishes publicly; bootstrap stages for maintainer MFA approval
+        description: Trusted OIDC, bootstrap staging, or npm-only recovery for 0.1.5
         required: true
         default: trusted
         type: choice
         options:
           - trusted
           - bootstrap-stage
+          - recover-npm-0.1.5
+      expected_recovery_commit:
+        description: Reviewed main merge SHA (only for npm-only recovery)
+        required: false
+        type: string
       rehearsal_candidate:
         description: Existing candidate tag to benchmark without publishing (leave empty for release)
         required: false
         type: string
       confirm_release:
-        description: Publish npm package and three GHCR images using the selected mode
+        description: Confirm registry writes for the selected mode
         required: true
         default: false
         type: boolean
@@ -52,7 +57,7 @@ env:
 
 jobs:
   missing-rehearsal-candidate:
-    if: "!inputs.confirm_release && inputs.rehearsal_candidate == ''"
+    if: "inputs.npm_publish_mode != 'recover-npm-0.1.5' && !inputs.confirm_release && inputs.rehearsal_candidate == ''"
     runs-on: ubuntu-latest
     steps:
       - run: |
@@ -60,7 +65,7 @@ jobs:
           exit 1
 
   build:
-    if: inputs.confirm_release
+    if: inputs.confirm_release && inputs.npm_publish_mode != 'recover-npm-0.1.5'
     permissions:
       contents: read
       packages: write
@@ -378,7 +383,7 @@ jobs:
           retention-days: 30
 
   rehearsal-inputs:
-    if: "!inputs.confirm_release && inputs.rehearsal_candidate != ''"
+    if: "inputs.npm_publish_mode != 'recover-npm-0.1.5' && !inputs.confirm_release && inputs.rehearsal_candidate != ''"
     runs-on: ubuntu-latest
     outputs:
       hoovda: ${{ steps.refs.outputs.hoovda }}
@@ -406,3 +411,94 @@ jobs:
       hoovda: ${{ needs.rehearsal-inputs.outputs.hoovda }}
       orca: ${{ needs.rehearsal-inputs.outputs.orca }}
       source: ${{ needs.rehearsal-inputs.outputs.source }}
+
+  invalid-npm-recovery:
+    needs: recover-npm-015
+    if: "!cancelled() && inputs.npm_publish_mode == 'recover-npm-0.1.5' && needs.recover-npm-015.result == 'skipped'"
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - run: |
+          echo '0.1.5 npm recovery requires an explicit first dispatch from the reviewed main merge with its exact release inputs.' >&2
+          exit 1
+
+  recover-npm-015:
+    if: >-
+      inputs.npm_publish_mode == 'recover-npm-0.1.5' && inputs.confirm_release &&
+      github.repository == 'openhoo/hoosaidthat' && github.event_name == 'workflow_dispatch' &&
+      github.ref == 'refs/heads/main' && github.sha == inputs.expected_recovery_commit && github.run_attempt == 1 &&
+      inputs.version == '0.1.5' && inputs.rehearsal_candidate == '' &&
+      inputs.hoovda_ref == '71cae236a506d598c201f15da4d8e7aa118a8ca1' &&
+      inputs.expected_package_sha256 == 'b249b33dfb7d46fb6d625d6697e35e8fe32f0da77dbcb84fe36c7af36d2a0c74'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+    env:
+      EXPECTED_RECOVERY_COMMIT: ${{ inputs.expected_recovery_commit }}
+      CONFIRM_RELEASE: ${{ inputs.confirm_release }}
+      REHEARSAL_CANDIDATE: ${{ inputs.rehearsal_candidate }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - name: Verify reviewed recovery dispatch and successful main CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir "$RUNNER_TEMP/recovery-evidence"
+          python3 scripts/recover-npm-015.py dispatch "$RUNNER_TEMP/recovery-evidence/dispatch.json"
+      - name: Download and verify original qualification and archive
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 scripts/recover-npm-015.py prepare "$RUNNER_TEMP/original"
+          cp "$RUNNER_TEMP/original/"{qualification,release-candidates}.json "$RUNNER_TEMP/recovery-evidence/"
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - name: Install the pinned publishing CLI
+        run: |
+          npm install --global --ignore-scripts --registry=https://registry.npmjs.org npm@11.20.0
+          test "$(npm --version)" = 11.20.0
+      - name: Verify destinations and publish the original npm bytes once
+        id: recover
+        run: |
+          set -euo pipefail
+          python3 scripts/recover-npm-015.py destinations "$RUNNER_TEMP/recovery-evidence/destinations.json"
+          source scripts/release-package-sha256.sh
+          verify_package_sha256 "$RUNNER_TEMP/original/package.tgz"
+          echo 'attempted=true' >> "$GITHUB_OUTPUT"
+          npm publish "$RUNNER_TEMP/original/package.tgz" --fetch-retries=0 --registry=https://registry.npmjs.org \
+            --access public --tag latest --provenance --ignore-scripts --json > "$RUNNER_TEMP/npm-publish-raw.json"
+      - name: Record the npm response
+        env:
+          NPM_PUBLISH_MODE: trusted
+          NPM_RELEASE_TAG: latest
+        run: |
+          node scripts/release-receipt.mjs create "$RUNNER_TEMP/npm-publish-raw.json" "$RUNNER_TEMP/recovery-evidence/npm-publication-receipt.json"
+          jq -e --slurpfile original "$RUNNER_TEMP/original/qualification.json" \
+            '.package.integrity == $original[0].package.integrity' "$RUNNER_TEMP/recovery-evidence/npm-publication-receipt.json" >/dev/null
+      - name: Read back npm package and verify recovery provenance
+        if: "!cancelled() && steps.recover.outputs.attempted == 'true'"
+        run: node scripts/verify-npm-recovery-015.mjs "$RUNNER_TEMP/original" "$RUNNER_TEMP/recovery-evidence"
+      - name: Record whether submission was attempted
+        if: always()
+        env:
+          ATTEMPTED: ${{ steps.recover.outputs.attempted }}
+          OUTCOME: ${{ steps.recover.outcome }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/recovery-evidence"
+          jq -n --arg attempted "$ATTEMPTED" --arg outcome "$OUTCOME" \
+            '{attempted: ($attempted == "true"), stepOutcome: $outcome}' > "$RUNNER_TEMP/recovery-evidence/submission.json"
+      - name: Preserve original qualification and recovery evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: npm-only-0.1.5-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/recovery-evidence/
+          if-no-files-found: ignore
+          retention-days: 30
