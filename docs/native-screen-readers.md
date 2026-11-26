@@ -110,6 +110,8 @@ manually prepared macOS guest uses the same commands.
 
 ## Connecting a Playwright project
 
+Set `HOOSAIDTHAT_VOICEOVER_CONTROL_TOKEN` in the worker environment, or pass a private file path as `controlTokenFile`. Keep the token itself out of Playwright project options because reporters can export them.
+
 ```ts
 import { defineConfig } from '@openhoo/hoosaidthat';
 
@@ -122,7 +124,6 @@ export default defineConfig({
       runtime: 'external',
       controlEndpoint: process.env.HOOSAIDTHAT_VOICEOVER_CONTROL_ENDPOINT,
       cdpEndpoint: process.env.HOOSAIDTHAT_VOICEOVER_CDP_ENDPOINT,
-      controlToken: process.env.HOOSAIDTHAT_VOICEOVER_CONTROL_TOKEN,
       locale: 'en-US',
       keyboardLayout: 'desktop',
       webReport: 'on',

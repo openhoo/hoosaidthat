@@ -1,6 +1,6 @@
 {
   "name": "@openhoo/hoosaidthat",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Real screen-reader testing fixtures, assertions, and visual evidence for Playwright.",
   "type": "module",
   "license": "MIT",
@@ -29,7 +29,8 @@
     "voiceover",
     "macos",
     "ios",
-    "iphone"
+    "iphone",
+    "jaws"
   ],
   "engines": {
     "node": ">=20"
@@ -51,7 +52,8 @@
     "hoosaidthat-native": "./scripts/native-screen-reader.mjs",
     "hoosaidthat-voiceover-macos": "./scripts/voiceover-macos.mjs",
     "hoosaidthat-hoovda-doctor": "./scripts/hoovda-doctor.mjs",
-    "hoosaidthat-voiceover-ios": "./scripts/voiceover-ios.mjs"
+    "hoosaidthat-voiceover-ios": "./scripts/voiceover-ios.mjs",
+    "hoosaidthat-windows-reader": "./scripts/windows-reader-docker.mjs"
   },
   "types": "./dist/index.d.ts",
   "files": [
@@ -98,7 +100,11 @@
     "oracle/ios-voiceover/HooSaidThat.xcodeproj/xcshareddata/xcschemes/HooSaidThat.xcscheme",
     "oracle/ios-voiceover/*.swift",
     "oracle/ios-voiceover/*.m",
-    "oracle/ios-voiceover/*.h"
+    "oracle/ios-voiceover/*.h",
+    "scripts/windows-reader-docker.mjs",
+    "oracle/windows-jaws",
+    "!oracle/windows-jaws/tests/**",
+    "scripts/native/focus-windows.ps1"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json && tsc -p tsconfig.parity.json && node scripts/build-parity.mjs",
@@ -151,7 +157,8 @@
     "hoovda:check": "node scripts/check-hoovda-source.mjs",
     "nvda:windows:qualification": "node scripts/nvda-windows.mjs qualification",
     "voiceover:ios:doctor": "node scripts/voiceover-ios.mjs doctor",
-    "voiceover:ios:run": "node scripts/voiceover-ios.mjs run"
+    "voiceover:ios:run": "node scripts/voiceover-ios.mjs run",
+    "windows:reader": "node scripts/windows-reader-docker.mjs"
   },
   "peerDependencies": {
     "@playwright/test": ">=1.62.1 <1.65.0"

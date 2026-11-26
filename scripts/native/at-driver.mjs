@@ -1,20 +1,24 @@
-// Client for the W3C AT Driver draft: session.new, interaction.pressKeys,
-// and interaction.capturedOutput. No keyboard or speech is synthesized by HST.
+import { AT_DRIVER_REQUEST_TIMEOUT_MS } from '../../dist/native-timeouts.js';
+
+// JAWS uses the W3C AT Driver userIntent command; the experimental VoiceOver
+// transport predates that command. Both report real interaction.capturedOutput events.
 export class ATDriver {
   #socket;
   #nextId = 1;
   #pending = new Map();
   #failure;
   #onSpeech;
+  #sessionId;
   capabilities;
 
   static async connect(endpoint, screenReader, { WebSocketClass = globalThis.WebSocket, timeoutMs = 10000 } = {}) {
-    if (screenReader !== 'voiceover') throw new Error('AT Driver currently supports VoiceOver only');
+    if (!['jaws', 'voiceover'].includes(screenReader)) throw new Error('AT Driver requires JAWS or VoiceOver');
     const url = new URL(endpoint);
     if ((url.protocol !== 'ws:' && url.protocol !== 'wss:') || url.username || url.password || url.hash || url.search ||
       (url.protocol === 'ws:' && !['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname))) {
       throw new Error('AT Driver must use loopback ws:// or secure wss:// without embedded credentials');
     }
+    if (screenReader === 'jaws' && !['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname)) throw new Error('JAWS AT Driver must run on the same Windows guest');
     if (!WebSocketClass) throw new Error('the native bridge requires Node.js 22 or later (WebSocket API)');
     const driver = new ATDriver(new WebSocketClass(url.href));
     try {
@@ -24,15 +28,27 @@ export class ATDriver {
         driver.#socket.addEventListener('error', () => { clearTimeout(timer); reject(new Error('AT Driver connection failed')); }, { once: true });
       });
       const result = await driver.request('session.new', {
-        capabilities: { alwaysMatch: { atName: 'VoiceOver', platformName: 'macos' } },
+        // The JAWS Remote Command Server implements the ARIA-AT harness dialect.
+        // Negotiate first, then verify the actual reader and platform it returned.
+        capabilities: screenReader === 'jaws' ? {} : { alwaysMatch: { atName: 'VoiceOver', platformName: 'macos' } },
       });
       const caps = result?.capabilities;
-      if (!result?.sessionId || !caps || typeof caps.atName !== 'string' || typeof caps.atVersion !== 'string' ||
-        !['macos', 'darwin'].includes(caps.platformName) ||
+      if (typeof result?.sessionId !== 'string' || !result.sessionId || !caps || typeof caps.atName !== 'string' ||
+        typeof caps.atVersion !== 'string' || !caps.atVersion.trim() || typeof caps.platformName !== 'string' ||
+        !(screenReader === 'jaws' ? ['windows', 'win32'] : ['macos', 'darwin']).includes(caps.platformName?.toLowerCase()) ||
         caps.atName.toLowerCase() !== screenReader) {
         throw new Error('AT Driver did not negotiate the requested screen reader and platform');
       }
+      driver.#sessionId = result.sessionId;
       driver.capabilities = caps;
+      if (screenReader === 'jaws') {
+        // These are the settings the upstream ARIA-AT harness uses on its dedicated guest.
+        await driver.request('settings.setSettings', { settings: [
+          { name: 'jcf:default:HTML:SayAllOnDocumentLoad', value: '0' },
+          { name: 'jcf:default:options:TypingEcho', value: '0' },
+          { name: 'jcf:default:options:DisplayStartupWizard', value: '0' },
+        ] });
+      }
       return driver;
     } catch (error) {
       driver.close();
@@ -48,7 +64,12 @@ export class ATDriver {
         const message = JSON.parse(event.data);
         if (message.method === 'interaction.capturedOutput') {
           if (typeof message.params?.data !== 'string' || Buffer.byteLength(message.params.data) > 16384) throw new Error('invalid AT Driver speech event');
-          this.#onSpeech?.(message.params.data);
+          if (message.params.sessionId !== undefined && message.params.sessionId !== this.#sessionId) return;
+          // JAWS wraps synthesized control types and states in U+001D/U+001E.
+          // Keep their words, omit the non-spoken formatting delimiters.
+          const text = this.capabilities?.atName.toLowerCase() === 'jaws'
+            ? message.params.data.replace(/[\u001d\u001e]/g, ' ').replace(/\s+/g, ' ').trim() : message.params.data;
+          if (text.trim()) this.#onSpeech?.(text);
         } else if (Number.isSafeInteger(message.id)) {
           const pending = this.#pending.get(message.id);
           if (!pending) return;
@@ -67,13 +88,16 @@ export class ATDriver {
   onSpeech(callback) { this.#onSpeech = callback; }
   assertReady() { if (this.#failure) throw this.#failure; }
   async press(chords) {
-    for (const keys of chords) await this.request('interaction.pressKeys', { keys });
+    for (const keys of chords) {
+      if (this.capabilities.atName.toLowerCase() === 'jaws') await this.request('interaction.userIntent', { name: 'pressKeys', keys });
+      else await this.request('interaction.pressKeys', { keys });
+    }
   }
   request(method, params) {
     this.assertReady();
     const id = this.#nextId++;
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => this.#fail(new Error('AT Driver command timed out; restart the bridge')), 10000);
+      const timer = setTimeout(() => this.#fail(new Error('AT Driver command timed out; restart the bridge')), AT_DRIVER_REQUEST_TIMEOUT_MS);
       this.#pending.set(id, { resolve, reject, timer });
       try { this.#socket.send(JSON.stringify({ id, method, params })); }
       catch (error) { this.#fail(error); }

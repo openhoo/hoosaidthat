@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import test from 'node:test';
+import { readerParity } from '../windows-reader-docker.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 
@@ -52,7 +53,15 @@ test('installed HooVDA parity collects compiled JavaScript with the real Playwri
   }
 });
 
-test('published Windows parity uses built package and forces the NVDA adapter', () => {
+test('the Docker parity command selects the bundled runner and validates replays before boot', () => {
+  const script = resolve(root, 'scripts/nvda-windows.mjs');
+  assert.deepEqual(readerParity('nvda', 'parity', []), ['--', process.execPath, script, 'parity']);
+  const args = ['de-DE','laptop','actions-08'];
+  assert.deepEqual(readerParity('nvda', 'parity-shard', args), ['--', process.execPath, script, 'parity-shard', ...args]);
+  assert.throws(() => readerParity('jaws','parity',[]), /Use nvda parity/);
+  assert.throws(() => readerParity('nvda','parity-shard',['de-DE','laptop','actions-09']), /Use nvda parity/);
+});
+test('published Windows parity selects the built NVDA suite and retains complete and failed Docker runs', () => {
   const temporary = mkdtempSync(resolve(tmpdir(), 'hoosaidthat-published-cli-'));
   try {
     const packageRoot = resolve(temporary, 'package');
@@ -61,8 +70,13 @@ test('published Windows parity uses built package and forces the NVDA adapter', 
       mkdirSync(resolve(packageRoot, path), { recursive: true });
     }
     cpSync(resolve(root, 'scripts/nvda-windows.mjs'), resolve(packageRoot, 'scripts/nvda-windows.mjs'));
+    // Simulate an already validated Docker owner; Windows reader ownership
+    // checks themselves run against the real controller in separate tests.
+    writeFileSync(resolve(packageRoot, 'scripts/windows-reader-docker.mjs'), "export const ownedDockerGuest=()=> 'a'.repeat(64);");
     cpSync(resolve(root, 'oracle/windows-nvda/engine-state.mjs'), resolve(packageRoot, 'oracle/windows-nvda/engine-state.mjs'));
     cpSync(resolve(root, 'oracle/windows-nvda/winhoo-local.mjs'), resolve(packageRoot, 'oracle/windows-nvda/winhoo-local.mjs'));
+    for (const name of ['matrix-inventory.json','report-evidence.mjs'])
+      cpSync(resolve(root, 'oracle/windows-nvda', name), resolve(packageRoot, 'oracle/windows-nvda', name));
     cpSync(resolve(root, 'oracle/parity/coverage.json'), resolve(packageRoot, 'oracle/parity/coverage.json'));
     writeFileSync(resolve(packageRoot, 'node_modules/@playwright/test/package.json'), JSON.stringify({ exports: { './cli': './cli.cjs' } }));
     writeFileSync(resolve(packageRoot, 'node_modules/@playwright/test/cli.cjs'), '');
@@ -74,12 +88,14 @@ test('published Windows parity uses built package and forces the NVDA adapter', 
     writeFileSync(preload, `
       import childProcess from 'node:child_process';
       import { syncBuiltinESMExports } from 'node:module';
+      import { writeFileSync } from 'node:fs';
       import assert from 'node:assert/strict';
+      const inventory = ${JSON.stringify(JSON.parse(readFileSync(resolve(root,"oracle/windows-nvda/matrix-inventory.json"),"utf8")).blocks)};
       let locale = 'en-US';
       let invocations = 0;
       childProcess.execFileSync = () => { throw new Error('published package tried to rebuild missing source'); };
       childProcess.spawnSync = (program, args, options) => {
-        if (program === 'podman') {
+        if (program === 'podman' || program === 'docker') {
           assert.equal(args[0], 'ps');
           return { status: 0, stdout: 'a'.repeat(64) + '	' + 'hoosaidthat-nvda-oracle' + '	running', stderr: '' };
         }
@@ -92,20 +108,66 @@ test('published Windows parity uses built package and forces the NVDA adapter', 
         assert.ok(args[args.indexOf('--config') + 1].endsWith('/dist/oracle/parity/playwright.config.js'));
         assert.equal(options.env.HOOSAIDTHAT_PARITY_ADAPTER, 'nvda', 'NVDA parity must not inherit another adapter');
         invocations += 1;
+        if (process.env.HST_NVDA_ENGINE === 'docker') {
+          assert.ok(args.includes('--reporter=line,json') && args.includes('--retries=0'));
+          if (process.env.TEST_MATRIX_FAIL === String(invocations)) return {status:23};
+          const e = options.env, block = e.HST_NVDA_PARITY_BLOCK;
+          const titles = inventory[block], skipped = 'Intentionally unselected spec';
+          const specs = [...titles,skipped].map(title => {
+            const pass = title !== skipped, status = pass ? 'passed' : 'skipped';
+            return {title,tests:[{expectedStatus:status,status:pass?'expected':'skipped',results:[{retry:0,status,errors:[]}]}]};
+          });
+          const binding = { adapter:'nvda', locale, layout:e.SCREEN_READER_KEYBOARD_LAYOUT, block, attempt:e.HST_WINHOO_ATTEMPT };
+          if (invocations === 3) {
+            if (process.env.TEST_MATRIX_WRONG === 'title') specs[0].title = 'Different passing test';
+            if (process.env.TEST_MATRIX_WRONG === 'retry') specs[0].tests[0].results[0].retry = 1;
+            if (process.env.TEST_MATRIX_WRONG === 'sibling') binding.block = 'actions-01';
+          }
+          writeFileSync(e.PLAYWRIGHT_JSON_OUTPUT_FILE,JSON.stringify({errors:[],config:{workers:1,projects:[{retries:0}],metadata:{hstMatrix:binding}},
+            suites:[{suites:[{specs}]}],stats:{expected:titles.length,skipped:1,flaky:0,unexpected:0}}));
+        }
         return { status: 0 };
       };
       syncBuiltinESMExports();
-      globalThis.fetch = async url => new Response(JSON.stringify(String(url).includes('/v2/health') ? { protocolVersion: '2.0', screenReader: 'nvda', version: '2026.1.1', ready: true } : { webSocketDebuggerUrl: 'ws://127.0.0.1/devtools/browser/fixture' }));
+      globalThis.fetch = async url => new Response(JSON.stringify(String(url).includes('/v2/health')
+        ? { protocolVersion:'2.0', screenReader:'nvda', version:'2026.1.1', ready:true, status:'ok', profile:'nvda-web-2026.1.1', captureBoundary:'nvda-presentation-hooks' }
+        : { Browser:'Chrome/151.0.7922.47', webSocketDebuggerUrl:'ws://127.0.0.1/devtools/browser/fixture' }));
       process.on('exit', () => { if (!process.exitCode) assert.equal(invocations, 40); });
     `);
-    const result = spawnSync(process.execPath, ['--import', pathToFileURL(preload).href, resolve(packageRoot, 'scripts/nvda-windows.mjs'), 'parity'], {
-      encoding: 'utf8',
-      timeout: 5000,
-      env: { ...process.env, HST_NVDA_RUNTIME_ROOT: runtimeRoot, HOOSAIDTHAT_PARITY_ADAPTER: 'hoovda' },
-    });
+    function invoke(env = {}) {
+      return spawnSync(process.execPath, ['--import', pathToFileURL(preload).href, resolve(packageRoot, 'scripts/nvda-windows.mjs'), 'parity'], {
+        cwd: temporary, encoding: 'utf8', timeout: 5000,
+        env: { ...process.env, HST_NVDA_RUNTIME_ROOT: runtimeRoot, HST_NVDA_QUALIFICATION: '', HOOSAIDTHAT_PARITY_ADAPTER: 'hoovda', ...env },
+      });
+    }
+    const result = invoke();
     assert.equal(result.error, undefined);
     assert.equal(result.status, 0, result.stderr);
     assert.match(result.stdout, /NVDA full declared-profile matrix passed/);
+    const complete = invoke({HST_NVDA_ENGINE:'docker'});
+    assert.equal(complete.status, 0, complete.stderr);
+    const attempts = () => readdirSync(temporary).filter(n => n.startsWith('hoosaidthat-nvda-matrix-'));
+    const [first] = attempts();
+    const directory = resolve(temporary, first);
+    assert.equal(statSync(directory).mode & 0o777, 0o700);
+    const reports = readdirSync(resolve(directory,'reports'));
+    assert.equal(reports.length, 40);
+    const events = path => readFileSync(resolve(path,'blocks.jsonl'),'utf8').trim().split('\n').map(JSON.parse);
+    assert.equal(events(directory).filter(e => e.state === 'passed').length, 40);
+    const failed = invoke({HST_NVDA_ENGINE:'docker', TEST_MATRIX_FAIL:'3'});
+    assert.equal(failed.status, 1, failed.stderr);
+    const [second] = attempts().filter(n => n !== first);
+    assert.deepEqual(events(resolve(temporary,second)).map(e=>e.state),['running','passed','running','passed','running','failed']);
+    assert.match(failed.stderr,/hoosaidthat-windows-reader nvda parity-shard en-US desktop actions-02/);
+    assert.deepEqual(readdirSync(resolve(directory,'reports')), reports);
+    for (const [wrong, message] of [['title', /spec titles/], ['retry', /retried/], ['sibling', /metadata/]]) {
+      const previous = attempts();
+      const invalid = invoke({HST_NVDA_ENGINE:'docker', TEST_MATRIX_WRONG:wrong});
+      assert.equal(invalid.status, 1, invalid.stderr);
+      assert.match(invalid.stderr, message);
+      const [attempt] = attempts().filter(n => !previous.includes(n));
+      assert.deepEqual(events(resolve(temporary,attempt)).map(e=>e.state), ['running','passed','running','passed','running','failed']);
+    }
   } finally {
     rmSync(temporary, { recursive: true, force: true });
   }

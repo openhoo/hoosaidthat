@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "profile": "jaws-web",
+  "jaws": {
+    "version": "2027.2610.428.400",
+    "url": "https://software.vfo.digital/JAWS/2027/2027.2610.428.400/69A563A5-77C2-47CE-A500-3388CFF30F91/J2027.2610.428.400-any.exe",
+    "sha256": "973c84121357e61c3a78af8d05ae14034370e11318b98c74d4adc7d33a6356b4",
+    "bytes": 15368592,
+    "installer": "Vendor network installer; downloaded payloads are vendor verified, not independently locked here. The bridge attests the running product version.",
+    "license": "Provide a JAWS license that permits automated accessibility testing on this VM. The unactivated 40-minute installation demonstration is not a substitute for a testing license."
+  },
+  "node": {
+    "version": "26.13.0",
+    "url": "https://nodejs.org/dist/v26.13.0/node-v26.13.0-win-x64.zip",
+    "sha256": "dcc60d59a0746999f99064a01c020445d54d84228c691cdbf25b49ac3b59150a"
+  },
+  "chrome": {
+    "version": "151.0.7922.47",
+    "url": "https://storage.googleapis.com/chrome-for-testing-public/151.0.7922.47/win64/chrome-win64.zip",
+    "sha256": "fc77bb98b550b7da23b14edfa282b59a022e7fdb075ac7625d2a5152ceb22396"
+  },
+  "capture": "JAWS Remote Command Server (AT Driver), interaction.capturedOutput. Evidence is the text JAWS sends for speech, not recorded audio or braille.",
+  "windows": "Docker runs a real x64 Windows VM. A valid Windows license remains the operator's responsibility. ARM64 hosts without KVM use slow native QEMU software emulation.",
+  "ports": {
+    "viewer": 8009,
+    "rdp": 3393,
+    "control": 3004,
+    "cdp": 9226
+  },
+  "driver": {
+    "component": "RemoteCommandServer.dll",
+    "endpoint": "ws://127.0.0.1:9002/session",
+    "harnessReference": "https://github.com/bocoup/aria-at-gh-actions-helper/tree/0c8e2320f2148a764498474596bcfbb59e45d8f8/JAWS"
+  }
+}

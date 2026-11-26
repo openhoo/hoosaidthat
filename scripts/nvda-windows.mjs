@@ -24,12 +24,15 @@ import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { checkReport } from '../oracle/windows-nvda/report-evidence.mjs';
 import { readOracleContainer, readQemuState, requireRunningOracle } from '../oracle/windows-nvda/engine-state.mjs';
 
 import { localDesktop, localControl, requireDesktop } from '../oracle/windows-nvda/winhoo-local.mjs';
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const invocationRoot = process.cwd();
+let invocationRoot = process.cwd();
+const parityAttempt = process.env.HST_WINHOO_ATTEMPT || randomBytes(16).toString('hex');
+let retainParityReports = process.env.HST_NVDA_QUALIFICATION === '1';
 const require = createRequire(import.meta.url);
 const parityConfig = join(
   projectRoot,
@@ -39,7 +42,7 @@ const parityConfig = join(
 );
 const deploymentRoot = join(projectRoot, 'oracle', 'windows-nvda');
 const runtimeRoot = resolve(
-  process.env.HST_NVDA_RUNTIME_ROOT ?? join(homedir(), 'VMs', 'hoosaidthat-nvda'),
+  process.env.HST_NVDA_RUNTIME_ROOT ?? join(homedir(), 'VMs', process.env.HST_NVDA_ENGINE === 'docker' ? 'hoosaidthat-nvda-docker' : 'hoosaidthat-nvda'),
 );
 const stateRoot = join(runtimeRoot, 'state');
 const sharedRoot = join(runtimeRoot, 'shared');
@@ -111,15 +114,44 @@ const parityBlocks = new Map([
 ]);
 
 const command = process.argv[2] ?? 'status';
+const dockerGuest = process.env.HST_NVDA_ENGINE === 'docker';
+const guestEngine = dockerGuest ? 'docker' : 'podman';
 
 try {
-switch (command) {
+if (dockerGuest && ['sync','control','wait-ssh','parity','parity-cell','parity-shard','docker-readiness'].includes(command)) {
+  const { ownedDockerGuest } = await import('./windows-reader-docker.mjs');
+  process.env.HST_NVDA_CONTAINER_ID = ownedDockerGuest('nvda',runtimeRoot,process.env.HST_NVDA_CONTAINER_ID);
+  if (!retainParityReports && (command === 'parity' || command === 'parity-shard')) {
+    invocationRoot = mkdtempSync(join(invocationRoot, command === 'parity' ? 'hoosaidthat-nvda-matrix-' : 'hoosaidthat-nvda-replay-'));
+    retainParityReports = true;
+    console.log('NVDA parity evidence: ' + invocationRoot);
+  }
+}
+if (command === 'docker' || (dockerGuest && ['doctor','init','up','status','wait','run','down'].includes(command))) {
+  const args = command === 'docker' ? process.argv.slice(3) : process.argv.slice(2);
+  const { runWindowsReader } = await import('./windows-reader-docker.mjs');
+  await runWindowsReader('nvda', args);
+} else switch (command) {
+  case 'docker-prepare-oem':
+    if (!dockerGuest) throw new Error('Docker OEM preparation requires HST_NVDA_ENGINE=docker');
+    initialize();
+    break;
+  case 'docker-readiness': {
+    if (!dockerGuest || !/^[a-f0-9]{64}$/.test(process.env.HST_NVDA_CONTAINER_ID ?? '')) throw new Error('Docker readiness requires the owned container identity');
+    const flags = process.argv.slice(3);
+    if (flags.length && !(flags.length === 1 && flags[0] === '--native-check'))
+      throw new Error('Unexpected Docker readiness arguments');
+    const active = await waitUntilReady();
+    if (flags.length) await ensureProcessLocale(active, 'en-US');
+    break;
+  }
   case 'winhoo': {
     const result = spawnSync('python3', [join(deploymentRoot, 'winhoo-local.py'), ...process.argv.slice(3)], { stdio: 'inherit' });
     process.exitCode = result.status ?? 1;
     break;
   }
   case 'qualification': {
+    if (dockerGuest) throw new Error('The release qualification controller requires its prepared Podman guest. Use docker run with parity or parity-shard for a WinHoo Docker guest.');
     const worker = spawnSync('python3', [join(deploymentRoot, 'qualification.py'), ...process.argv.slice(3)], {
       stdio: 'inherit', env: { ...process.env, HST_QUAL_NODE: process.execPath },
     });
@@ -128,7 +160,7 @@ switch (command) {
     break;
   }
   case 'preflight':
-    console.log(JSON.stringify(readOracleContainer('podman')));
+    console.log(JSON.stringify(readOracleContainer(guestEngine)));
     break;
   case 'doctor':
     await doctor();
@@ -141,14 +173,14 @@ switch (command) {
   case 'up':
     await doctor();
     {
-      const { state, id } = readOracleContainer('podman');
+      const { state, id } = readOracleContainer(guestEngine);
       if (state === 'running') {
-        const guest = readQemuState('podman', id);
+        const guest = readQemuState(guestEngine, id);
         if (guest !== 'ended') {
           console.log(`NVDA oracle already active (QEMU: ${guest}).`);
           break;
         }
-        requireRunningOracle('podman', Infinity, id);
+        requireRunningOracle(guestEngine, Infinity, id);
         compose(['restart']);
       } else if (['absent', 'created', 'configured', 'exited', 'stopped'].includes(state)) {
         initialize();
@@ -169,7 +201,8 @@ switch (command) {
     requireInitialized();
     {
       const remoteCommand = process.argv[3] ?? 'status';
-      const owner = remoteCommand === 'shutdown' ? requireRunningOracle('podman') : undefined;
+      if (dockerGuest && remoteCommand === 'shutdown') throw new Error('Use nvda-windows.mjs docker down for the owned WinHoo desktop');
+      const owner = remoteCommand === 'shutdown' ? requireRunningOracle(guestEngine) : undefined;
       runSshControl(remoteCommand);
       if (owner) await finalizeGuestShutdown(owner.id);
       if (remoteCommand === 'reconfigure-ssh') await waitAfterSshReconfigure();
@@ -179,10 +212,20 @@ switch (command) {
     requireInitialized();
     await waitUntilSshReady();
     break;
-  case 'sync':
+  case 'sync': {
+    const flags = process.argv.slice(3);
+    if (flags.length && !(dockerGuest && flags.length === 1 && flags[0] === '--reload'))
+      throw new Error('Unexpected NVDA sync arguments');
     requireInitialized();
-    await syncControlPayload();
+    const pluginSha256 = await syncControlPayload();
+    if (flags.length) {
+      const previous = runSshControl('status').runtime?.nvdaPid;
+      runSshControl('restart');
+      const active = await waitUntilReady(undefined, { pluginSha256, previous });
+      console.log('NVDA loaded the synchronized plugin in process ' + active.nvdaPid + ': ' + pluginSha256);
+    }
     break;
+  }
   case 'parity':
     await runParityMatrix();
     break;
@@ -204,7 +247,7 @@ switch (command) {
     break;
   default:
     throw new Error(
-      'usage: nvda-windows.mjs winhoo <provision|run>|qualification <prepare|run|start|status|recover>|preflight|doctor|init|up|wait|status|control <command>|wait-ssh|sync|parity|parity-cell <locale> <layout>|parity-shard <locale> <layout> <shard>|down',
+      'usage: nvda-windows.mjs docker <doctor|init|up|status|wait|sync|run -- CMD|down>|winhoo <provision|run>|qualification <prepare|run|start|status|recover>|preflight|doctor|init|up|wait|status|control <command>|wait-ssh|sync|parity|parity-cell <locale> <layout>|parity-shard <locale> <layout> <shard>|down',
     );
 }
 } catch (error) {
@@ -216,7 +259,7 @@ async function doctor() {
   if (process.platform !== 'linux') {
     throw new Error('NVDA VM doctor failed: host must be Linux with KVM and Podman Compose');
   }
-  const container = readOracleContainer('podman');
+  const container = readOracleContainer(guestEngine);
   const failures = [];
   if (!existsSync('/dev/kvm')) failures.push('/dev/kvm missing');
   if (!existsSync('/dev/net/tun')) failures.push('/dev/net/tun missing');
@@ -327,6 +370,7 @@ function initializeSshIdentity() {
 }
 
 function compose(arguments_) {
+  if (dockerGuest) throw new Error('Use the WinHoo Docker controller for guest lifecycle operations');
   execFileSync(
     'podman',
     [
@@ -360,7 +404,7 @@ function lockedSignInSession(status) {
   return consoleLocked && (session.account === null || session.account === '') ? session.sessionId : null;
 }
 
-async function waitUntilReady(expectedLocale) {
+async function waitUntilReady(expectedLocale, reload) {
   requireInitialized();
   if (winhoo) {
     const deadline = Date.now() + 120_000;
@@ -392,7 +436,9 @@ async function waitUntilReady(expectedLocale) {
     throw new Error('WinHoo screen reader readiness timed out: ' + reason);
   }
   const token = readControlToken();
-  const deadline = Date.now() + 45 * 60_000;
+  const waitMs = dockerGuest ? Number(process.env.HST_NVDA_READY_TIMEOUT_MS ?? 4 * 60 * 60_000) : 45 * 60_000;
+  if (!Number.isSafeInteger(waitMs) || waitMs < 1000 || waitMs > 4 * 60 * 60_000) throw new Error('Invalid NVDA readiness deadline');
+  const deadline = Date.now() + waitMs;
   let lastPhases = '';
   let lastError = 'not started';
   let oracleId = process.env.HST_NVDA_CONTAINER_ID;
@@ -402,7 +448,7 @@ async function waitUntilReady(expectedLocale) {
   let lockedSession = null;
   let lockedCount = 0;
   while (Date.now() < deadline) {
-    oracleId = requireRunningOracle('podman', deadline, oracleId).id;
+    oracleId = requireRunningOracle(guestEngine, deadline, oracleId).id;
     const statusFiles = [
       join(sharedRoot, 'bootstrap', 'oem-status.json'),
       join(sharedRoot, 'bootstrap', 'runtime-status.json'),
@@ -436,6 +482,8 @@ async function waitUntilReady(expectedLocale) {
         health.screenReader === 'nvda' &&
         health.version === '2026.1.1' &&
         health.ready === true &&
+        (!dockerGuest || (health.status === 'ok' && health.profile === 'nvda-web-2026.1.1' &&
+          health.captureBoundary === 'nvda-presentation-hooks' && version.Browser === 'Chrome/151.0.7922.47')) &&
         typeof version.webSocketDebuggerUrl === 'string'
       ) {
         endpointsReady = true;
@@ -450,6 +498,13 @@ async function waitUntilReady(expectedLocale) {
         if (ssh.status === 0 && ssh.payload.ready === true && ssh.payload.runtimeFresh === true &&
             typeof ssh.payload.runtime?.locale === 'string' &&
             (expectedLocale === undefined || ssh.payload.runtime.locale === expectedLocale)) {
+          if (reload) {
+            const pid = ssh.payload.runtime.nvdaPid;
+            if (!Number.isSafeInteger(pid) || pid <= 0 || pid === reload.previous || pid !== health.pluginProcessId)
+              throw new Error('Waiting for the restarted NVDA process to report its plugin identity');
+            if (health.pluginSourceSha256 !== reload.pluginSha256)
+              throw Object.assign(new Error('The restarted NVDA process did not load the synchronized plugin'), { code: 'HST_PLUGIN_MISMATCH' });
+          }
           console.log(
             'NVDA 2026.1.1 oracle ready: SSH 127.0.0.1:2224, control 127.0.0.1:3002, CDP 127.0.0.1:9224.',
           );
@@ -461,7 +516,7 @@ async function waitUntilReady(expectedLocale) {
         lastError = 'readiness payload invalid';
       }
     } catch (error) {
-      if (error?.code === 'HST_SSH_TIMEOUT' || error?.code === 'HST_SSH_RESET') throw error;
+      if (error?.code === 'HST_SSH_TIMEOUT' || error?.code === 'HST_SSH_RESET' || error?.code === 'HST_PLUGIN_MISMATCH') throw error;
       sessionResets = 0;
       lastError = error instanceof Error ? error.message : String(error);
     }
@@ -480,7 +535,7 @@ async function waitUntilReady(expectedLocale) {
       await new Promise((resolvePromise) => setTimeout(resolvePromise, Math.min(5_000, remaining)));
     }
   }
-  throw new Error(`NVDA oracle did not become ready in 45 minutes: ${lastError}`);
+  throw new Error(`NVDA oracle did not become ready within ${waitMs / 1000} seconds: ${lastError}`);
 }
 
 async function probeHttpReadiness(token, deadline) {
@@ -533,7 +588,7 @@ async function readHttpReadinessResponse(responsePromise, label, controller) {
 }
 
 function status() {
-  const { state } = readOracleContainer('podman');
+  const { state } = readOracleContainer(guestEngine);
   console.log(`container ${state}`);
   if (state !== 'running') return;
   for (const name of ['oem-status.json', 'ssh-status.json', 'runtime-status.json']) {
@@ -642,11 +697,13 @@ function trySshControl(remoteCommand, deadline = Infinity) {
   } catch (error) {
     return { status: 1, stdout: '', stderr: '', error };
   }
-  // A cold Windows CIM inventory can take longer than the SSH connection itself.
-  // Keep one outstanding request and the outer readiness deadline.
-  const inventory = remoteCommand === 'status' && process.env.HST_NVDA_QUALIFICATION === '1' &&
-    process.env.HST_NVDA_ACCELERATION === 'kvm';
-  const timeout = sshTimeoutMs(remoteCommand, inventory ? 60_000 : 15_000, deadline);
+  // The Windows status query includes CIM inventory. Keep one request in
+  // flight, capped by the remaining readiness deadline.
+  const kvmStatus = remoteCommand === 'status' && process.env.HST_NVDA_ACCELERATION === 'kvm';
+  let statusBudgetMs = 15_000;
+  if (kvmStatus && process.env.HST_NVDA_QUALIFICATION === '1') statusBudgetMs = 60_000;
+  else if (kvmStatus && dockerGuest) statusBudgetMs = 30_000;
+  const timeout = sshTimeoutMs(remoteCommand, statusBudgetMs, deadline);
   if (timeout <= 0) {
     return { status: 1, stdout: '', stderr: '', error: new Error('SSH readiness deadline exhausted') };
   }
@@ -673,7 +730,7 @@ function runSshControl(remoteCommand) {
 }
 
 function runSshCommand(remoteCommand, expectedCommand) {
-  if (process.env.HST_NVDA_CONTAINER_ID) requireRunningOracle('podman', Infinity, process.env.HST_NVDA_CONTAINER_ID);
+  if (process.env.HST_NVDA_CONTAINER_ID) requireRunningOracle(guestEngine, Infinity, process.env.HST_NVDA_CONTAINER_ID);
   if (!winhoo) pinGuestHostKey();
   const defaultTimeout = remoteCommand === 'reconfigure-ssh' ||
     (expectedCommand === 'update' && process.env.HST_NVDA_ACCELERATION === 'tcg')
@@ -791,6 +848,7 @@ async function syncControlPayload() {
   }
   runSshControl('reconfigure-ssh');
   await waitAfterSshReconfigure();
+  return files.find(f => f.name.endsWith('/hoosaidthatControl.py')).sha256;
 }
 
 async function waitUntilSshReady() {
@@ -798,7 +856,7 @@ async function waitUntilSshReady() {
   let lastError = 'not started';
   let oracleId = process.env.HST_NVDA_CONTAINER_ID;
   while (Date.now() < deadline) {
-    oracleId = requireRunningOracle('podman', deadline, oracleId).id;
+    oracleId = requireRunningOracle(guestEngine, deadline, oracleId).id;
     const result = trySshControl('status', deadline);
     if (result.status === 0) {
       process.stdout.write(result.stdout);
@@ -818,7 +876,7 @@ async function finalizeGuestShutdown(expectedId) {
   await new Promise((resolvePromise) => setTimeout(resolvePromise, 12_000));
   const deadline = Date.now() + 90_000;
   while (Date.now() < deadline) {
-    const { state, id } = readOracleContainer('podman', deadline);
+    const { state, id } = readOracleContainer(guestEngine, deadline);
     if (state === 'absent') return;
     if (id !== expectedId) throw new Error('NVDA container changed during guest shutdown');
     if (state === 'exited' || state === 'stopped') return;
@@ -870,6 +928,17 @@ async function runParityMatrix() {
   console.log('NVDA full declared-profile matrix passed.');
 }
 
+async function ensureProcessLocale(active, locale) {
+  if (active.locale === locale) return;
+  runSshControl(`locale-${locale}`);
+  const changed = await waitUntilReady(locale);
+  if (![active, changed].every(s => [s.chromePid,s.nvdaPid].every(pid => Number.isInteger(pid) && pid > 0)) ||
+      active.chromePid !== changed.chromePid || active.nvdaPid === changed.nvdaPid) {
+    throw new Error('A runtime language change must preserve Chrome and replace NVDA before sending native keys');
+  }
+  console.log(`NVDA locale ${active.locale} -> ${locale}; Chrome PID ${changed.chromePid}, NVDA PID ${active.nvdaPid} -> ${changed.nvdaPid}`);
+}
+
 async function runParityCell(locale, keyboardLayout, options = {}) {
   if (!['en-US', 'de-DE'].includes(locale) || !['desktop', 'laptop'].includes(keyboardLayout)) {
     throw new Error('parity-cell requires locale en-US|de-DE and layout desktop|laptop');
@@ -884,15 +953,7 @@ async function runParityCell(locale, keyboardLayout, options = {}) {
   }
   const token = options.token ?? readControlToken();
   console.log(`NVDA parity ${locale}/${keyboardLayout}`);
-  if (active.locale !== locale) {
-    runSshControl(`locale-${locale}`);
-    const changed = await waitUntilReady(locale);
-    if (![active, changed].every(s => [s.chromePid,s.nvdaPid].every(pid => Number.isInteger(pid) && pid > 0)) ||
-        active.chromePid !== changed.chromePid || active.nvdaPid === changed.nvdaPid) {
-      throw new Error('A runtime language change must preserve Chrome and replace NVDA before sending native keys');
-    }
-    console.log(`NVDA locale ${active.locale} -> ${locale}; Chrome PID ${changed.chromePid}, NVDA PID ${active.nvdaPid} -> ${changed.nvdaPid}`);
-  }
+  await ensureProcessLocale(active, locale);
   if (options.shard) {
     const root = join(invocationRoot, 'test-results');
     mkdirSync(root, { recursive: true });
@@ -923,15 +984,18 @@ async function runParityCell(locale, keyboardLayout, options = {}) {
 function runParityInvocation(locale, keyboardLayout, token, label, overrides = {}, output) {
   const name = `${locale}/${keyboardLayout}/${label}`;
   const started = performance.now();
-  if (process.env.HST_NVDA_CONTAINER_ID) requireRunningOracle('podman', Infinity, process.env.HST_NVDA_CONTAINER_ID);
+  if (process.env.HST_NVDA_CONTAINER_ID) requireRunningOracle(guestEngine, Infinity, process.env.HST_NVDA_CONTAINER_ID);
   if (winhoo) requireDesktop(winhoo);
-  const qualification = process.env.HST_NVDA_QUALIFICATION === '1';
+  const qualification = retainParityReports;
   const report = join(invocationRoot, 'reports', `${locale}-${keyboardLayout}-${label}.json`);
-  if (qualification) mkdirSync(dirname(report), { recursive: true, mode: 0o700 });
+  if (qualification) {
+    mkdirSync(dirname(report), { recursive: true, mode: 0o700 });
+    if (existsSync(report)) throw new Error('Refusing to overwrite retained Playwright evidence: ' + report);
+  }
   function record(state, counts = {}) {
     if (qualification) {
       appendFileSync(join(invocationRoot, 'blocks.jsonl'), JSON.stringify({
-        time: new Date().toISOString(), locale, layout: keyboardLayout, block: label, state, ...counts,
+        time: new Date().toISOString(), locale, layout: keyboardLayout, block: label, attempt: parityAttempt, state, ...counts,
       }) + '\n', { mode: 0o600 });
     }
   }
@@ -967,27 +1031,40 @@ function runParityInvocation(locale, keyboardLayout, token, label, overrides = {
         HOOSAIDTHAT_NVDA_PARITY_ARTIFACTS: '',
         HOOSAIDTHAT_NVDA_PARITY_CORE: '',
         ...overrides,
-        ...(qualification && { PLAYWRIGHT_JSON_OUTPUT_FILE: report }),
+        ...(qualification && { PLAYWRIGHT_JSON_OUTPUT_FILE: report, HST_WINHOO_ATTEMPT: parityAttempt }),
       },
     },
   );
   if (result.status !== 0) {
     record('failed');
     const replay = parityBlocks.has(label)
-      ? `\nReplay: hoosaidthat-nvda-windows parity-shard ${locale} ${keyboardLayout} ${label}`
+      ? `\nReplay: ${dockerGuest ? 'hoosaidthat-windows-reader nvda' : 'hoosaidthat-nvda-windows'} parity-shard ${locale} ${keyboardLayout} ${label}`
       : '';
     const reason = result.error?.message ?? result.signal ?? `exit ${result.status}`;
     throw new Error(`NVDA parity failed for ${name} (${reason})${replay}`);
   }
   if (qualification) {
     try {
-      const { stats } = JSON.parse(readFileSync(report, 'utf8'));
-      const required = label === 'core' ? 5 : 2;
-      if (!Number.isInteger(stats.expected) || stats.expected < required || stats.flaky !== 0 ||
-          stats.unexpected !== 0 || !Number.isInteger(stats.skipped) || stats.skipped < 0) {
-        throw new Error(`expected at least ${required} selected passing tests, without retries`);
+      const evidence = JSON.parse(readFileSync(report, 'utf8'));
+      if (parityBlocks.has(label)) {
+        const inventory = JSON.parse(readFileSync(join(deploymentRoot, 'matrix-inventory.json'), 'utf8'));
+        const titles = inventory.blocks[label];
+        if (inventory.schemaVersion !== 1 || !Array.isArray(titles) || !titles.length)
+          throw new Error('Missing declared NVDA block inventory for ' + label);
+        const { passed, skipped } = checkReport(evidence, titles.length, {
+          titles, binding: { adapter: 'nvda', locale, layout: keyboardLayout, block: label, attempt: parityAttempt },
+        });
+        record('passed', { selected: passed, skipped });
+      } else {
+        // A caller-selected legacy run has no declared block in the inventory.
+        const { stats } = evidence;
+        const required = 2;
+        if (!Number.isInteger(stats.expected) || stats.expected < required || stats.flaky !== 0 ||
+            stats.unexpected !== 0 || !Number.isInteger(stats.skipped) || stats.skipped < 0) {
+          throw new Error(`expected at least ${required} selected passing tests, without retries`);
+        }
+        record('passed', { selected: stats.expected, skipped: stats.skipped });
       }
-      record('passed', { selected: stats.expected, skipped: stats.skipped });
     } catch (error) {
       record('failed');
       throw new Error(`Missing or incomplete Playwright evidence for ${name}: ${error.message}`);

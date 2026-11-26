@@ -1,3 +1,4 @@
+import { closeSync, constants, fstatSync, openSync, readSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import type { Locator } from '@playwright/test';
 
@@ -238,8 +239,9 @@ export const STRUCTURED_SCREEN_READER_ACTIONS = new Set<ScreenReaderAction>([
   'brailleRoute',
   'brailleReportFormatting',
 ]);
-export type ScreenReaderName = 'orca' | 'hoovda' | 'nvda' | 'voiceover' | 'talkback';
-export type ScreenReaderProfile = 'nvda-web-2026.1.1' | 'voiceover-web' | 'talkback-web';
+const SCREEN_READERS = ['orca', 'hoovda', 'nvda', 'jaws', 'voiceover', 'talkback'] as const;
+export type ScreenReaderName = (typeof SCREEN_READERS)[number];
+export type ScreenReaderProfile = 'nvda-web-2026.1.1' | 'jaws-web' | 'voiceover-web' | 'talkback-web';
 export type ScreenReaderLocale = 'en-US' | 'de-DE';
 export type KeyboardLayout = 'desktop' | 'laptop';
 export type ContainerRuntime = 'auto' | 'docker' | 'podman' | 'external';
@@ -248,18 +250,23 @@ export type RecordingMode = 'off' | 'on';
 export type CaptureBoundary =
   | 'speech-dispatcher-output-module'
   | 'hoovda-structured-presentation'
+  | 'jaws-speech-output'
   | 'nvda-presentation-hooks'
   | 'voiceover-last-phrase'
   | 'voiceover-speech-output'
   | 'talkback-tts-output';
 
 export function requiresNativeHost(name: ScreenReaderName): boolean {
-  return name === 'nvda' || name === 'voiceover' || name === 'talkback';
+  return name === 'nvda' || name === 'jaws' || name === 'voiceover' || name === 'talkback';
 }
 
 export function defaultProfile(name: ScreenReaderName): ScreenReaderProfile {
-  return name === 'voiceover' ? 'voiceover-web'
-    : name === 'talkback' ? 'talkback-web' : 'nvda-web-2026.1.1';
+  switch (name) {
+    case 'jaws': return 'jaws-web';
+    case 'voiceover': return 'voiceover-web';
+    case 'talkback': return 'talkback-web';
+    default: return 'nvda-web-2026.1.1';
+  }
 }
 
 export interface ScreenReaderOptions {
@@ -271,7 +278,10 @@ export interface ScreenReaderOptions {
   image?: string;
   controlEndpoint?: string;
   cdpEndpoint?: string;
+  /** For programmatic use. Playwright reporters can serialize literal project options. */
   controlToken?: string;
+  /** Path to a private token file. The worker reads it when it connects. */
+  controlTokenFile?: string;
   startupTimeoutMs?: number;
   actionTimeoutMs?: number;
   quietMs?: number;
@@ -543,10 +553,37 @@ export interface ScanResult {
 // reach the TTS engine over half a second apart.
 export const TALKBACK_QUIET_MS = 1500;
 
+// Accept the native bridge's token format, never the contents of an arbitrary
+// file as an Authorization header. Windows shares use ACLs, not Unix modes.
+function workerControlToken(path: string): string {
+  const flags = constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0);
+  const fd = openSync(path, flags);
+  try {
+    const stat = fstatSync(fd);
+    if (!stat.isFile() || stat.size < 32 || stat.size > 130 ||
+        (process.platform !== 'win32' && (stat.mode & 0o077) !== 0)) {
+      throw new Error('Expected a private native control token file');
+    }
+    const data = Buffer.alloc(131);
+    let length = 0;
+    while (length < data.length) {
+      const n = readSync(fd, data, length, data.length - length, null);
+      if (!n) break;
+      length += n;
+    }
+    // Every accepted byte is part of a single URL-safe token or its final EOL.
+    const match = /^([A-Za-z0-9_-]{32,128})(?:\r?\n)?$/u.exec(data.toString('utf8', 0, length));
+    if (length !== stat.size || !match || match[0].length !== length) throw new Error('Invalid native control token file');
+    return match[1]!;
+  } finally {
+    closeSync(fd);
+  }
+}
+
 export function resolveOptions(options: ScreenReaderOptions = {}): ResolvedScreenReaderOptions {
   const screenReader = options.screenReader ?? 'orca';
-  if (screenReader !== 'orca' && screenReader !== 'hoovda' && screenReader !== 'nvda' && screenReader !== 'voiceover' && screenReader !== 'talkback') {
-    throw new Error('screenReaderOptions.screenReader must be "orca", "hoovda", "nvda", "voiceover", or "talkback"');
+  if (!SCREEN_READERS.includes(screenReader)) {
+    throw new Error('screenReaderOptions.screenReader must be "orca", "hoovda", "nvda", "jaws", "voiceover", or "talkback"');
   }
   const profile = options.profile ?? defaultProfile(screenReader);
   if (profile !== defaultProfile(screenReader)) {
@@ -556,11 +593,14 @@ export function resolveOptions(options: ScreenReaderOptions = {}): ResolvedScree
   if (locale !== 'en-US' && locale !== 'de-DE') {
     throw new Error('screenReaderOptions.locale must be "en-US" or "de-DE"');
   }
+  if (screenReader === 'jaws' && locale !== 'en-US') {
+    throw new Error('The JAWS Windows guest currently requires locale "en-US"');
+  }
   const keyboardLayout = options.keyboardLayout ?? 'desktop';
   if (keyboardLayout !== 'desktop' && keyboardLayout !== 'laptop') {
     throw new Error('screenReaderOptions.keyboardLayout must be "desktop" or "laptop"');
   }
-  if ((screenReader === 'voiceover' || screenReader === 'talkback') && keyboardLayout !== 'desktop') {
+  if ((screenReader === 'jaws' || screenReader === 'voiceover' || screenReader === 'talkback') && keyboardLayout !== 'desktop') {
     throw new Error(`${screenReader} currently requires keyboardLayout "desktop"`);
   }
   const allowedRuntimes: readonly ContainerRuntime[] = ['auto', 'docker', 'podman', 'external'];
@@ -585,7 +625,7 @@ export function resolveOptions(options: ScreenReaderOptions = {}): ResolvedScree
       (screenReader === 'hoovda'
         ? (process.env.HOOSAIDTHAT_HOOVDA_IMAGE ?? `ghcr.io/openhoo/hoosaidthat-hoovda:${packageVersion}`)
         : requiresNativeHost(screenReader)
-          ? (screenReader === 'voiceover' ? 'external:voiceover-macos' : screenReader === 'talkback' ? 'external:talkback-android' : 'external:nvda-windows')
+          ? (screenReader === 'voiceover' ? 'external:voiceover-macos' : screenReader === 'talkback' ? 'external:talkback-android' : `external:${screenReader}-windows`)
           : (process.env.HOOSAIDTHAT_ORCA_IMAGE ?? `ghcr.io/openhoo/hoosaidthat-orca:${packageVersion}`)),
     controlEndpoint:
       options.controlEndpoint ??
@@ -595,6 +635,7 @@ export function resolveOptions(options: ScreenReaderOptions = {}): ResolvedScree
       (requiresNativeHost(screenReader) ? process.env[`HOOSAIDTHAT_${screenReader.toUpperCase()}_CDP_ENDPOINT`] : undefined),
     controlToken:
       options.controlToken ??
+      (options.controlTokenFile ? workerControlToken(options.controlTokenFile) : undefined) ??
       (requiresNativeHost(screenReader) ? process.env[`HOOSAIDTHAT_${screenReader.toUpperCase()}_CONTROL_TOKEN`] : undefined),
     startupTimeoutMs: options.startupTimeoutMs ?? 60_000,
     actionTimeoutMs:
@@ -625,6 +666,9 @@ export function resolveOptions(options: ScreenReaderOptions = {}): ResolvedScree
   }
   if ((screenReader === 'voiceover' || screenReader === 'talkback') && resolved.runtime !== 'external') {
     throw new Error(`${screenReader} requires runtime "external" on ${screenReader === 'voiceover' ? 'macOS' : 'Android'}`);
+  }
+  if (screenReader === 'jaws' && resolved.runtime !== 'external') {
+    throw new Error('JAWS requires runtime "external" on Windows');
   }
   if (screenReader === 'nvda' && resolved.runtime !== 'external') {
     throw new Error('NVDA is a Windows reference oracle and requires runtime "external"');

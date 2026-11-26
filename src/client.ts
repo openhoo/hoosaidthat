@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { jawsActionBudgetMs } from './native-timeouts.js';
 import type {
   BrailleEvent,
   CaptureBoundary,
@@ -110,6 +111,7 @@ export class HttpScreenReaderClient {
           ...(this.screenReaderName === 'hoovda' && typeof value.commit === 'string' && /^[0-9a-f]{40}$/.test(value.commit)
             ? { revision: value.commit } : {}),
           capture: this.screenReaderName === 'voiceover' ? value.capture as CaptureBoundary
+            : this.screenReaderName === 'jaws' ? 'jaws-speech-output'
             : this.screenReaderName === 'talkback' ? 'talkback-tts-output'
             : this.screenReaderName === 'nvda' ? 'nvda-presentation-hooks'
             : 'hoovda-structured-presentation',
@@ -131,7 +133,7 @@ export class HttpScreenReaderClient {
           : {}),
         platform: this.screenReaderName === 'voiceover' ? 'macos'
           : this.screenReaderName === 'talkback' ? 'android'
-          : this.screenReaderName === 'nvda' ? 'windows' : 'linux',
+          : (this.screenReaderName === 'nvda' || this.screenReaderName === 'jaws') ? 'windows' : 'linux',
       };
     }
     const value = await this.requestJSON('/v1/health', { timeoutMs });
@@ -188,7 +190,7 @@ export class HttpScreenReaderClient {
   async state(): Promise<ScreenReaderState> {
     if (this.usesV2()) {
       const value = await this.requestJSON(`${this.sessionPath()}/state`);
-      if (!isHooVDAState(value)) {
+      if (!isV2State(value, this.screenReaderName)) {
         throw new ScreenReaderProtocolError(`invalid ${this.adapterLabel()} state response`);
       }
       const focus = runtimeObject(value.focus);
@@ -198,7 +200,9 @@ export class HttpScreenReaderClient {
         protocolVersion: 2,
         lastSequence: value.lastSequence,
         cursorMode: value.cursor.mode,
-        virtualBufferActive: value.cursorInDocument,
+        // Older JAWS bridges always sent false, even when JAWS was browsing.
+        ...(this.screenReaderName !== 'jaws' && value.cursorInDocument !== undefined
+          ? { virtualBufferActive: value.cursorInDocument } : {}),
         focus: {
           id: focus?.id ?? null,
           ...(focus?.documentUrlSha256
@@ -317,13 +321,15 @@ export class HttpScreenReaderClient {
       }
     }
     if (this.usesV2()) {
+      const actionBudgetMs = this.screenReaderName === 'jaws'
+        ? jawsActionBudgetMs(this.actionTimeoutMs) : this.actionTimeoutMs;
       const value = await this.requestJSON(`${this.sessionPath()}/actions`, {
         method: 'POST',
         body: JSON.stringify({
           command: action,
           ...(argument === undefined ? {} : { argument }),
         }),
-        timeoutMs: this.actionTimeoutMs + 2_000,
+        timeoutMs: actionBudgetMs + 2_000,
       });
       if (
         !isObject(value) ||
@@ -336,7 +342,7 @@ export class HttpScreenReaderClient {
           value.delivery !== 'structured') ||
         (argument === undefined &&
           value.delivery !==
-            (this.screenReaderName === 'voiceover' || this.screenReaderName === 'talkback'
+            (this.screenReaderName === 'jaws' || this.screenReaderName === 'voiceover' || this.screenReaderName === 'talkback'
               ? 'emulated'
               : STRUCTURED_SCREEN_READER_ACTIONS.has(action)
               ? 'structured'
@@ -556,7 +562,7 @@ export class HttpScreenReaderClient {
   private adapterLabel(): string {
     return this.screenReaderName === 'voiceover' ? 'VoiceOver'
       : this.screenReaderName === 'talkback' ? 'TalkBack'
-      : this.screenReaderName === 'nvda' ? 'NVDA' : 'HooVDA';
+      : this.screenReaderName === 'jaws' ? 'JAWS' : this.screenReaderName === 'nvda' ? 'NVDA' : 'HooVDA';
   }
 
   private async requestJSON(
@@ -963,6 +969,9 @@ function isV2Health(
     (expected !== 'voiceover' ||
       (value.screenReader === 'voiceover' && value.platform === 'macos' &&
         (value.capture === 'voiceover-last-phrase' || value.capture === 'voiceover-speech-output'))) &&
+    (expected !== 'jaws' ||
+      (value.screenReader === 'jaws' && value.platform === 'windows' && value.capture === 'jaws-speech-output' &&
+        value.outputSource === 'at-driver-interaction.capturedOutput' && value.locale === 'en-US' && value.keyboardLayout === 'desktop')) &&
     (expected !== 'talkback' ||
       (value.screenReader === 'talkback' && value.platform === 'android' &&
         value.capture === 'talkback-tts-output')) &&
@@ -977,7 +986,7 @@ function isV2Health(
     (value.locale === 'en-US' || value.locale === 'de-DE') &&
     (value.keyboardLayout === 'desktop' || value.keyboardLayout === 'laptop') &&
     value.ready === true &&
-    (expected !== 'nvda' ||
+    ((expected !== 'nvda' && expected !== 'jaws') ||
       (isObject(value.browser) &&
         value.browser.name === 'chrome' &&
         typeof value.browser.version === 'string' &&
@@ -1089,11 +1098,11 @@ function isPresentationSettings(value: unknown): value is ScreenReaderPresentati
   );
 }
 
-function isHooVDAState(value: unknown): value is {
+function isV2State(value: unknown, reader: ScreenReaderName): value is {
   lastSequence: number;
   browserWindowActive: boolean;
   webContentFocused: boolean;
-  cursorInDocument: boolean;
+  cursorInDocument?: boolean;
   cursor: { mode: string };
   focus?: unknown;
   browse?: unknown;
@@ -1108,7 +1117,7 @@ function isHooVDAState(value: unknown): value is {
     !isSequence(value.lastSequence) ||
     typeof value.browserWindowActive !== 'boolean' ||
     typeof value.webContentFocused !== 'boolean' ||
-    typeof value.cursorInDocument !== 'boolean' ||
+    (typeof value.cursorInDocument !== 'boolean' && !(reader === 'jaws' && value.cursorInDocument === undefined)) ||
     !isObject(value.cursor) ||
     typeof value.cursor.mode !== 'string' ||
     value.cursor.mode.length < 1 ||

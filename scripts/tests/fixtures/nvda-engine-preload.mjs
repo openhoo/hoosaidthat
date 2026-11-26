@@ -1,8 +1,10 @@
 // OS and engine seam for the real controller subprocess. No VM or external command can run.
 import assert from 'node:assert/strict';
 import cp from 'node:child_process';
+import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
+import net from 'node:net';
 import { join } from 'node:path';
 
 const { HST_NVDA_RUNTIME_ROOT: root, HST_TEST_SCENARIO: scenario, HST_TEST_MANAGED: managed } = process.env;
@@ -19,13 +21,29 @@ fs.existsSync = (path) => ['/dev/kvm', '/dev/net/tun'].includes(path) || origina
 fs.readFileSync = (path, ...args) =>
   path === '/proc/meminfo' ? 'MemAvailable: 17000000 kB' : originalRead(path, ...args);
 fs.statfsSync = () => ({ bavail: 200 * 1024 ** 2, bsize: 1024 });
+// Simulated VM ownership and port availability must describe the same host.
+// A Windows reader already listening outside this fixture is unrelated.
+net.createServer = () => {
+  const server = new EventEmitter();
+  server.listen = (port, host, ready) => {
+    assert.equal(host, '127.0.0.1');
+    calls.push(['listen', host, port]);
+    if (scenario === 'port-in-use' && port === 3002)
+      queueMicrotask(() => server.emit('error', Object.assign(new Error('in use'), { code: 'EADDRINUSE' })));
+    else queueMicrotask(ready);
+    return server;
+  };
+  server.close = (closed) => queueMicrotask(closed);
+  return server;
+};
 const ok = (stdout = '') => ({ status: 0, stdout, stderr: '' });
 const lost = {
   status: 1,
   stdout: '',
   stderr: 'failed to connect to the docker API: dial unix docker.sock: connect: no such file or directory',
 };
-const state = ['stopped', 'absent', 'paused'].includes(scenario) ? scenario : 'running';
+const state = scenario === 'port-in-use' ? 'absent'
+  : ['stopped', 'absent', 'paused'].includes(scenario) ? scenario : 'running';
 cp.spawnSync = (program, args, options) => {
   calls.push([program, ...args]);
   if (program === 'ssh' && args.at(-1) === 'shutdown')

@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
+import { NATIVE_FOCUS_PROBE_TIMEOUT_MS } from '../../dist/native-timeouts.js';
 const executeFile = promisify(execFile);
 async function executeProbe(stage, binary, args, options) {
   try { return await executeFile(binary, args, options); }
@@ -13,10 +14,10 @@ async function executeProbe(stage, binary, args, options) {
 }
 
 export function assertNativePlatform(screenReader, platform = process.platform) {
-  if (screenReader !== 'voiceover') throw new Error('native reader must be voiceover');
-  const expected = 'darwin';
+  if (!['jaws', 'voiceover'].includes(screenReader)) throw new Error('native reader must be jaws or voiceover');
+  const expected = screenReader === 'jaws' ? 'win32' : 'darwin';
   if (platform !== expected) {
-    throw new Error(`${screenReader} requires an interactive ${'macOS'} host; Linux containers can run the Playwright client`);
+    throw new Error(`${screenReader} requires an interactive ${screenReader === 'jaws' ? 'Windows' : 'macOS'} host; Linux containers can run the Playwright client`);
   }
 }
 
@@ -54,8 +55,10 @@ export async function nativeProbe(screenReader, browserPid, { voiceOverCursor = 
   assertNativePlatform(screenReader);
   if (!Number.isSafeInteger(browserPid) || browserPid <= 0) throw new Error('native browser PID is required');
   const directory = new URL('.', import.meta.url);
-  const command = '/usr/bin/osascript';
-  const args = ['-l', 'JavaScript', fileURLToPath(new URL('focus-macos.js', directory)), String(browserPid)];
+  const command = screenReader === 'jaws' ? 'powershell.exe' : '/usr/bin/osascript';
+  const args = screenReader === 'jaws'
+    ? ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', fileURLToPath(new URL('focus-windows.ps1', directory)), '-BrowserProcessId', String(browserPid)]
+    : ['-l', 'JavaScript', fileURLToPath(new URL('focus-macos.js', directory)), String(browserPid)];
   let rectangle;
   if (screenReader === 'voiceover' && voiceOverCursor) {
     try {
@@ -71,7 +74,9 @@ export async function nativeProbe(screenReader, browserPid, { voiceOverCursor = 
       if (error.nativeScriptNumber !== -1728) throw error;
     }
   }
-  const { stdout } = await executeProbe('AX_FOCUS', command, args, { timeout: 10000, maxBuffer: 65536, windowsHide: true });
+  const probeOptions = { timeout: NATIVE_FOCUS_PROBE_TIMEOUT_MS, maxBuffer: 65536, windowsHide: true };
+  const { stdout } = screenReader === 'jaws' ? await executeFile(command, args, probeOptions)
+    : await executeProbe('AX_FOCUS', command, args, probeOptions);
   const value = JSON.parse(stdout.replace(/^\uFEFF/, ''));
   if (value.screenReader !== screenReader || typeof value.browserWindowActive !== 'boolean' ||
       typeof value.webContentFocused !== 'boolean' ||

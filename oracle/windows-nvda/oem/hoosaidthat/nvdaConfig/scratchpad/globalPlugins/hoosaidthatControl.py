@@ -40,6 +40,12 @@ from keyboardHandler import KeyboardInputGesture
 from logHandler import log
 
 
+# Capture once. The sync receipt must identify the plugin loaded in this
+# process even if an operator has already replaced the installed source.
+with open(__file__, "rb") as _plugin_source:
+    PLUGIN_SOURCE_SHA256 = hashlib.sha256(_plugin_source.read()).hexdigest()
+PLUGIN_PROCESS_ID = os.getpid()
+
 PROFILE = "nvda-web-2026.1.1"
 NVDA_VERSION = "2026.1.1"
 CHROME_VERSION = "151.0.7922.47"
@@ -668,12 +674,106 @@ def call_on_main(function, timeout=10.0):
     return result.get("value")
 
 
+def prepare_browse_braille():
+    """Restore NVDA's native display for keyboard navigation in a ready document."""
+    handler = braille.handler
+    if handler.getTether() != "focus" or not handler.enabled:
+        return
+    focus = api.getFocusObject()
+    if object_is_protected(focus):
+        return
+    app = getattr(getattr(focus, "appModule", None), "appName", "")
+    if app not in ("chrome", "msedge"):
+        return
+    document = getattr(focus, "treeInterceptor", None)
+    if not document or not document.isReady or document.passThrough:
+        return
+    # Script emulation skips the Windows key-down counter which normally
+    # dismisses a timed braille message when navigating. Never redraw the
+    # previous buffer while dismissing it.
+    if handler.buffer is handler.messageBuffer:
+        handler._dismissMessage(shouldUpdate=False)
+    # NVDA's handleCaretMove only updates an existing region for the same
+    # document. Focus may have arrived before the virtual display or browse
+    # buffer was ready. Let NVDA rebuild it using the real current focus.
+    regions = handler.mainBuffer.regions
+    if not regions or getattr(regions[-1], "obj", None) != document:
+        handler.initialDisplay()
+
+
 def emulate(gesture_name):
     def invoke():
+        if gesture_name == "f6":
+            ensure_browser_foreground()
         gesture = KeyboardInputGesture.fromName(gesture_name)
         inputCore.manager.emulateGesture(gesture)
 
     call_on_main(invoke)
+
+
+def ensure_browser_foreground():
+    """F6 changes focus inside Chrome; it must never cycle Explorer's controls."""
+    import ctypes
+    from ctypes import wintypes as w
+
+    owner_file = os.path.join(os.environ["ProgramData"], "HooSaidThat", "browser-owner.json")
+    with open(owner_file, encoding="utf-8-sig") as source:
+        owner = json.load(source)
+    pid = owner["pid"]
+    if type(pid) is not int or not 0 < pid < 2**32:
+        raise RuntimeError("The supervised Chrome PID is invalid")
+    kernel = ctypes.WinDLL("kernel32")
+    user = ctypes.WinDLL("user32")
+    kernel.OpenProcess.argtypes = (w.DWORD, w.BOOL, w.DWORD)
+    kernel.OpenProcess.restype = w.HANDLE
+    kernel.GetProcessTimes.argtypes = (w.HANDLE,) + (ctypes.POINTER(w.FILETIME),) * 4
+    kernel.CloseHandle.argtypes = (w.HANDLE,)
+    handle = kernel.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+    if not handle:
+        raise RuntimeError("The supervised Chrome process is unavailable")
+    try:
+        times = [w.FILETIME() for _ in range(4)]
+        if not kernel.GetProcessTimes(handle, *(ctypes.byref(value) for value in times)):
+            raise RuntimeError("Could not verify the supervised Chrome process")
+        created = times[0].dwHighDateTime << 32 | times[0].dwLowDateTime
+        if created != owner["createdFileTime"]:
+            raise RuntimeError("The supervised Chrome PID was reused")
+
+        def owns(hwnd):
+            actual = w.DWORD()
+            user.GetWindowThreadProcessId(hwnd, ctypes.byref(actual))
+            return actual.value == pid
+
+        user.GetWindowThreadProcessId.argtypes = (w.HWND, ctypes.POINTER(w.DWORD))
+        user.GetForegroundWindow.restype = w.HWND
+        if owns(user.GetForegroundWindow()):
+            return
+        windows = []
+        callback_type = ctypes.WINFUNCTYPE(w.BOOL, w.HWND, w.LPARAM)
+        user.IsWindowVisible.argtypes = (w.HWND,)
+        user.GetClassNameW.argtypes = (w.HWND, w.LPWSTR, ctypes.c_int)
+
+        @callback_type
+        def collect(hwnd, _):
+            if owns(hwnd) and user.IsWindowVisible(hwnd):
+                name = ctypes.create_unicode_buffer(128)
+                if user.GetClassNameW(hwnd, name, len(name)) and name.value == "Chrome_WidgetWin_1":
+                    windows.append(hwnd)
+            return True
+
+        if not user.EnumWindows(collect, 0) or len(windows) != 1:
+            raise RuntimeError("Cannot identify one visible supervised Chrome window for F6")
+        hwnd = windows[0]
+        user.IsIconic.argtypes = (w.HWND,)
+        user.ShowWindow.argtypes = (w.HWND, ctypes.c_int)
+        if user.IsIconic(hwnd):
+            user.ShowWindow(hwnd, 9)  # SW_RESTORE
+        user.SetForegroundWindow.argtypes = (w.HWND,)
+        user.SetForegroundWindow(hwnd)
+        if user.GetForegroundWindow() != hwnd:
+            raise RuntimeError("Windows did not give the supervised Chrome window foreground focus")
+    finally:
+        kernel.CloseHandle(handle)
 
 
 def invoke_browse_mode_script(script_name):
@@ -993,6 +1093,15 @@ def execute_action(command, argument):
         or DIRECT_BRAILLE_COMMAND_BY_ID.get(command)
         or DIRECT_SPEECH_COMMAND_BY_ID[command]
     )
+    # Any repair presents the location *before* the key. Keep this native
+    # frame out of the command's result and evidence of its destination.
+    if (
+        command in ("documentStart", "documentEnd", "moveToContainerStart", "movePastContainerEnd")
+        or command in DIRECT_COMMAND_BY_ID
+        or (command.startswith(("next", "previous")) and command in COMMAND_BY_ID
+            and "NVDA+" not in definition[2])
+    ):
+        call_on_main(prepare_browse_braille)
     with STATE.lock:
         before = STATE.sequence
         STATE.command = command
@@ -1222,6 +1331,8 @@ class Handler(BaseHTTPRequestHandler):
                             "keyboardLayout": STATE.keyboard_layout,
                             "ready": STATE.ready,
                             "captureBoundary": "nvda-presentation-hooks",
+                            "pluginSourceSha256": PLUGIN_SOURCE_SHA256,
+                            "pluginProcessId": PLUGIN_PROCESS_ID,
                             "browser": {
                                 "name": "chrome",
                                 "version": CHROME_VERSION,
@@ -1430,7 +1541,6 @@ class Handler(BaseHTTPRequestHandler):
             STATE.operation_lock.release()
 
     def events(self, session_id, query):
-        self.require_session(session_id)
         values = parse_qs(query, keep_blank_values=True)
         if set(values) != {"after", "timeoutMs", "quietMs"}:
             raise ValueError("events query fields are invalid")
@@ -1446,7 +1556,10 @@ class Handler(BaseHTTPRequestHandler):
         timed_out = False
         with STATE.condition:
             while True:
-                found = STATE.since(after)
+                # A long poll releases the lock while waiting. Recheck its
+                # session before reading history, including after each wake.
+                session = self.require_session(session_id)
+                found = STATE.since(max(after, session["startSequence"]))
                 quiet = time.monotonic() - STATE.last_event_at >= quiet_ms / 1000.0
                 if found and quiet:
                     break
@@ -1456,7 +1569,6 @@ class Handler(BaseHTTPRequestHandler):
                     break
                 STATE.condition.wait(min(remaining, quiet_ms / 1000.0))
             cursor = STATE.sequence
-            found = STATE.since(after)
         return self.json_response(
             200, {"cursor": cursor, "timedOut": timed_out, "events": found}
         )
@@ -1510,6 +1622,7 @@ class Handler(BaseHTTPRequestHandler):
                 while len(STATE.finished) > 8:
                     del STATE.finished[next(iter(STATE.finished))]
                 STATE.active_session = None
+                STATE.condition.notify_all()
             return self.json_response(200, result)
         except BaseException:
             if session is not None:
@@ -1524,6 +1637,7 @@ class Handler(BaseHTTPRequestHandler):
                             and STATE.active_session["id"] == session_id
                         ):
                             STATE.active_session = None
+                            STATE.condition.notify_all()
             raise
         finally:
             STATE.operation_lock.release()
@@ -1618,6 +1732,10 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
             self.terminate()
 
     def on_startup(self):
+        # Registering filter_displayDimensions supplies a virtual display, but
+        # does not initialize its buffers the way connecting a driver does.
+        braille.handler.invalidateCache()
+        braille.handler.initialDisplay()
         with STATE.lock:
             STATE.ready = True
 
@@ -1804,9 +1922,12 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
                 duplicate_idle_refresh = (
                     STATE.command == "event"
                     and previous is not None
+                    and (STATE.active_session is None
+                         or previous["sequence"] > STATE.active_session["startSequence"])
                     and previous.get("kind") == "braille"
                     and previous.get("text") == text
                     and previous.get("brailleCells") == encoded_cells
+                    and previous.get("brailleCursor") == cursor_position
                     and bool(previous.get("redacted", False)) == redacted
                 )
                 if duplicate_idle_refresh:

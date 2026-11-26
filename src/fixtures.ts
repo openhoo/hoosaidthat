@@ -145,7 +145,7 @@ export const test = base.extend<ScreenReaderFixtures & NativeContextFixtures, Sc
     const page = existing ?? (screenReaderResolvedOptions.screenReader === 'talkback'
       ? await context.newPage() : context.pages()[0] ?? await context.newPage());
     await page.bringToFront();
-    if (screenReaderResolvedOptions.screenReader === 'nvda') await fitNvdaWindow(page);
+    if (screenReaderResolvedOptions.screenReader === 'nvda' || screenReaderResolvedOptions.screenReader === 'jaws') await fitNvdaWindow(page);
     const keepAlive = keepAlivePages.get(browser);
     if (keepAlive && keepAlive !== page) {
       await keepAlive.close();
@@ -199,7 +199,12 @@ export const test = base.extend<ScreenReaderFixtures & NativeContextFixtures, Sc
     } finally {
       try {
         if (browser.isConnected()) await ensureKeepAlive(browser, context);
-        if (!page.isClosed()) await page.close();
+        // Closing the final private window first can make Chrome dispose its
+        // Windows context while Playwright is still finishing trace and video.
+        // Let the context fixture close its pages together on this desktop.
+        const windowsReader = screenReaderResolvedOptions.screenReader === 'nvda' ||
+          screenReaderResolvedOptions.screenReader === 'jaws';
+        if (!windowsReader && !page.isClosed()) await page.close();
       } finally {
         context.off('page', guardPageClose);
         for (const [candidate, closePage] of originalPageCloses) candidate.close = closePage;

@@ -60,7 +60,7 @@
       "reboot"
     ],
     "payloadUpdate": "npm run nvda:windows:sync stages the seven allowlisted runtime files with exact byte counts and SHA-256 hashes. The forced dispatcher independently validates the manifest, file set, and content-derived generation before installation, validates the new sshd configuration, restarts sshd out of band, and waits for key-only control to recover.",
-    "localeControl": "locale-en-US and locale-de-DE atomically select the runtime locale and restart the owned NVDA/Chrome task. NVDA starts with its official --lang override; runtime status attests the active locale and session creation fails closed on mismatch.",
+    "localeControl": "locale-en-US and locale-de-DE record the requested language and start the supervisor if needed. On a language change, the running supervisor waits for its NVDA process to exit gracefully, then starts NVDA with the new --lang value. The managed Chrome process stays open. Session creation rejects a mismatch with the active NVDA language.",
     "restrictions": [
       "ForceCommand allowlist dispatcher",
       "no TTY",

@@ -1,8 +1,10 @@
 # Windows NVDA reference oracle
 
-Dedicated real-NVDA parity oracle. Not npm runtime and not a Windows product
-dependency. Normal Orca/HooVDA tests remain Linux containers. This VM provides
-the reference traces used to prove the declared `nvda-web-2026.1.1` profile.
+This Windows guest runs real NVDA and records the reference output for the
+`nvda-web-2026.1.1` browser profile. To use it with Docker and WinHoo, start
+with [NVDA and JAWS in Docker](../../docs/windows-readers.md). That guide covers
+the installed package's smoke check, the full English/German matrix, and how to
+replay a single failed block. Orca and HooVDA continue to run in Linux containers.
 
 ## Local Mac with WinHoo
 
@@ -238,11 +240,12 @@ atomic per-file replacement. It then validates the staged `sshd_config`,
 restarts OpenSSH out of band, and waits for key-only control to recover. Restart
 the screenreader runtime after plugin or runtime-script changes.
 
-Locale commands atomically select the process locale, restart the owned
-NVDA/Chrome task, and publish the active locale in runtime status. NVDA starts
-with its official `--lang` override; session creation rejects a requested locale
-that does not match the running NVDA process. `nvda:windows:parity` performs this
-switch and attestation for every matrix cell automatically.
+The `locale-en-US` and `locale-de-DE` commands record the requested language
+and start the supervisor if it is stopped. When the language changes on a
+running desktop, the supervisor asks its NVDA process to exit, waits for it,
+and starts NVDA with the new `--lang` value. Chrome and its open tabs stay
+in place. Session creation checks the active NVDA language and rejects a
+mismatch. `nvda:windows:parity` checks the language for each matrix profile.
 
 Client key, pinned `known_hosts`, VM disk, and Windows password stay outside the
 repository under `~/VMs/hoosaidthat-nvda`. A changed guest host key fails closed;
@@ -276,6 +279,17 @@ work area before the test starts, preserving its size whenever it fits. This
 keeps visible page controls reachable by NVDA's mouse commands. The native
 core test starts with a displaced window and checks that NVDA actually clicks
 the fixture button.
+
+If Windows gives Explorer focus between tests, the adapter restores the
+supervised Chrome window before sending F6. It checks the process identity
+against the browser that owns the test's CDP listener. If several Chrome
+windows are visible and none is active, it reports the ambiguity instead of
+sending F6 to an unrelated window. Run `sync` and restart the runtime when
+upgrading an existing guest so the supervisor and NVDA plugin agree.
+
+Event polls and braille refreshes are scoped to each test. An unchanged
+braille frame is recorded again at the start of a new session, and moving
+the cursor within the same text produces a new frame.
 
 Live-region semantics use the object handler or the exact native IA2 report
 callback's queued presentation call. The latter retains reported politeness and

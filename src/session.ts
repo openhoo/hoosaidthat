@@ -280,6 +280,9 @@ export class ScreenReaderSession {
   }
 
   brailleText(): string {
+    if (this.health.screenReader.capture === 'jaws-speech-output') {
+      throw new Error('JAWS captures speech text only; braille assertions need a reader with braille capture, such as NVDA.');
+    }
     return this.lastObservation()?.braille ?? '';
   }
 

@@ -2,6 +2,7 @@ import { createServer } from 'node:http';
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import { SCREEN_READER_ACTIONS } from '../../dist/types.js';
+import { NATIVE_ACTION_SETTLE_TIMEOUT_MS } from '../../dist/native-timeouts.js';
 import { nativeCommands } from './commands.mjs';
 
 const MAX_EVENTS = 20000;
@@ -11,12 +12,12 @@ const MAX_EVENT_BYTES = 8 * 1024 * 1024;
 // platform independent and can be regression-tested in a Linux container.
 export async function startNativeServer({ screenReader, token, driver, probe,
   port = 0, locale = 'en-US', keyboardLayout = 'desktop', quietMs = 300,
-  actionTimeoutMs = 15000, browser }) {
-  if (!['voiceover', 'talkback'].includes(screenReader)) throw new Error('native reader must be voiceover or talkback');
+  actionTimeoutMs = NATIVE_ACTION_SETTLE_TIMEOUT_MS, browser }) {
+  if (!['jaws', 'voiceover', 'talkback'].includes(screenReader)) throw new Error('native reader must be jaws, voiceover or talkback');
   if (typeof token !== 'string' || Buffer.byteLength(token) < 16 || Buffer.byteLength(token) > 4096 || /[\u0000-\u0020\u007f]/.test(token)) {
     throw new Error('native control token must contain 16 to 4096 bytes without whitespace or control characters');
   }
-  if (!['en-US', 'de-DE'].includes(locale)) throw new Error('unsupported native locale');
+  if (!['en-US', 'de-DE'].includes(locale) || (screenReader === 'jaws' && locale !== 'en-US')) throw new Error('unsupported native locale');
   if (keyboardLayout !== 'desktop') throw new Error('native adapters currently require keyboardLayout desktop');
   if (!Number.isInteger(quietMs) || quietMs < 1 || quietMs > 5000 ||
       !Number.isInteger(actionTimeoutMs) || actionTimeoutMs <= quietMs || actionTimeoutMs > 30000) throw new Error('invalid native settling deadlines');
@@ -25,8 +26,8 @@ export async function startNativeServer({ screenReader, token, driver, probe,
   const version = initialState.version;
   if (typeof version !== 'string' || !version.trim()) throw new Error('native version attestation is required');
   const profile = `${screenReader}-web`;
-  const platform = screenReader === 'talkback' ? 'android' : 'macos';
-  const capture = screenReader === 'talkback' ? 'talkback-tts-output'
+  const platform = screenReader === 'talkback' ? 'android' : screenReader === 'jaws' ? 'windows' : 'macos';
+  const capture = screenReader === 'jaws' ? 'jaws-speech-output' : screenReader === 'talkback' ? 'talkback-tts-output'
     : driver.capture === 'voiceover-last-phrase' ? 'voiceover-last-phrase' : 'voiceover-speech-output';
   const commands = nativeCommands(screenReader);
   const secret = Buffer.from(`Bearer ${token}`);
@@ -70,8 +71,10 @@ export async function startNativeServer({ screenReader, token, driver, probe,
       fault ??= new Error('native identity or focus probe failed; restart the bridge');
       throw error;
     }
+    // JAWS exposes browser focus through UI Automation, but neither that probe
+    // nor its speech stream reports whether the virtual buffer is active.
     return { ...state, lastSequence: sequence, cursor: { mode: 'unknown' },
-      cursorInDocument: false };
+      ...(screenReader === 'jaws' ? {} : { cursorInDocument: false }) };
   }
   async function settle(after, timeoutMs, requestedQuietMs, requireOutput) {
     const started = Date.now();

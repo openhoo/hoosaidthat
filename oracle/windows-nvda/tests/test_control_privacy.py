@@ -160,6 +160,20 @@ class CapturePrivacyTests(unittest.TestCase):
         self.assertEqual(len(self.state.events), 1)
         self.assert_suppressed(self.state.events)
 
+    def test_idle_braille_keeps_cursor_moves_but_not_identical_refreshes(self):
+        for cursor in (1, 2, 2):
+            self.namespace["braille"].handler._cursorPos = cursor
+            self.hooks.on_braille(cells=CELLS, rawText=SENTINEL)
+        self.assertEqual([event["brailleCursor"] for event in self.state.events], [1, 2])
+
+    def test_new_session_observes_its_first_braille_frame_even_if_unchanged(self):
+        self.hooks.on_braille(cells=CELLS, rawText=SENTINEL)
+        start = self.state.sequence
+        self.state.active_session = {"startSequence": start}
+        self.hooks.on_braille(cells=CELLS, rawText=SENTINEL)
+        self.hooks.on_braille(cells=CELLS, rawText=SENTINEL)
+        self.assertEqual([event["text"] for event in self.state.since(start)], [SENTINEL])
+
     def test_protected_focus_event_does_not_read_the_object_name(self):
         class ProtectedFocus:
             isProtected = True

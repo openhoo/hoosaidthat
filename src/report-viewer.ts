@@ -47,7 +47,7 @@ function mountReportViewer(): void {
   let playback = 0;
   let annotationsVisible = true;
   let zoomed = false;
-  const reader = report.runtime.screenReader.name === 'hoovda' ? 'HooVDA' : report.runtime.screenReader.name === 'nvda' ? 'NVDA' : 'Orca';
+  const reader = ({ orca: 'Orca', hoovda: 'HooVDA', nvda: 'NVDA', jaws: 'JAWS', voiceover: 'VoiceOver', talkback: 'TalkBack' })[report.runtime.screenReader.name];
   get('reader').textContent = reader;
   document.title = `HooSaidThat — ${report.title || 'Screenreader report'}`;
   const mobile = window.matchMedia('(max-width: 700px)');

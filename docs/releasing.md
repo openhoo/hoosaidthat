@@ -73,7 +73,7 @@ runner. For the workflow, configure the repository variable
 Require one matrix receipt with all 40 blocks (190 actions per locale/layout,
 core and settings), zero retries, and confirmed guest shutdown. A diagnostic
 replay or a green HooVDA image CI job is a separate result.
-For a WinHoo run, also verify the original guest report archive offline with
+For an Apple Silicon WinHoo run, also verify the original guest report archive offline with
 WinHoo 0.2.0 or later. Use the inventory from the candidate checkout; it
 declares the case titles independently of what Playwright tells the verifier
 passed. The report for each block identifies its locale, keyboard layout, block
@@ -85,6 +85,22 @@ winhoo desktop verify-nvda-matrix "$evidence" \
   --inventory oracle/windows-nvda/matrix-inventory.json \
   --candidate "$(git rev-parse HEAD)" --tree "$(git rev-parse 'HEAD^{tree}')" \
   --engine "$(node -p 'require("./images/hoovda/source.json").commit')"
+```
+
+For a retained AMD64 WinHoo desktop on Docker, run the installed
+`hoosaidthat-windows-reader nvda parity` once under an owner that captures
+the stopped container and disk before and after the run, the running NVDA
+plugin identity, the signed package installation, and the HooVDA source check.
+Keep the host observations (`before.json`, `after.json`, `live.json`), native
+report and attachment archive (`matrix.zip`), and their checksums
+(`qualification.json`) together in a private evidence directory. A standalone
+`parity` invocation produces reader reports but does not collect the host
+observations. From the candidate checkout, verify the evidence offline against
+the full candidate commit and the independently inspected HooVDA tree:
+
+```sh
+python3 oracle/windows-nvda/verify-docker-qualification.py "$evidence" \
+  --candidate "$(git rev-parse HEAD)" --engine-tree "$hoovda_tree"
 ```
 
 The qualification and release compare the HooVDA pin to the source tree on

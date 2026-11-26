@@ -5,6 +5,7 @@ import {
   test,
   type ScreenReaderAction,
   type HttpScreenReaderClient,
+  type ScreenReaderObservation,
   type ScreenReaderSession,
 } from "@openhoo/hoosaidthat";
 
@@ -324,18 +325,23 @@ actionsTest(
       const targetFrame = beforeFocus === undefined ? undefined : await reviewTextFrame(screenReaderClient, beforeFocus);
       if (action === "brailleRoute") {
         // The target cell is the one the reader displayed at the d in "delta".
-        // Start routing from G in the same line so that a no-op cannot pass.
+        // Move within the same word: moving onto capital G can change its
+        // translation and shift every following physical cell one place.
         const editor = page.locator("#reviewText");
         await screenReader.observe("Leave the route target", () => page.locator("#activateButton").focus(), "focus");
         const beforeStart = await screenReader.checkpoint();
         await screenReader.observe("Focus the route start", async () => {
-          await editor.evaluate(element => (element as HTMLTextAreaElement).setSelectionRange(11, 11));
+          await editor.evaluate(element => (element as HTMLTextAreaElement).setSelectionRange(19, 19));
           await editor.focus();
         }, "focus");
         const startFrame = await reviewTextFrame(screenReaderClient, beforeStart);
         expect(startFrame.text).toBe(targetFrame!.text);
+        expect(startFrame.cells, "the route target must remain at the same physical display cell").toEqual(targetFrame!.cells);
         expect(startFrame.cursor).not.toBe(targetFrame!.cursor);
-        expect(await editor.evaluate(element => (element as HTMLTextAreaElement).selectionStart)).toBe(11);
+        expect(await editor.evaluate(element => {
+          const field = element as HTMLTextAreaElement;
+          return [field.selectionStart, field.selectionEnd];
+        })).toEqual([19, 19]);
       }
       const observation =
         action === "returnToPage"
@@ -375,7 +381,12 @@ actionsTest(
         ),
         `${action} completed evidence`,
       ).toBe(true);
-      assertSemanticOutput(action, observation.speech, observation.braille);
+      if (action === "toggleNativeSelection") {
+        await restoreNativeSelection(observation, () => screenReader.act("toggleNativeSelection"));
+        await page.goto("about:blank");
+      } else {
+        assertSemanticOutput(action, observation.speech, observation.braille);
+      }
       if (action === "brailleRoute") {
         const editor = page.locator("#reviewText");
         await expect(editor).toBeFocused();
@@ -447,12 +458,6 @@ actionsTest(
         await screenReader.act("toggleFocusMode");
       if (action === "toggleSingleLetterNavigation") {
         await screenReader.act("toggleSingleLetterNavigation");
-      }
-      if (action === "toggleNativeSelection") {
-        const reset = await screenReader.act("toggleNativeSelection");
-        expect(reset.timedOut).toBe(false);
-        expect(reset.speech).toMatch(/Native app selection mode disabled|Nativer Auswahlmodus deaktiviert/iu);
-        await page.goto("about:blank");
       }
       if (action === "leftMouseLock" || action === "rightMouseLock") {
         await screenReader.act(action);
@@ -633,15 +638,30 @@ function assertSemanticOutput(
 }
 
 async function reviewTextFrame(client: HttpScreenReaderClient, since: number) {
-  let displayed: { text: string; cursor: number } | undefined;
+  let displayed: { text: string; cells: number[]; cursor: number } | undefined;
   await expect.poll(async () => {
     const { events } = await client.readEvents(since, { timeoutMs: 400, quietMs: 80 });
     const frame = events.filter(event => event.kind === "braille").at(-1);
     displayed = frame && frame.text.includes("Gamma delta") && frame.cursor >= 0 && frame.cursor < frame.cells.length
-      ? { text: frame.text, cursor: frame.cursor } : undefined;
+      ? { text: frame.text, cells: [...frame.cells], cursor: frame.cursor } : undefined;
     return displayed;
   }, { timeout: 12_000, message: "the braille display must show the focused review text and its cursor" }).toBeDefined();
   return displayed!;
+}
+
+// Sending this toggle a second time is a reset only if NVDA confirmed the first transition.
+async function restoreNativeSelection(
+  enabled: Pick<ScreenReaderObservation, "timedOut" | "speech">,
+  toggle: () => Promise<Pick<ScreenReaderObservation, "timedOut" | "speech">>,
+): Promise<void> {
+  expect(enabled.timedOut, "native selection enable timed out").toBe(false);
+  expect(enabled.speech, "NVDA must announce that native selection is enabled")
+    .toMatch(semanticExpectations.get("toggleNativeSelection")!);
+  const disabled = await toggle();
+  expect(disabled.timedOut, "native selection disable timed out").toBe(false);
+  expect(disabled.speech, "NVDA must announce that native selection is disabled")
+    .toBe(enabled.speech === "Native app selection mode enabled"
+      ? "Native app selection mode disabled" : "Nativer Auswahlmodus deaktiviert");
 }
 
 async function focusFixture(
@@ -1303,7 +1323,7 @@ const semanticExpectations = new Map<ScreenReaderAction, RegExp>([
   ],
   [
     "toggleNativeSelection",
-    /Native app selection mode enabled|Nativer Auswahlmodus aktiviert/iu,
+    /^(?:Native app selection mode enabled|Nativer Auswahlmodus aktiviert)$/u,
   ],
   ["previousTableColumn", /Column A/iu],
   ["nextTableColumn", /Column B/iu],

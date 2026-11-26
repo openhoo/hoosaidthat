@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { runInNewContext } from 'node:vm';
 import { ScreenReaderSession } from '../src/session.js';
+import { expect as screenReaderExpect } from '../src/matchers.js';
 import { ScreenReaderProtocolError } from '../src/client.js';
 import type { ScreenReaderAction, ScreenReaderObservation } from '../src/types.js';
 import type { ReportSnapshot } from '../src/report.js';
@@ -584,6 +585,17 @@ test('finish retains captured flow evidence when an ARIA snapshot is unavailable
   await assert.rejects(() => session.finish(), /page navigating/);
   assert(attachments.includes('screen-reader-flow.txt'));
   assert(attachments.includes('screen-reader-flow.json'));
+});
+
+
+test('JAWS cannot pass a negative or empty braille assertion without a braille capture channel', () => {
+  const session = Object.create(ScreenReaderSession.prototype) as ScreenReaderSession;
+  Object.defineProperties(session, {
+    health: { value: { screenReader: { name: 'jaws', capture: 'jaws-speech-output' } } },
+    entries: { value: [] },
+  });
+  assert.throws(() => screenReaderExpect(session).not.toHaveBraille('Gift wrap'), /JAWS captures speech text only/);
+  assert.throws(() => screenReaderExpect(session).toHaveExactBraille(''), /JAWS captures speech text only/);
 });
 
 function cursorModeRace(events: unknown[], timedOut = false) {
