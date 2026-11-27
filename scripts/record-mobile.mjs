@@ -10,11 +10,14 @@ import { androidScenario } from './mobile-scenario.mjs';
 const local = path => fileURLToPath(new URL(path, import.meta.url));
 const help = `Record a mobile feature with a real screen reader.
 
+  hoosaidthat-record ios --manual --udid UUID --audio-device NAME [--duration SECONDS]
   hoosaidthat-record ios [--scenario feature.json] --audio-device NAME [--udid UUID]
   hoosaidthat-record android --avd NAME [--scenario feature.json]
   hoosaidthat-record android --avd NAME -- npx playwright test checkout.spec.ts
 
   --results DIR       parent for a new run directory (default: test-results/mobile-recordings)
+  --manual            drive an already booted iPhone yourself; Enter or Ctrl-C saves the movie
+  --duration SECONDS  stop a manual recording after 1–3600 seconds (required without a terminal)
   --scenario FILE     feature to exercise; omit for the packaged smoke test
   --audio-device NAME isolated simulator audio loopback input (iOS)
   --dedicated-mac-output  include whole-host output via that named virtual device (dedicated Mac only)
@@ -31,11 +34,11 @@ export function parseRecording(args) {
   if (!own.length || own.includes('--help') || own.includes('-h')) return { help: true };
   const [platform, ...flags] = own;
   if (!['android','ios'].includes(platform)) throw Error(help);
-  const allowed = ['--results','--scenario', ...(platform === 'ios' ? ['--udid','--audio-device','--dedicated-mac-output'] : ['--avd','--locale','--talkback-apk','--tts-engine','--reverse-port'])];
+  const allowed = ['--results','--scenario', ...(platform === 'ios' ? ['--udid','--audio-device','--dedicated-mac-output','--manual','--duration'] : ['--avd','--locale','--talkback-apk','--tts-engine','--reverse-port'])];
   const options = Object.create(null);
   for (let i = 0; i < flags.length;) {
     const key = flags[i++];
-    if (platform === 'ios' && key === '--dedicated-mac-output' && !(key in options)) {
+    if (platform === 'ios' && ['--dedicated-mac-output','--manual'].includes(key) && !(key in options)) {
       options[key] = true;
       continue;
     }
@@ -44,6 +47,11 @@ export function parseRecording(args) {
     options[key] = value;
   }
   if (options['--dedicated-mac-output'] && !options['--audio-device']) throw Error('Name the virtual --audio-device when recording dedicated Mac output.');
+  if (options['--manual'] && (!options['--udid'] || !options['--audio-device'] || options['--scenario'] || options['--dedicated-mac-output'])) {
+    throw Error('--manual needs an explicit --udid and --audio-device, with a simulator-only audio route and no --scenario.');
+  }
+  if (options['--duration'] && (!options['--manual'] || !/^\d{1,4}$/.test(options['--duration']) || +options['--duration'] < 1 || +options['--duration'] > 3600))
+    throw Error('--duration requires iOS --manual and a whole number from 1 to 3600 seconds.');
   const child = split < 0 ? [] : args.slice(split + 1);
   if (split >= 0 && (platform !== 'android' || !child.length || options['--scenario'])) throw Error('Use either --scenario or an Android -- command, and provide the command after --.');
   if (options['--reverse-port'] && (!child.length || !/^\d{1,5}$/.test(options['--reverse-port']) ||
@@ -68,6 +76,10 @@ export async function recordMobile(args) {
   if (showHelp) { console.log(help); return; }
   const parent = resolve(options['--results'] ?? 'test-results/mobile-recordings');
   const scenario = options['--scenario'] && resolve(options['--scenario']);
+  if (platform === 'ios' && options['--manual']) {
+    const { recordManualIPhone } = await import('./native/ios-manual.mjs');
+    return recordManualIPhone({ udid: options['--udid'], audioDevice: options['--audio-device'], parent, seconds: Number(options['--duration']) || undefined });
+  }
   if (platform === 'ios') {
     const flags = Object.entries(options).filter(([k]) => k !== '--results').flatMap(([k,v]) => v === true ? [k] : [k,v]);
     return invoke([local('./voiceover-ios.mjs'), 'record', '--results', parent, ...flags], process.env);

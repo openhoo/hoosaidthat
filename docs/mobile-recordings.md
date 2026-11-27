@@ -3,8 +3,8 @@
 Use `hoosaidthat-record` from a project that has this SDK and its supported
 Playwright peer installed. Both platforms can follow the same web navigation
 scenario. Each invocation makes its own run directory. The MP4 contains device
-pixels and routed audio, including sounds your app makes. The separate transcript
-is what the screen reader reported as text.
+pixels and routed audio, including sounds your app makes. For automated scenarios,
+the separate transcript is what the screen reader reported as text.
 
 ## Record your first feature
 
@@ -62,6 +62,31 @@ For a state change, navigate to a button with an expectation, use
 activation shortcut. On iOS this is an XCTest double tap followed by a
 VoiceOver observation. The [iPhone guide](ios-voiceover.md) also covers typing
 and starting an installed app by bundle ID.
+
+## Record any iPhone feature by hand
+
+Open your iPhone simulator in **Device Hub**, launch the app or site, and leave
+it on the screen where the movie should start. Choose **Device > Sound >
+Sound Output** and select a dedicated virtual loopback, such as BlackHole 2ch.
+Keep your Mac’s output and system alert sounds on another device. Use
+`xcrun simctl list devices booted` to find the simulator’s UUID, then run:
+
+```sh
+npx --no-install hoosaidthat-record ios --manual --udid "$UDID" --audio-device "BlackHole 2ch" --results films
+```
+
+Wait for **Recording now**, then drive the iPhone in Device Hub. You can
+navigate a native app, switch apps, type, or explore a web feature with
+VoiceOver gestures. Press **Enter** in the terminal or **Ctrl-C** to save.
+For a timed recording, add `--duration 30` (1–3600 seconds); this is required
+without an interactive terminal. The duration starts when both recorders
+are ready. Let the final announcement finish before stopping.
+
+The command checks the selected simulator’s audio route and enables VoiceOver
+through Device Hub if needed. It restores VoiceOver to its original state.
+Open `recording.mp4` to verify the words you expected to hear. The adjacent
+`report.json` identifies the simulator, route, VoiceOver state and media
+checks. Manual recording does not produce a transcript or require XCTest.
 
 ## Record a longer Android flow
 

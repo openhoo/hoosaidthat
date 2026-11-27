@@ -87,7 +87,7 @@ async function xcrun(args, timeout = 90_000) {
   return (await exec('/usr/bin/xcrun', args, { timeout, maxBuffer: 8 * 1024 * 1024 })).stdout;
 }
 
-async function inventory() {
+export async function inventory() {
   check(process.platform === 'darwin', 'The iPhone simulator needs macOS and Xcode 27+.');
   const [xcode, sdk, list] = await Promise.all([xcrun(['xcodebuild', '-version']), xcrun(['--sdk', 'iphonesimulator', '--show-sdk-version']), xcrun(['simctl', 'list', '-j'])]);
   const { devices, runtimes } = JSON.parse(list);
@@ -216,15 +216,19 @@ async function runOnDevice(device, environment, input, parent, audioDevice, dedi
   }
 }
 
-async function run(device, environment, input, parent, audioDevice, dedicatedMac = false, signal) {
+export async function withIPhoneLock(device, fn) {
   const lock = join(tmpdir(), 'hoosaidthat-voiceover-' + device.udid + '.lock');
   try { await mkdir(lock, { mode: 0o700 }); }
   catch (err) {
     if (err.code === 'EEXIST') throw new Error('This simulator is in use. After an interrupted run, confirm no test is running before removing ' + lock);
     throw err;
   }
-  try { return await runOnDevice(device, environment, input, parent, audioDevice, dedicatedMac, signal); }
+  try { return await fn(); }
   finally { await rm(lock, { recursive: true, force: true }); }
+}
+
+function run(device, environment, input, parent, audioDevice, dedicatedMac = false, signal) {
+  return withIPhoneLock(device, () => runOnDevice(device, environment, input, parent, audioDevice, dedicatedMac, signal));
 }
 
 export async function runIPhoneVoiceOver(scenario, { udid, resultsDirectory, signal } = {}) {

@@ -8,13 +8,16 @@ import { promisify } from 'node:util';
 const exec = promisify(execFile);
 
 export function selectLoopback(profile, requested, dedicatedMac = false) {
-  const devices = (profile.SPAudioDataType ?? []).flatMap(group => group._items ?? [])
-    .filter(d => d.coreaudio_device_transport === 'coreaudio_device_type_virtual' && d.coreaudio_device_input > 0 && d.coreaudio_device_output > 0);
+  const inputs = (profile.SPAudioDataType ?? []).flatMap(group => group._items ?? []).filter(d => d.coreaudio_device_input > 0);
+  const devices = inputs.filter(d => d.coreaudio_device_transport === 'coreaudio_device_type_virtual' && d.coreaudio_device_input > 0 && d.coreaudio_device_output > 0);
   const eligible = devices.filter(d => requested === undefined || d._name === requested);
   if (eligible.length !== 1 || !eligible[0]._name || eligible[0]._name.includes(':')) {
     throw new Error('Select a dedicated virtual loopback with --audio-device NAME and route Device Hub → Device → Sound → Sound Output to it. Available virtual input/output devices: ' + (devices.map(d => d._name).join(', ') || 'none'));
   }
   const device = eligible[0];
+  if (/^(?:default$|[+-]?\d)/i.test(device._name) || inputs.some(d => d !== device && d._name?.startsWith(device._name))) {
+    throw new Error('Choose a unique loopback name that cannot select another AVFoundation input by index, default, or prefix.');
+  }
   if (!dedicatedMac && (device.coreaudio_default_audio_output_device === 'spaudio_yes' || device.coreaudio_default_audio_system_device === 'spaudio_yes')) {
     throw new Error('The selected loopback is the default Mac output. Keep Mac audio on a different output and route only the simulator to the loopback in Device Hub.');
   }
@@ -40,8 +43,8 @@ export async function recordingTools(requested, dedicatedMac = false) {
   return selectLoopback(JSON.parse(profile.stdout), requested, dedicatedMac);
 }
 
-function launch(command, args, readyPattern) {
-  const child = spawn(command, args, { stdio: ['pipe', 'ignore', 'pipe'] });
+export function launchCapture(command, args, readyPattern, { detached = false } = {}) {
+  const child = spawn(command, args, { detached, stdio: ['pipe', 'ignore', 'pipe'] });
   child.stdin.on('error', () => {}); // The process may exit while we ask it to stop.
   let log = '', first, notify, readyAt;
   const ready = new Promise(resolve => { notify = resolve; });
@@ -55,6 +58,7 @@ function launch(command, args, readyPattern) {
   });
   const exited = () => new Error('Recorder stopped: ' + command + ': ' + log.trim());
   return {
+    closed,
     async start() {
       let timer;
       try {
@@ -89,6 +93,21 @@ export async function inspectMovie(file) {
   return { durationSeconds: Number(video.duration), width: video.width, height: video.height, peakDb };
 }
 
+export async function mediaDuration(file) {
+  const { stdout } = await exec('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', file], { timeout: 30_000 });
+  return Number(stdout.trim());
+}
+
+export async function encodeIPhoneMovie(screen, rawAudio, output, offset, duration) {
+  // Simulator screen captures can stop on the last changed frame. Hold that
+  // frame until the end of the real audio without generating any sound.
+  const filter = 'tpad=stop_mode=clone:stop=-1,trim=start=' + offset.toFixed(3) + ',setpts=PTS-STARTPTS,fps=24';
+  await exec('ffmpeg', ['-nostdin', '-v', 'error', '-i', screen, '-i', rawAudio, '-map', '0:v:0', '-map', '1:a:0',
+    '-c:v', 'libx264', '-preset', 'veryfast', '-pix_fmt', 'yuv420p', '-vf', filter, '-c:a', 'aac', '-b:a', '128k',
+    '-t', duration.toFixed(3), '-movflags', '+faststart', output], { timeout: Math.max(600_000, duration * 3000) });
+  return inspectMovie(output);
+}
+
 // Both CoreAudio discovery calls can take more than 20s on a freshly booted Mac.
 // They only inspect routes; a timeout can safely be retried once.
 async function inspectRoute(description, command, args) {
@@ -101,12 +120,13 @@ async function inspectRoute(description, command, args) {
   }
 }
 
+export const simulatorPorts = udid => inspectRoute('the simulator audio route', '/usr/bin/xcrun', ['simctl', 'io', udid, 'enumerate']);
 const audioProfile = () => inspectRoute('Mac audio devices', '/usr/sbin/system_profiler', ['SPAudioDataType', '-json']);
 
 // The XCTest calls this private loopback endpoint immediately before and after scenario steps.
 export async function createRecording(output, udid, audioDevice, dedicatedMac = false) {
   const [ports, profile] = await Promise.all([
-    inspectRoute('the simulator audio route', '/usr/bin/xcrun', ['simctl', 'io', udid, 'enumerate']),
+    simulatorPorts(udid),
     audioProfile(),
   ]);
   verifyAudioRoute(ports.stdout, audioDevice, JSON.parse(profile.stdout), dedicatedMac);
@@ -125,7 +145,7 @@ export async function createRecording(output, udid, audioDevice, dedicatedMac = 
     try {
       if (op.endsWith('/start') && state === 'idle') {
         state = 'starting';
-        audio = launch('ffmpeg', ['-hide_banner', '-nostdin', '-f', 'avfoundation', '-i', ':' + audioDevice,
+        audio = launchCapture('ffmpeg', ['-hide_banner', '-nostdin', '-f', 'avfoundation', '-i', ':' + audioDevice,
           '-vn', '-c:a', 'pcm_s16le', '-stats_period', '0.05', '-progress', 'pipe:2', rawAudio], /out_time_us=[1-9]\d*/);
         pending = audio.start();
         await pending;
@@ -148,18 +168,11 @@ export async function createRecording(output, udid, audioDevice, dedicatedMac = 
       if (state !== 'captured') throw new Error('XCTest did not complete the requested feature recording.');
       if (!screen || !Number.isFinite(screen.timestamp)) throw new Error('XCTest did not attach a screen movie for the selected simulator.');
       const file = join(scratch, 'recording.mp4');
-      const { stdout: rawDuration } = await exec('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', rawAudio], {timeout: 20_000});
-      const duration = Number(rawDuration.trim());
-      const { stdout: screenDuration } = await exec('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', screen.file], {timeout: 20_000});
+      const [duration, screenDuration] = await Promise.all([mediaDuration(rawAudio), mediaDuration(screen.file)]);
       const offset = audioAt - screen.timestamp;
-      // Screen recording can end on the last changed frame; preserve that frame through trailing speech.
-      if (!Number.isFinite(duration) || duration < 0.5 || !(offset >= -0.5 && offset < Number(screenDuration.trim())))
+      if (!Number.isFinite(duration) || duration < 0.5 || !(offset >= -0.5 && offset < screenDuration))
         throw new Error('The XCTest screen attachment does not overlap the recorded feature audio.');
-      const filter = 'tpad=stop_mode=clone:stop=-1,trim=start=' + Math.max(0, offset).toFixed(3) + ',setpts=PTS-STARTPTS,fps=24';
-      await exec('ffmpeg', ['-nostdin', '-v', 'error', '-i', screen.file, '-i', rawAudio,
-        '-map', '0:v:0', '-map', '1:a:0', '-c:v', 'libx264', '-preset', 'veryfast', '-vf', filter,
-        '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '128k', '-t', duration.toFixed(3), '-movflags', '+faststart', file], {timeout: 10 * 60_000});
-      const media = await inspectMovie(file);
+      const media = await encodeIPhoneMovie(screen.file, rawAudio, file, Math.max(0, offset), duration);
       await rename(file, join(output, 'recording.mp4'));
       finalized = true;
       return { file: 'recording.mp4', videoSource: 'XCTest device screen recording', screenOffsetSeconds: Math.max(0, offset), audioSource: dedicatedMac ? 'dedicated Mac output via virtual loopback (includes host audio)' : 'simulator output via virtual loopback', audioDevice, ...media };

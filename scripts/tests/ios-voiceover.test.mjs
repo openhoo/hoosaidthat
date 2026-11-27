@@ -31,6 +31,7 @@ test('the npm package ships the iPhone runner and every source needed by the XCT
   const [manifest] = JSON.parse(packed.stdout);
   const paths = new Set(manifest.files.map(item => item.path));
   for (const file of [
+    'scripts/record-mobile.mjs', 'scripts/native/ios-manual.mjs', 'scripts/native/ios-recording.mjs',
     'scripts/voiceover-ios.mjs', 'scripts/voiceover-ios.d.mts', 'oracle/ios-voiceover/UITestHost.swift', 'oracle/ios-voiceover/VoiceOverTests.swift',
     'oracle/ios-voiceover/HSTVoiceOver.h', 'oracle/ios-voiceover/HSTVoiceOver.m',
     'oracle/ios-voiceover/HooSaidThat.xcodeproj/project.pbxproj',
@@ -178,6 +179,8 @@ test('recording accepts an isolated loopback, never a microphone or the host def
   const profile = devices => ({ SPAudioDataType: [{ _items: devices }] });
   assert.equal(selectLoopback(profile([mic, loop])), loop._name);
   assert.throws(() => selectLoopback(profile([mic]), mic._name));
+  for (const name of ['default', '0', '6 virtual inputs']) assert.throws(() => selectLoopback(profile([{ ...loop, _name: name }])));
+  assert.throws(() => selectLoopback(profile([loop, { ...mic, _name: loop._name + ' microphone' }]), loop._name));
   assert.throws(() => selectLoopback(profile([{ ...loop, coreaudio_default_audio_output_device: 'spaudio_yes' }]), loop._name));
   assert.throws(() => selectLoopback(profile([loop, { ...loop, _name: 'Other' }])));
 });

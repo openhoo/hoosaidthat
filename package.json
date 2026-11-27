@@ -109,7 +109,8 @@
     "scripts/native/focus-windows.ps1",
     "scripts/record-mobile.mjs",
     "scripts/mobile-scenario.mjs",
-    "scripts/native/ios-recording.mjs"
+    "scripts/native/ios-recording.mjs",
+    "scripts/native/ios-manual.mjs"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json && tsc -p tsconfig.parity.json && node scripts/build-parity.mjs",
