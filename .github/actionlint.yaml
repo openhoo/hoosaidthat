@@ -2,5 +2,6 @@ self-hosted-runner:
   labels:
     - kvm
     - nvda-oracle
+    - xcode-27
 
 config-variables: null
