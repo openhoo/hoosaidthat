@@ -94,7 +94,10 @@ Mac used only for this run, you may instead select the loopback as the Mac's
 default output, leave Device Hub on System, and add `--dedicated-mac-output`
 with an explicit `--audio-device`. That mode records **all sounds routed to
 that Mac output**; the report labels it accordingly. Microphones remain
-ineligible.
+ineligible. Before recording, the runner checks that the simulator's output is
+actually routed to that device. Ctrl-C requests XCTest teardown and stops both
+recorders. An unresponsive XCTest process may be unable to restore VoiceOver;
+check that setting on a pre-booted simulator after a forced interruption.
 
 For an installed native app, use its bundle ID instead of a URL:
 

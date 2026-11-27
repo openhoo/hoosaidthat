@@ -203,3 +203,15 @@ test('media verification refuses a mute AAC track, a video without audio, and ac
     }
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
+
+test('the simulator output route must match the loopback, including the dedicated-host opt-in', async () => {
+  const { verifyAudioRoute } = await import('../native/ios-recording.mjs');
+  const device = 'BlackHole [2ch]';
+  const profile = { SPAudioDataType: [{ _items: [{ _name: device, coreaudio_default_audio_output_device: 'spaudio_yes' }] }] };
+  const ports = route => 'Guest Audio Output -> ' + route + '\n    BlackHole_UID: ' + device + ' (2 In / 2 Out)\n';
+  verifyAudioRoute(ports('Host Audio Device #BlackHole_UID'), device, profile, false);
+  verifyAudioRoute(ports('Default Host Audio Device'), device, profile, true);
+  assert.throws(() => verifyAudioRoute(ports('Default Host Audio Device'), device, profile, false));
+  assert.throws(() => verifyAudioRoute(ports('Default Host Audio Device'), device, {}, true));
+  assert.throws(() => verifyAudioRoute(ports('Host Audio Device #Other'), device, profile, true));
+});

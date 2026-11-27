@@ -128,7 +128,8 @@ async function extract(result, dir, device) {
   return JSON.parse(await readFile(join(path, file), 'utf8'));
 }
 
-async function runOnDevice(device, environment, input, parent, audioDevice, dedicatedMac) {
+async function runOnDevice(device, environment, input, parent, audioDevice, dedicatedMac, signal) {
+  signal?.throwIfAborted();
   check(device.state === 'Booted' || device.state === 'Shutdown', `Simulator is ${device.state}; wait until it is ready.`);
   await mkdir(parent, { recursive: true });
   const output = await mkdtemp(join(parent, 'run-'));
@@ -139,25 +140,43 @@ async function runOnDevice(device, environment, input, parent, audioDevice, dedi
   try {
     if (!input) fixture = await smokeFixture(!!audioDevice);
     const scenario = input ?? fixture.scenario;
+    signal?.throwIfAborted();
     if (device.state === 'Shutdown') {
       await xcrun(['simctl', 'boot', device.udid]);
       bootedHere = true;
     }
     await xcrun(['simctl', 'bootstatus', device.udid], 5 * 60_000);
+    signal?.throwIfAborted();
     if (audioDevice) recording = await createRecording(output, device.udid, audioDevice, dedicatedMac);
     const args = ['xcodebuild', 'test', '-project', project, '-scheme', 'HooSaidThat', '-destination', 'platform=iOS Simulator,id=' + device.udid,
       '-derivedDataPath', derived, '-resultBundlePath', result, '-parallel-testing-enabled', 'NO', '-test-timeouts-enabled', 'YES',
       '-default-test-execution-time-allowance', '480', '-maximum-test-execution-time-allowance', '480', '-only-testing:HooSaidThatUITests/VoiceOverTests/testScenario'];
     // xcodebuild strips TEST_RUNNER_ before forwarding the value into XCTest.
-    let failure;
+    let failure, cancelTimer;
+    // XCTest hears SIGINT first, allowing its teardown to restore VoiceOver; bound
+    // a crashed or unresponsive runner before releasing the simulator lock.
+    let testProcess;
+    const interrupt = () => {
+      testProcess?.kill('SIGINT');
+      cancelTimer ??= setTimeout(() => testProcess?.kill('SIGKILL'), 12_000);
+      void recording?.close().catch(() => {});
+    };
     try {
-      const { stdout, stderr } = await exec('/usr/bin/xcrun', args, { env: { ...process.env, TEST_RUNNER_HST_IOS_SCENARIO_JSON: JSON.stringify(scenario), ...(recording ? { TEST_RUNNER_HST_RECORDING_ENDPOINT: recording.endpoint } : {}) },
+      signal?.throwIfAborted();
+      const testing = exec('/usr/bin/xcrun', args, { env: { ...process.env, TEST_RUNNER_HST_IOS_SCENARIO_JSON: JSON.stringify(scenario), ...(recording ? { TEST_RUNNER_HST_RECORDING_ENDPOINT: recording.endpoint } : {}) },
         maxBuffer: 32 * 1024 * 1024, timeout: 22 * 60_000 });
+      testProcess = testing.child;
+      signal?.addEventListener('abort', interrupt, {once: true});
+      const { stdout, stderr } = await testing;
       await writeFile(join(output, 'xcodebuild.log'), stdout + stderr);
     } catch (error) {
       await writeFile(join(output, 'xcodebuild.log'), (error.stdout ?? '') + (error.stderr ?? ''));
       failure = new Error('XCTest did not pass; see xcodebuild.log and VoiceOver.xcresult in ' + output);
+    } finally {
+      signal?.removeEventListener('abort', interrupt);
+      clearTimeout(cancelTimer);
     }
+    signal?.throwIfAborted();
     let transcript;
     try {
       transcript = await extract(result, output, device);
@@ -191,31 +210,33 @@ async function runOnDevice(device, environment, input, parent, audioDevice, dedi
   }
 }
 
-async function run(device, environment, input, parent, audioDevice, dedicatedMac = false) {
+async function run(device, environment, input, parent, audioDevice, dedicatedMac = false, signal) {
   const lock = join(tmpdir(), 'hoosaidthat-voiceover-' + device.udid + '.lock');
   try { await mkdir(lock, { mode: 0o700 }); }
   catch (err) {
     if (err.code === 'EEXIST') throw new Error('This simulator is in use. After an interrupted run, confirm no test is running before removing ' + lock);
     throw err;
   }
-  try { return await runOnDevice(device, environment, input, parent, audioDevice, dedicatedMac); }
+  try { return await runOnDevice(device, environment, input, parent, audioDevice, dedicatedMac, signal); }
   finally { await rm(lock, { recursive: true, force: true }); }
 }
 
-export async function runIPhoneVoiceOver(scenario, { udid, resultsDirectory } = {}) {
+export async function runIPhoneVoiceOver(scenario, { udid, resultsDirectory, signal } = {}) {
   const input = validateScenario(scenario);
+  signal?.throwIfAborted();
   const env = await inventory();
-  return run(selectDevice(env.devices, env.runtimes, udid), env, input, resolve(resultsDirectory ?? 'test-results/ios-voiceover'));
+  return run(selectDevice(env.devices, env.runtimes, udid), env, input, resolve(resultsDirectory ?? 'test-results/ios-voiceover'), undefined, false, signal);
 }
 
-export async function recordIPhoneVoiceOver(scenario, { udid, resultsDirectory, audioDevice, dedicatedMacOutput = false } = {}) {
+export async function recordIPhoneVoiceOver(scenario, { udid, resultsDirectory, audioDevice, dedicatedMacOutput = false, signal } = {}) {
   const input = validateScenario(scenario);
+  signal?.throwIfAborted();
   const env = await inventory();
   const device = selectDevice(env.devices, env.runtimes, udid);
-  return run(device, env, input, resolve(resultsDirectory ?? 'test-results/ios-voiceover'), await recordingTools(audioDevice, dedicatedMacOutput), dedicatedMacOutput);
+  return run(device, env, input, resolve(resultsDirectory ?? 'test-results/ios-voiceover'), await recordingTools(audioDevice, dedicatedMacOutput), dedicatedMacOutput, signal);
 }
 
-async function main(args) {
+async function main(args, signal) {
   if (args.length === 0 || args.includes('--help') || args.includes('-h')) { console.log(help); return; }
   const [command, ...rest] = args;
   check(['doctor', 'run', 'record'].includes(command), help);
@@ -240,9 +261,14 @@ async function main(args) {
   const device = selectDevice(env.devices, env.runtimes, options['--udid']);
   if (command === 'doctor') { console.log(env.xcode + '\n' + JSON.stringify(device)); return; }
   const audioDevice = command === 'record' ? await recordingTools(options['--audio-device'], options['--dedicated-mac-output']) : undefined;
-  await run(device, env, input, resolve(options['--results'] ?? 'test-results/ios-voiceover'), audioDevice, options['--dedicated-mac-output']);
+  await run(device, env, input, resolve(options['--results'] ?? 'test-results/ios-voiceover'), audioDevice, options['--dedicated-mac-output'], signal);
 }
 
 if (process.argv[1] && await realpath(process.argv[1]).catch(() => undefined) === fileURLToPath(import.meta.url)) {
-  main(process.argv.slice(2)).catch(error => { console.error(error.message); process.exitCode = 1; });
+  const controller = new AbortController();
+  const stop = name => controller.abort(new Error('iPhone VoiceOver interrupted by ' + name + '.'));
+  const handlers = ['SIGINT', 'SIGTERM', 'SIGHUP'].map(name => [name, () => stop(name)]);
+  for (const [name, handler] of handlers) process.on(name, handler);
+  main(process.argv.slice(2), controller.signal).catch(error => { console.error(error.message); process.exitCode = 1; })
+    .finally(() => { for (const [name, handler] of handlers) process.off(name, handler); });
 }
