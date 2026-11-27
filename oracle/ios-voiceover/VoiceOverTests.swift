@@ -13,6 +13,7 @@ private struct Scenario: Decodable {
     let url: String?
     let bundleId: String?
     let readyText: String?
+    let initialFocusText: String?
     let steps: [Step]
 }
 
@@ -220,12 +221,15 @@ final class VoiceOverTests: XCTestCase {
         if state.initialVoiceOver == false { try HSTVoiceOver.setEnabled(true) }
         guard HSTVoiceOver.isEnabled() else { throw ScenarioError("VoiceOver did not become enabled.") }
         let recording = ProcessInfo.processInfo.environment["HST_RECORDING_ENDPOINT"]
-        if recording != nil, let readyText = scenario.readyText {
+        if recording != nil, let initialFocusText = scenario.initialFocusText {
             // A physical touch selects an item while VoiceOver is on. It gives a cold
             // service a real foreground focus before asking it for its current speech.
             let elements = scenario.url == nil ? target.descendants(matching: .any) : target.webViews.descendants(matching: .any)
-            let anchor = elements.matching(NSPredicate(format: "label == %@", readyText)).firstMatch
-            if anchor.exists && anchor.isHittable { anchor.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap() }
+            let anchor = elements.matching(NSPredicate(format: "label == %@", initialFocusText)).firstMatch
+            guard anchor.waitForExistence(timeout: 15) && anchor.isHittable else {
+                throw ScenarioError("The requested initialFocusText is absent or not hittable.")
+            }
+            anchor.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
         }
         try await waitForVoiceOver(in: target, firstAction: scenario.steps[0].action, startedHere: state.initialVoiceOver == false)
         if let recording {
@@ -252,7 +256,10 @@ final class VoiceOverTests: XCTestCase {
                 if recording != nil && (step.action == .forward || step.action == .backward) {
                     // In acoustic recordings send a VoiceOver one-finger flick, as
                     // a user would, and observe the native service's resulting focus.
-                    if step.action == .forward { target.swipeRight() } else { target.swipeLeft() }
+                    let direction = step.action == .forward ? 1.0 : -1.0
+                    let from = target.coordinate(withNormalizedOffset: CGVector(dx: 0.5 - 0.16 * direction, dy: 0.5))
+                    let to = target.coordinate(withNormalizedOffset: CGVector(dx: 0.5 + 0.16 * direction, dy: 0.5))
+                    from.press(forDuration: 0.01, thenDragTo: to, withVelocity: .fast, thenHoldForDuration: 0)
                     query = "current"
                     try await Task.sleep(nanoseconds: 300_000_000)
                 }

@@ -26,7 +26,8 @@ function check(condition, message) { if (!condition) throw new Error(message); }
 function onlyKeys(value, keys) { return record(value) && Object.keys(value).every(key => keys.includes(key)); }
 
 export function validateScenario(input) {
-  check(onlyKeys(input, ['url', 'bundleId', 'readyText', 'steps']) && (('url' in input) !== ('bundleId' in input)), 'Scenario needs one of url or bundleId, and steps.');
+  check(onlyKeys(input, ['url', 'bundleId', 'readyText', 'initialFocusText', 'steps']) && (('url' in input) !== ('bundleId' in input)), 'Scenario needs one of url or bundleId, and steps.');
+  if ('initialFocusText' in input) check(typeof input.initialFocusText === 'string' && input.initialFocusText.trim(), 'initialFocusText must be a nonempty accessibility label.');
   if ('readyText' in input) check(typeof input.readyText === 'string' && input.readyText.trim(), 'readyText must be a nonempty accessibility label.');
   if ('url' in input) {
     check(typeof input.url === 'string', 'The scenario URL must be a string.');
@@ -108,7 +109,7 @@ async function smokeFixture(recording = false) {
     res.end(`<!doctype html><html lang="en"><meta name="viewport" content="width=device-width"><title>VoiceOver test</title><main><h1>${heading}</h1><button onclick="this.textContent='${receipt}'">${button}</button></main></html>`);
   });
   await new Promise((ok, fail) => { server.once('error', fail); server.listen(0, '127.0.0.1', ok); });
-  return { server, scenario: { url: `http://127.0.0.1:${server.address().port}${path}`, readyText: recording ? heading : button, steps: [
+  return { server, scenario: { url: `http://127.0.0.1:${server.address().port}${path}`, readyText: button, ...(recording ? { initialFocusText: heading } : {}), steps: [
     { action: 'forward', until: button, maxMoves: 40 }, { action: 'backward', expect: heading }, { action: 'forward', expect: button },
     ...(recording ? [{ action: 'activate', expect: receipt }] : []),
   ] } };

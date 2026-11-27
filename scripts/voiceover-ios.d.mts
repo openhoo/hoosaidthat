@@ -9,6 +9,8 @@ export type IPhoneVoiceOverStep =
 export type IPhoneVoiceOverScenario = ({ url: string; bundleId?: never } | { bundleId: string; url?: never }) & {
   /** Wait for this exact accessibility label on the page before enabling VoiceOver. */
   readyText?: string;
+  /** In a recording, touch the center of this exact accessible label once to establish VoiceOver focus. Use a noninteractive heading. */
+  initialFocusText?: string;
   steps: readonly IPhoneVoiceOverStep[];
 }
 

@@ -83,9 +83,10 @@ can still be interrupted. Transcript events include the action's elapsed time
 from the start of the scenario. The report identifies the selected audio device,
 duration, frame size and measured peak volume.
 
-When `readyText` is visible and hittable, recording starts by touching its
-center once with VoiceOver on to establish focus before the movie. Set it to
-the element where the walkthrough should begin. Recording uses actual
+Optionally specify `initialFocusText` to touch the center of that exact label
+once with VoiceOver on before the movie starts. Choose a noninteractive heading
+as the starting point. Without this option no initial touch is sent. The
+`readyText` check never touches the element. Recording uses actual
 one-finger right/left flicks for forward/backward and queries native VoiceOver
 for the resulting utterance. The transcript-only `run` command uses Apple's
 service navigation methods.
