@@ -5,6 +5,7 @@ on:
   pull_request:
     paths:
       - '.github/workflows/iphone-voiceover.yml'
+      - '.github/scripts/verify-iphone-audio.py'
       - 'oracle/ios-voiceover/**'
       - 'scripts/voiceover-ios.mjs'
       - 'scripts/record-mobile.mjs'
@@ -36,7 +37,8 @@ jobs:
           npm install --global --ignore-scripts npm@11.20.0
           npm ci
           npm run build
-          mkdir -p "$RUNNER_TEMP/sdk" "$RUNNER_TEMP/consumer" test-results/ios-voiceover
+          mkdir -p "$RUNNER_TEMP/sdk" "$RUNNER_TEMP/consumer" test-results
+          mkdir test-results/ios-voiceover # Only accept recordings from this job.
           npm pack --pack-destination "$RUNNER_TEMP/sdk"
           (cd "$RUNNER_TEMP/sdk" && shasum -a 256 ./*.tgz) > test-results/ios-voiceover/SHA256SUMS
           git rev-parse HEAD > test-results/ios-voiceover/SOURCE
@@ -77,7 +79,9 @@ jobs:
       - name: Record and check actual VoiceOver output in Mobile Safari
         working-directory: ${{ runner.temp }}/consumer
         run: node_modules/.bin/hoosaidthat-record ios --udid "$HST_PHONE" --audio-device "BlackHole 2ch" --results "$GITHUB_WORKSPACE/test-results/ios-voiceover"
-      - name: Preserve XCTest results and transcript
+      - name: Hear the order and confirmation in the finished movie
+        run: python3 .github/scripts/verify-iphone-audio.py test-results/ios-voiceover
+      - name: Preserve XCTest results, MP4 and acoustic verification
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
