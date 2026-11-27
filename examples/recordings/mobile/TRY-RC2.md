@@ -1,16 +1,75 @@
 # Try the RC.2 recorder
 
-Record a native app or website by hand on a simulator. The MP4 includes the screen and the sound you heard, including VoiceOver or TalkBack and any app audio. No test script is required.
+Record a feature by hand with real VoiceOver or TalkBack. You can open a website, explore an installed app, or start directly in your own build. The MP4 includes the simulator screen and its audio. [Watch four examples](README.md).
 
-## Install the preview
+## Install once
 
-As of November 27, 2026, `0.1.6-rc.2` has not been published to the npm registry. Install the public preview and its Playwright peer in an empty directory with Node.js and npm. No GitHub account or source build is needed.
+As of November 27, 2026, `0.1.6-rc.2` is available as a public preview outside the npm registry. In an empty directory with Node.js and npm, install the package and download the [standalone Bash companion](https://github.com/openhoo/hoosaidthat/blob/84904904bf0567c6f9896654e94b197977262504/examples/recordings/mobile/hst-film). No GitHub account is needed.
 
 ```sh
 npm init -y
 npm install --ignore-scripts https://raw.githubusercontent.com/openhoo/hoosaidthat/75faec6dba652ac2afc398341851f9aa56d6bda3/examples/recordings/mobile/preview/0.1.6-rc.2/openhoo-hoosaidthat-0.1.6-rc.2.tgz @playwright/test@1.62.1
-npx --no-install hoosaidthat-record --help
+curl -fLo hst-film https://raw.githubusercontent.com/openhoo/hoosaidthat/84904904bf0567c6f9896654e94b197977262504/examples/recordings/mobile/hst-film
+chmod +x hst-film
+./hst-film --help
 ```
+
+Run the commands below from this directory. The helper uses its installed `node_modules/.bin/hoosaidthat-record`. If you prefer to verify or rebuild the SDK first, see the package details at the end.
+
+## iPhone with VoiceOver
+
+Follow the [iPhone setup](https://github.com/openhoo/hoosaidthat/blob/2d99883002316be08700f6763303c72539929ac6/docs/ios-voiceover.md) on a Mac with Xcode 27+, a booted iPhone simulator running iOS 27+, FFmpeg, and a dedicated audio loopback. In Device Hub, choose the loopback under **Device → Sound → Sound Output**. Leave the Mac’s own sound output on its usual device.
+
+Copy your simulator’s UUID from `xcrun simctl list devices booted`, and set the actual name of its audio loopback:
+
+```sh
+export UDID="your-booted-iPhone-UUID"
+export HST_AUDIO_DEVICE="BlackHole 2ch"
+```
+
+**Record your own build:**
+
+```sh
+./hst-film ios --install "/path/to/MyApp.app"
+```
+
+Use a **Simulator** build. The helper reads the bundle ID, installs the app on the selected iPhone, and opens it. To record a site or an app that’s already installed, open it in Device Hub and run `./hst-film ios`.
+
+Wait for **Recording now**, navigate your feature, and let the last announcement finish. Press **Enter** or **Ctrl-C** in the terminal to save. Append `--duration 30` to stop after 30 seconds; a duration is required without an interactive terminal.
+
+## Android with TalkBack
+
+Follow the [Android emulator setup](https://github.com/openhoo/hoosaidthat/blob/2d99883002316be08700f6763303c72539929ac6/oracle/android-talkback/README.md) on macOS or Linux with a graphical desktop. Install scrcpy, FFmpeg, the JDK, and Android SDK command-line tools (including `apkanalyzer` for your own APK). Prepare an AVD with TalkBack and a speech engine.
+
+Set `ANDROID_HOME` to your SDK and `AVD` to the prepared emulator’s name. For example:
+
+```sh
+export ANDROID_HOME="$HOME/Library/Android/sdk"  # On Linux this is often "$HOME/Android/Sdk"
+"$ANDROID_HOME/emulator/emulator" -list-avds
+export AVD="HST_TalkBack_API35"                  # Use a name from that list
+```
+
+**Record your own build:**
+
+```sh
+./hst-film android --install "/path/to/app-debug.apk"
+```
+
+Use a single installable APK. The helper reads its application ID and opens it in a disposable copy of the named emulator. Drive the feature in the scrcpy window. Let TalkBack finish, then **close the window** to save. Append `--duration 30` for a timed recording. To choose an existing app or visit a website yourself, run `./hst-film android`.
+
+## Find or share the movie
+
+Open `recording.mp4` in the run directory printed under `films/`. Set `HST_FILMS_DIR` to change where new recordings go. If a recording is quiet, you can make a listening copy with FFmpeg:
+
+```sh
+./hst-film louder "/path/to/recording.mp4"
+```
+
+This writes `recording-louder.mp4` next to the original. It copies the video stream, adjusts the audio level, and refuses to overwrite an existing copy.
+
+For repeatable tests, use the SDK’s [scenario guide](https://github.com/openhoo/hoosaidthat/blob/2d99883002316be08700f6763303c72539929ac6/docs/mobile-recordings.md) and [booking example](https://github.com/openhoo/hoosaidthat/blob/2d99883002316be08700f6763303c72539929ac6/docs/examples/mobile/booking/booking.json). In a scripted iPhone Safari run, if XCTest reports that Safari has not loaded accessibility before the first feature action, close only Safari on the selected simulator and run the script again. Manual recording does not use XCTest.
+
+## Package details
 
 <details>
 <summary>Download and check the tarball, rebuild from source, or get it from CI</summary>
@@ -43,47 +102,3 @@ gh run download 45978539642 -R openhoo/hoosaidthat -n installable-sdk
 Check and install either tarball with the commands above.
 
 </details>
-
-## Record a feature
-
-**iPhone with VoiceOver.** Follow the [iPhone setup](https://github.com/openhoo/hoosaidthat/blob/2d99883002316be08700f6763303c72539929ac6/docs/ios-voiceover.md) on a Mac with Xcode 27+, a booted iPhone simulator running iOS 27+, FFmpeg and an audio loopback. In Device Hub, select the loopback under **Device → Sound → Sound Output** and leave the Mac’s own output on its usual device. Open your app or website. Set `UDID` to the iPhone identifier from `xcrun simctl list devices booted`. Use your loopback’s actual name in the command.
-
-To record your own iOS build, use a `.app` built for the iOS Simulator. Install and open it on the same booted iPhone **before** starting the recorder:
-
-```sh
-xcrun simctl install "$UDID" /path/to/MyApp.app
-xcrun simctl launch "$UDID" com.example.MyApp
-```
-
-Use your app’s bundle ID, or open the installed app from the home screen. Then start recording:
-
-```sh
-npx --no-install hoosaidthat-record ios --manual --udid "$UDID" --audio-device "BlackHole 2ch" --results films
-```
-
-When the terminal says **Recording now**, navigate in Device Hub. Let the last announcement finish and press **Enter** or **Ctrl-C** in the terminal to save. Without an interactive terminal, add `--duration 30` to stop after 30 seconds.
-
-**Android with TalkBack.** Follow the [Android emulator setup](https://github.com/openhoo/hoosaidthat/blob/2d99883002316be08700f6763303c72539929ac6/oracle/android-talkback/README.md) and install scrcpy and FFmpeg on a computer with a graphical desktop. Set `AVD` to the name of your prepared Android Virtual Device; `emulator -list-avds` lists the available names. Start in Settings, or substitute the package name of another app installed on that AVD.
-
-```sh
-npx --no-install hoosaidthat-record android --manual --avd "$AVD" --app com.android.settings --results films
-```
-
-Navigate in the scrcpy window. Let TalkBack finish speaking, then **close the window** to save. You can also add `--duration 30` for a timed recording. Omit `--app com.android.settings` to choose the app yourself.
-
-**Record your own Android APK.** Set `APK` to your signed debug or release APK and `APP_ID` to the Android application ID. From the project where you installed the recorder, run:
-
-```sh
-export APK="/absolute/path/to/app-debug.apk"
-export APP_ID="com.example.myapp"
-npx --no-install hoosaidthat-record android --avd "$AVD" --results films -- sh -ec '
-  adb -s "$ANDROID_SERIAL" install -r "$APK"
-  exec scrcpy --serial "$ANDROID_SERIAL" --no-audio --no-clipboard-autosync --start-app="$APP_ID"
-'
-```
-
-The recorder supplies `ANDROID_SERIAL` for its disposable emulator. The commands install and open your build there. Drive the feature in the window, let TalkBack finish, then close the window to save. HooSaidThat records device audio separately, so the control window uses `--no-audio`.
-
-On either platform, open `recording.mp4` in the run directory printed by the command under `films/`. To replay a feature automatically, see the [scenario guide](https://github.com/openhoo/hoosaidthat/blob/2d99883002316be08700f6763303c72539929ac6/docs/mobile-recordings.md) and [booking example](https://github.com/openhoo/hoosaidthat/blob/2d99883002316be08700f6763303c72539929ac6/docs/examples/mobile/booking/booking.json).
-
-In a scripted iPhone Safari run, if XCTest reports that Safari has not loaded accessibility before the first feature action, close only Safari on the selected simulator and run the script again. Manual recording does not use XCTest.
