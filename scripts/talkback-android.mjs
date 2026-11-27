@@ -251,6 +251,10 @@ async function runOnDevice(options, adb, signal) {
         HOOSAIDTHAT_TALKBACK_CONTROL_ENDPOINT: bridge.endpoint, HOOSAIDTHAT_TALKBACK_CDP_ENDPOINT: devtools.endpoint,
         HOOSAIDTHAT_TALKBACK_CONTROL_TOKEN: token } });
         await movie?.finish();
+      } catch (error) {
+        if (signal.aborted && signal.reason?.signal) {
+          process.exitCode = signal.reason.signal === 'SIGINT' ? 130 : 143;
+        } else throw error;
       } finally { await movie?.close(); }
     }
   } finally {
