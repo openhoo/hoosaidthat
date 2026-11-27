@@ -1,5 +1,19 @@
 # Feature recordings with VoiceOver and TalkBack
 
+## Confirm a checkout in iPhone Safari
+
+[Play or download the 46-second iPhone checkout MP4](https://raw.githubusercontent.com/openhoo/hoosaidthat/examples/mobile-recordings/examples/recordings/mobile/ios-voiceover-checkout.mp4) · [English captions](ios-voiceover-checkout.en.vtt).
+
+VoiceOver reads the **Confirm order** button, moves back to **Order summary**, then forward to the button. A double tap activates the button. On the next forward movement you hear **Receipt ready** and see the focus outline around the new label. The letters and digits in the labels identify this synthetic run.
+
+To reproduce on a supported, routed iPhone simulator, run the built-in example:
+
+```sh
+npx --no-install hoosaidthat-record ios --udid "$UDID" --audio-device "BlackHole 2ch" --results films
+```
+
+This is the unedited MP4 written by the installed [candidate archive](https://github.com/openhoo/hoosaidthat/actions/runs/45974196315), SHA-256 `857b8e5dc81a7388dd7ab70236a649faf6dd283bb6b1dcc00cee13ef6576b64c`. Independent speech recognition recovered the three checkout phrases from its audio. The first and last frames remain in Safari. The package ran on Xcode 27.2 and iOS 27.0.
+
 ## Book a visit in a browser
 
 [Download or play the 31-second MP4](https://raw.githubusercontent.com/openhoo/hoosaidthat/examples/mobile-recordings/examples/recordings/mobile/android-talkback-booking.mp4). [English captions](android-talkback-booking.en.vtt) are available separately. The green rectangle is TalkBack’s current focus. At 0:25 the button has been activated and TalkBack says “Visit reserved.” The video includes audio from the Android 15 emulator.
