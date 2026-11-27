@@ -42,7 +42,8 @@ async function main() {
     await rm(out, { recursive: true, force: true });
     await mkdir(join(out, 'classes'), { recursive: true });
     await mkdir(join(out, 'dex'), { recursive: true });
-    await run(java('javac'), ['--release', '8', '-classpath', android, '-d', join(out, 'classes'), join(root, name, source)]);
+    await run(java('javac'), ['--release', '8', '-classpath', android, '-d', join(out, 'classes'), join(root, name, source),
+      ...(name === 'capture' ? [join(root, name, 'AudibleSpeech.java')] : [])]);
     await run(java('java'), ['-cp', join(tools, 'lib', 'd8.jar'), 'com.android.tools.r8.D8', '--lib', android, '--min-api', '34',
       '--output', join(out, 'dex'), ...await classes(join(out, 'classes'))]);
     const unsigned = join(out, 'unsigned.apk');

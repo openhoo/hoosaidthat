@@ -7,7 +7,7 @@ const talkback = 'com.google.android.marvin.talkback';
 const chrome = 'com.android.chrome';
 const capture = 'dev.openhoo.hoosaidthat.tts';
 const component = talkback + '/com.google.android.marvin.talkback.TalkBackService';
-const helpers = fileURLToPath(new URL('../../oracle/android-talkback/build/', import.meta.url));
+const helpers = process.env.HST_TALKBACK_HELPERS || fileURLToPath(new URL('../../oracle/android-talkback/build/', import.meta.url));
 
 // Called only for the read-only AVD instance launched by this process.
 export async function prepareTalkBackEmulator(adb, options, { checkFile = access, wait = delay } = {}) {
@@ -44,6 +44,20 @@ export async function prepareTalkBackEmulator(adb, options, { checkFile = access
     }
   }
   const settings = (...args) => shell('settings', ...args);
+  let voice;
+  if (options.recording) {
+    const preferred = await settings('get', 'secure', 'tts_default_synth');
+    voice = options['tts-engine'] || (preferred && preferred !== 'null' ? preferred : 'com.google.android.tts');
+    if (!/^[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)+$/.test(voice) || voice === capture || !installed.has(voice)) {
+      throw new Error('select an installed Android speech engine with --tts-engine PACKAGE, with a voice for the recording language');
+    }
+    const services = await shell('cmd', 'package', 'query-services', '--components', '-a', 'android.intent.action.TTS_SERVICE', '-p', voice);
+    if (!services.split(/\s+/).some(component => component.startsWith(voice + '/'))) throw new Error('selected package does not expose an Android speech engine: ' + voice);
+    await shell('am', 'force-stop', capture);
+    // voice is restricted to an Android package name above. The shell inside
+    // run-as writes only the test helper's own private configuration file.
+    await shell('run-as', capture, 'sh', '-c', `'mkdir -p files && rm -f files/recording-live && echo ${voice} > files/recording-engine'`);
+  }
   const existing = (await settings('get', 'secure', 'enabled_accessibility_services')).split(':').filter(v => v && v !== 'null');
   if (!existing.every(v => /^[\w.$]+\/[\w.$]+$/.test(v))) throw new Error('invalid accessibility service list in the AVD');
   // Preserve every other accessibility service in the disposable guest.
@@ -67,7 +81,7 @@ export async function prepareTalkBackEmulator(adb, options, { checkFile = access
       await openChrome();
     } else if (top.includes(chrome + '/') && !/FirstRun|FreActivity/.test(top)) {
       const bound = await shell('dumpsys', 'accessibility');
-      if (bound.includes('TalkBackService') && (await shell('cat', '/proc/net/unix')).includes('chrome_devtools_remote')) return;
+      if (bound.includes('TalkBackService') && (await shell('cat', '/proc/net/unix')).includes('chrome_devtools_remote')) return voice;
     }
     await wait(500);
   }

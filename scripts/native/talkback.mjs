@@ -91,7 +91,7 @@ export class TalkBackCapture {
         throw new Error('invalid or lost TalkBack synthesis event; restart the bridge');
       }
       this.sequence = event.sequence;
-      emit(event.text);
+      emit(event.text, event);
     }
     this.offset = end;
   }
@@ -135,7 +135,7 @@ export class TalkBackDriver {
     if (!this.pending) {
       this.pending = (async () => {
         try {
-          this.reader.read(await this.history(), text => { for (const listener of this.listeners) listener(text); });
+          this.reader.read(await this.history(), (text, event) => { for (const listener of this.listeners) listener(text, event); });
         } catch { this.fault = new TalkBackCaptureError('TalkBack speech capture failed or lost events; restart the bridge'); throw this.fault; }
       })().finally(() => { this.pending = undefined; });
     }

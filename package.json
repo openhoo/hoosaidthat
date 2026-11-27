@@ -80,6 +80,7 @@
     "scripts/native/server.mjs",
     "scripts/native/token.mjs",
     "scripts/native/talkback.mjs",
+    "scripts/native/talkback-movie.mjs",
     "scripts/native/android-devtools.mjs",
     "scripts/native/android-emulator.mjs",
     "scripts/native/prepare-talkback-emulator.mjs",

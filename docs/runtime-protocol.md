@@ -186,8 +186,10 @@ A separate Android instrumentation process verifies the native foreground
 package and WebView focus while leaving TalkBack enabled. The capture app
 records actual `TextToSpeechService` requests only from TalkBack's UID, with
 generation and consecutive sequence checks. It preserves repeated utterances
-and fails on loss or restart. It supplies textual synthesis-boundary evidence;
-silent PCM is not an acoustic recording or a voice-timing oracle. See the
+and fails on loss or restart. Ordinary tests use a silent synthesis callback.
+For an emulator feature movie, the helper sends TalkBack’s requests to an
+installed Android voice and returns its PCM to TalkBack’s playback stream.
+The recorder captures the guest’s output audio alongside its display. See the
 [Android guide](../oracle/android-talkback/README.md) for prerequisites,
 persistent Chrome-context limitations and the real-device smoke suite.
 

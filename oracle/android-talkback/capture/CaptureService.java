@@ -10,11 +10,13 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.UUID;
+import java.nio.file.Files;
 import org.json.JSONObject;
 
-/** Test-only TTS engine. Stores requests from TalkBack, returns silent PCM. */
+/** Test-only TTS engine. Stores requests from TalkBack. Movie mode delegates audio to a real device voice. */
 public final class CaptureService extends TextToSpeechService {
-  private File history;
+  private File history, voiced, recordLive;
+  private AudibleSpeech audible;
   private String generation;
   private int talkbackUid = -1;
   private int sequence;
@@ -26,7 +28,16 @@ public final class CaptureService extends TextToSpeechService {
     super.onCreate();
     history = new File(getFilesDir(), "speech.jsonl");
     generation = UUID.randomUUID().toString();
+    recordLive = new File(getFilesDir(), "recording-live");
+    voiced = new File(getFilesDir(), "voiced.jsonl");
     try {
+      File config = new File(getFilesDir(), "recording-engine");
+      if (config.exists()) {
+        String pkg = new String(Files.readAllBytes(config.toPath()), StandardCharsets.UTF_8).trim();
+        if (pkg.equals(getPackageName()) || !pkg.matches("[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+")) throw new IllegalArgumentException("invalid voice engine");
+        audible = new AudibleSpeech(this, pkg);
+        try (FileOutputStream out = new FileOutputStream(voiced, false)) { }
+      }
       talkbackUid = getPackageManager().getApplicationInfo("com.google.android.marvin.talkback", 0).uid;
       try (FileOutputStream out = new FileOutputStream(history, false)) {
         JSONObject header = new JSONObject().put("schemaVersion", 1).put("generation", generation)
@@ -46,7 +57,8 @@ public final class CaptureService extends TextToSpeechService {
     return support;
   }
   @Override protected synchronized String[] onGetLanguage() { return language.clone(); }
-  @Override protected void onStop() { }
+  @Override protected void onStop() { if (audible != null) audible.stop(); }
+  @Override public void onDestroy() { if (audible != null) audible.close(); super.onDestroy(); }
 
   @Override protected synchronized void onSynthesizeText(SynthesisRequest request, SynthesisCallback callback) {
     if (failed) { callback.error(); return; }
@@ -63,6 +75,17 @@ public final class CaptureService extends TextToSpeechService {
         }
         if (overflow) { failed = true; callback.error(); return; }
       } catch (Exception error) { failed = true; callback.error(); return; }
+    }
+    if (audible != null && recordLive.exists() && request.getCallerUid() == talkbackUid) {
+      try {
+        if (audible.speak(request, callback)) {
+          try (FileOutputStream out = new FileOutputStream(voiced, true)) {
+            String line = new JSONObject().put("generation", generation).put("sequence", sequence).toString();
+            out.write((line + "\n").getBytes(StandardCharsets.UTF_8));
+          }
+        }
+      } catch (Exception error) { android.util.Log.w("HSTVoice", "Device voice failed: " + error.getClass().getSimpleName()); callback.error(); }
+      return;
     }
     // This is textual synthesis-boundary evidence, not an acoustic recording.
     if (callback.start(16000, AudioFormat.ENCODING_PCM_16BIT, 1) == TextToSpeech.SUCCESS) {
