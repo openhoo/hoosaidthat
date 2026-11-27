@@ -139,6 +139,26 @@ final class VoiceOverTests: XCTestCase {
     }
 
     @MainActor
+    private func activateFocusedItem(in target: XCUIApplication, isWeb: Bool) throws {
+        // On iOS Simulator a synthesized double-tap in blank page content need not
+        // activate VoiceOver's cursor. Place it on the unique, visibly hittable
+        // item VoiceOver just identified; never guess when labels are ambiguous.
+        let spoken = try HSTVoiceOver.speech(for: "current")
+        let words = spoken.split(whereSeparator: { $0.isWhitespace })
+        guard !words.isEmpty else { throw ScenarioError("VoiceOver has no current item to activate.") }
+        let prefixes = (1...words.count).map { words.prefix($0).joined(separator: " ") }
+        let elements = isWeb ? target.webViews.descendants(matching: .any) : target.descendants(matching: .any)
+        let matches = elements.matching(NSPredicate(format: "label IN %@", prefixes)).allElementsBoundByIndex
+            .filter { $0.isHittable }
+        guard let length = matches.map({ $0.label.count }).max() else {
+            throw ScenarioError("The current VoiceOver utterance did not identify a visible item to activate.")
+        }
+        let longest = matches.filter { $0.label.count == length }
+        guard longest.count == 1 else { throw ScenarioError("Several visible items match the current VoiceOver utterance; activation is ambiguous.") }
+        longest[0].coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).doubleTap()
+    }
+
+    @MainActor
     func testScenario() async throws {
         let state = RunState()
         guard let input = ProcessInfo.processInfo.environment["HST_IOS_SCENARIO_JSON"],
@@ -247,8 +267,7 @@ final class VoiceOverTests: XCTestCase {
                 guard target.state == .runningForeground else { throw ScenarioError("Step \(index): The target app lost focus.") }
                 let actionTime = recording == nil ? nil : ProcessInfo.processInfo.systemUptime - featureStart
                 if step.action == .activate {
-                    // VoiceOver activates its focused element on a one-finger double-tap.
-                    target.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).doubleTap()
+                    try activateFocusedItem(in: target, isWeb: scenario.url != nil)
                 } else if step.action == .type, let text = step.text {
                     target.typeText(text)
                 }
