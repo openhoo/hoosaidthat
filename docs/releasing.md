@@ -189,7 +189,7 @@ announcing it.
 ### If npm accepts a trusted publish but the version is not visible yet
 
 npm can accept a package before anonymous clients can read it. The workflow submits
-the package once, then reads its public version metadata for up to 18 minutes. It
+the package once, then reads its public version metadata for up to 60 minutes. It
 backs off to one request per minute while the version or its provenance is missing
 or the registry is temporarily unavailable. Any conflicting package identity,
 checksum or attestation fails verification immediately. The upload step preserves

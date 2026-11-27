@@ -359,7 +359,7 @@ jobs:
           NODE_AUTH_TOKEN: ${{ inputs.npm_publish_mode == 'bootstrap-stage' && secrets.NPM_TOKEN || '' }}
       - name: Verify public npm integrity and provenance
         if: inputs.npm_publish_mode == 'trusted'
-        timeout-minutes: 20
+        timeout-minutes: 65
         shell: bash
         run: |
           set -euo pipefail

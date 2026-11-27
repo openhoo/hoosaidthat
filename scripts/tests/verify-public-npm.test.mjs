@@ -33,10 +33,10 @@ test('an accepted publish can stay absent longer than a minute, then verify with
   assert.deepEqual(state.waits, [5000,10000,20000,40000,60000,60000,60000]);
   assert.ok(state.log.every(line => !line.includes('PRIVATE')));
 });
-test('a 404 never issues a read after the 18 minute deadline, and leaves the accepted receipt intact', async () => {
+test('a 404 never issues a read after the one-hour deadline, and leaves the accepted receipt intact', async () => {
   const { state, run } = simulate(() => new Response(null, { status: 404 }));
-  await assert.rejects(run(), /18 minutes/);
-  assert.equal(state.at, 18 * 60_000);
+  await assert.rejects(run(), /60 minutes/);
+  assert.equal(state.at, 60 * 60_000);
   assert.ok(state.attempts.at(-1) < state.at);
   assert.equal(receipt.registryVerified, undefined);
 });

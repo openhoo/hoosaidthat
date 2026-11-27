@@ -4,7 +4,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { verifyNpmPublication } from './release-receipt.mjs';
 
-const WINDOW = 18 * 60_000;
+const WINDOW = 60 * 60_000;
 const transientStatus = new Set([404, 408, 425, 429, 500, 502, 503, 504]);
 const transientNetwork = new Set(['ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT', 'EAI_AGAIN',
   'ENETUNREACH', 'ENETDOWN', 'EHOSTUNREACH', 'EPIPE', 'UND_ERR_CONNECT_TIMEOUT',
@@ -77,7 +77,7 @@ export async function readPublishedPackage(receipt, {
       delay = Math.min(delay * 2, 60_000);
     }
   }
-  throw new Error('npm accepted the publish, but public readback did not finish within 18 minutes. Keep the receipt and rerun only this readback.');
+  throw new Error('npm accepted the publish, but public readback did not finish within 60 minutes. Keep the receipt and rerun only this readback.');
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
