@@ -1,0 +1,97 @@
+#!/usr/bin/env bash
+# Standalone companion for @openhoo/hoosaidthat's mobile recorder. Run from your npm project.
+set -euo pipefail
+umask 077
+
+fail() { printf 'hst-film: %s\n' "$*" >&2; exit 2; }
+usage() {
+  cat <<'USAGE'
+Run from the npm project with @openhoo/hoosaidthat installed:
+  ./hst-film ios     [--install MyApp.app]  [--duration SECONDS]
+  ./hst-film android [--install my-app.apk] [--duration SECONDS]
+  ./hst-film louder  /path/to/recording.mp4
+
+iOS: export UDID and HST_AUDIO_DEVICE; boot that simulator and route its sound to the device.
+Android: export AVD and ANDROID_HOME; prepare this AVD for TalkBack and put scrcpy on PATH.
+For both, put FFmpeg on PATH. Set HST_FILMS_DIR to change the output parent (default: ./films).
+Enter or Ctrl-C saves on iPhone; closing the control window saves on Android.
+USAGE
+}
+absolute() { case "$1" in /*) printf '%s\n' "$1";; *) printf '%s\n' "$PWD/$1";; esac; }
+need_tool() { command -v "$1" >/dev/null || fail "Missing $1 on PATH."; }
+
+case "${1:-}" in
+  ''|-h|--help|help) usage; exit 0 ;;
+  ios|android) platform=$1; shift ;;
+  louder)
+    [[ $# == 2 && -f "$2" && "$2" == *.[mM][pP]4 ]] || fail 'Use: ./hst-film louder /path/to/recording.mp4'
+    need_tool ffmpeg
+    src=$(absolute "$2"); dest="${src%.*}-louder.mp4"
+    [[ ! -e "$dest" && ! -L "$dest" ]] || fail "Listening copy already exists: $dest"
+    stage=$(mktemp -d "${dest%/*}/.hst-film.XXXXXX")
+    trap 'rm -f "$stage/audio.mp4"; rmdir "$stage"' EXIT
+    ffmpeg -nostdin -hide_banner -loglevel error -n -i "$src" -map 0:v:0 -map 0:a:0 -c:v copy \
+      -af loudnorm=I=-16:TP=-1.5:LRA=11 -ar 48000 -c:a aac -b:a 160k -movflags +faststart "$stage/audio.mp4"
+    ln "$stage/audio.mp4" "$dest" || fail "Could not create listening copy: $dest"
+    printf 'Listening copy: %s\n' "$dest"; exit 0 ;;
+  *) usage >&2; exit 2 ;;
+esac
+
+runner="$PWD/node_modules/.bin/hoosaidthat-record"
+[[ -x "$runner" ]] || fail 'Run this command from the npm project where you installed @openhoo/hoosaidthat.'
+build=''; seconds=''; out=${HST_FILMS_DIR:-"$PWD/films"}
+while (($#)); do
+  case "$1" in
+    --install) [[ $# -ge 2 && -n "$2" && -z "$build" ]] || fail 'Pass one app build after --install.'; build=$(absolute "$2"); shift 2 ;;
+    --duration)
+      if [[ $# -lt 2 || -n "$seconds" || ! "$2" =~ ^[1-9][0-9]{0,3}$ ]] || ((10#$2 > 3600)); then
+        fail 'Use one --duration value, 1 to 3600 seconds.'
+      fi
+      seconds=$2; shift 2 ;;
+    *) fail "Unknown option: $1 (see ./hst-film --help)." ;;
+  esac
+done
+timing=()
+if [[ -n "$seconds" ]]; then timing=(--duration "$seconds"); fi
+if [[ "$platform" == ios ]]; then
+  [[ "${UDID:-}" =~ ^[[:xdigit:]]{8}-[[:xdigit:]]{4}-[[:xdigit:]]{4}-[[:xdigit:]]{4}-[[:xdigit:]]{12}$ ]] || fail 'Set UDID to one booted iPhone simulator UUID (xcrun simctl list devices booted).'
+  [[ -n "${HST_AUDIO_DEVICE:-}" ]] || fail 'Set HST_AUDIO_DEVICE to the dedicated simulator audio loopback name.'
+  need_tool xcrun
+  if [[ -n "$build" ]]; then
+    [[ -d "$build" && -f "$build/Info.plist" ]] || fail 'Pass an iOS Simulator .app with Info.plist.'
+    need_tool plutil
+    id=$(plutil -extract CFBundleIdentifier raw -o - "$build/Info.plist") || fail 'Cannot read CFBundleIdentifier.'
+    [[ "$id" =~ ^[A-Za-z0-9][A-Za-z0-9.-]*$ ]] || fail 'Invalid app bundle ID.'
+    xcrun simctl install "$UDID" "$build"
+    xcrun simctl launch "$UDID" "$id"
+  fi
+  exec "$runner" ios --manual --udid "$UDID" --audio-device "$HST_AUDIO_DEVICE" --results "$out" ${timing[@]+"${timing[@]}"}
+fi
+
+[[ -n "${AVD:-}" ]] || fail 'Set AVD to the name of your prepared TalkBack emulator.'
+export ANDROID_HOME="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+[[ -x "$ANDROID_HOME/platform-tools/adb" && -n "$ANDROID_HOME" ]] || fail 'Set ANDROID_HOME to your Android SDK with platform-tools installed.'
+export PATH="$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$ANDROID_HOME/cmdline-tools/latest/bin:$PATH"
+need_tool scrcpy
+if [[ -z "$build" ]]; then
+  exec "$runner" android --manual --avd "$AVD" --results "$out" ${timing[@]+"${timing[@]}"}
+fi
+[[ -f "$build" && -r "$build" ]] || fail 'Pass one readable, installable Android APK.'
+need_tool apkanalyzer
+id=$(apkanalyzer manifest application-id "$build") || fail 'Cannot read the application ID. Use a single installable APK, not an app bundle.'
+[[ "$id" =~ ^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+$ ]] || fail 'Invalid Android application ID.'
+printf 'Installing %s in the disposable %s emulator. Close its window to save.\n' "$id" "$AVD"
+# The SDK supplies ANDROID_SERIAL to the child after starting its own emulator.
+# shellcheck disable=SC2016
+exec "$runner" android --avd "$AVD" --results "$out" -- bash -ec '
+  serial=${ANDROID_SERIAL:?Recorder did not supply an emulator}
+  [[ "$serial" =~ ^emulator-[0-9]+$ ]] || { echo "Refusing to install on a non-emulator." >&2; exit 1; }
+  adb="$ANDROID_HOME/platform-tools/adb"
+  names=$("$adb" -s "$serial" emu avd name)
+  read -r name <<< "$(printf "%s" "$names" | tr -d "\r")"
+  [[ "$name" == "$4" ]] || { echo "Unexpected AVD; skipping install." >&2; exit 1; }
+  "$adb" -s "$serial" install -r -t "$1"
+  args=(--serial "$serial" --no-audio --no-clipboard-autosync --window-title="HooSaidThat — Android (close to save recording)" --start-app="$2")
+  if [[ -n "$3" ]]; then args+=(--time-limit="$3"); fi
+  exec scrcpy "${args[@]}"
+' hst-film-install "$build" "$id" "$seconds" "$AVD"
