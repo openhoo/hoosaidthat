@@ -91,9 +91,21 @@ export async function inspectMovie(file) {
 
 // The XCTest calls this private loopback endpoint immediately before and after scenario steps.
 // No build, startup probe, unrelated desktop pixels, or physical microphone enter the movie.
+async function simulatorPorts(udid) {
+  // A busy, freshly booted hosted Mac can take over 20s just to start simctl.
+  // Route inventory is a read-only operation and can safely be tried again.
+  for (let attempt = 0; ; attempt++) {
+    try { return await exec('/usr/bin/xcrun', ['simctl', 'io', udid, 'enumerate'], { timeout: 90_000 }); }
+    catch (error) {
+      if (attempt === 0 && error.killed) continue;
+      throw new Error('Could not inspect the simulator audio route: ' + (error.stderr?.trim() || error.message));
+    }
+  }
+}
+
 export async function createRecording(output, udid, audioDevice, dedicatedMac = false) {
   const [ports, profile] = await Promise.all([
-    exec('/usr/bin/xcrun', ['simctl', 'io', udid, 'enumerate'], { timeout: 20_000 }),
+    simulatorPorts(udid),
     exec('/usr/sbin/system_profiler', ['SPAudioDataType', '-json'], { timeout: 20_000 }),
   ]);
   verifyAudioRoute(ports.stdout, audioDevice, JSON.parse(profile.stdout), dedicatedMac);
