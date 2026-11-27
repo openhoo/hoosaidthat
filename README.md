@@ -24,7 +24,9 @@ test('checkout is announced', async ({ page, screenReader }) => {
 });
 ```
 
-**Record a mobile feature:** use `hoosaidthat-record ios` for VoiceOver or
+**Record a mobile feature:** [try the RC.2 recorder](examples/recordings/mobile/TRY-RC2.md) or [watch four captioned feature recordings](examples/recordings/mobile/README.md).
+
+For scripted runs, use `hoosaidthat-record ios` for VoiceOver or
 `hoosaidthat-record android` for TalkBack. Both take a feature scenario and
 save a movie of the device with its output audio. See the
 [recording walkthrough](docs/mobile-recordings.md) for setup, a reusable

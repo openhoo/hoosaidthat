@@ -4,17 +4,17 @@ Record a feature by hand with real VoiceOver or TalkBack. You can open a website
 
 ## Install once
 
-As of November 27, 2026, `0.1.6-rc.2` is available as a public preview outside the npm registry. In an empty directory with Node.js and npm, install the package and download the [standalone Bash companion](https://github.com/openhoo/hoosaidthat/blob/84904904bf0567c6f9896654e94b197977262504/examples/recordings/mobile/hst-film). No GitHub account is needed.
+In an empty directory with Node.js and npm, install the exact preview version, `0.1.6-rc.2`, from the public npm registry and download the [standalone Bash companion](https://github.com/openhoo/hoosaidthat/blob/84904904bf0567c6f9896654e94b197977262504/examples/recordings/mobile/hst-film). No GitHub account is needed.
 
 ```sh
 npm init -y
-npm install --ignore-scripts https://raw.githubusercontent.com/openhoo/hoosaidthat/75faec6dba652ac2afc398341851f9aa56d6bda3/examples/recordings/mobile/preview/0.1.6-rc.2/openhoo-hoosaidthat-0.1.6-rc.2.tgz @playwright/test@1.62.1
+npm install --ignore-scripts @openhoo/hoosaidthat@0.1.6-rc.2 @playwright/test@1.62.1
 curl -fLo hst-film https://raw.githubusercontent.com/openhoo/hoosaidthat/84904904bf0567c6f9896654e94b197977262504/examples/recordings/mobile/hst-film
 chmod +x hst-film
 ./hst-film --help
 ```
 
-Run the commands below from this directory. The helper uses its installed `node_modules/.bin/hoosaidthat-record`. If you prefer to verify or rebuild the SDK first, see the package details at the end.
+Run the commands below from this directory. The helper uses its installed `node_modules/.bin/hoosaidthat-record`. If you need the same package without using the SDK registry entry, the [package details](#package-details) include the public archive, checksum, and source build.
 
 ## iPhone with VoiceOver
 
