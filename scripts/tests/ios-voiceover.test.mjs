@@ -164,6 +164,10 @@ test('native target and activation are tied to their own transcript; activation 
   assert.throws(() => validateTranscript(scenario, { ...transcript, bundleId: 'com.example.other' }));
   assert.throws(() => validateScenario({ ...scenario, url }));
   assert.throws(() => validateScenario({ ...scenario, bundleId: '' }));
+  assert.doesNotThrow(() => validateScenario({ ...scenario, steps: [{ action: 'type', text: 'Sample' }] }));
+  for (const step of [{ action: 'type' }, { action: 'type', text: '' }, { action: 'forward', text: 'Sample' }, { action: 'type', text: 'S', until: 'x', maxMoves: 2 }]) {
+    assert.throws(() => validateScenario({ ...scenario, steps: [step] }));
+  }
   assert.throws(() => validateScenario({ ...scenario, steps: [{ action: 'activate', until: 'Receipt', maxMoves: 2 }] }));
 });
 
@@ -176,4 +180,26 @@ test('recording accepts an isolated loopback, never a microphone or the host def
   assert.throws(() => selectLoopback(profile([mic]), mic._name));
   assert.throws(() => selectLoopback(profile([{ ...loop, coreaudio_default_audio_output_device: 'spaudio_yes' }]), loop._name));
   assert.throws(() => selectLoopback(profile([loop, { ...loop, _name: 'Other' }])));
+});
+
+test('media verification refuses a mute AAC track, a video without audio, and accepts audible synchronized tracks', async t => {
+  if (spawnSync('ffmpeg', ['-version'], { stdio: 'ignore' }).status !== 0 || spawnSync('ffprobe', ['-version'], { stdio: 'ignore' }).status !== 0) {
+    t.skip('FFmpeg not installed'); return;
+  }
+  const { mkdtemp, rm } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { inspectMovie } = await import('../native/ios-recording.mjs');
+  const dir = await mkdtemp(join(tmpdir(), 'hst-ios-media-'));
+  try {
+    for (const [name, source] of [['tone', 'sine=frequency=700'], ['silent', 'anullsrc'], ['no-audio', null]]) {
+      const file = join(dir, name + '.mp4');
+      const args = ['-nostdin', '-loglevel', 'error', '-f', 'lavfi', '-i', 'color=size=64x64:rate=24'];
+      if (source) args.push('-f', 'lavfi', '-i', source, '-c:a', 'aac');
+      const result = spawnSync('ffmpeg', [...args, '-c:v', 'libx264', '-t', '1', file], { encoding: 'utf8' });
+      assert.equal(result.status, 0, result.stderr);
+      if (name === 'tone') assert.equal((await inspectMovie(file)).width, 64);
+      else await assert.rejects(inspectMovie(file), name === 'silent' ? /No usable simulator audio/ : /screen track/);
+    }
+  } finally { await rm(dir, { recursive: true, force: true }); }
 });

@@ -13,7 +13,7 @@ const exec = promisify(execFile);
 const project = fileURLToPath(new URL('../oracle/ios-voiceover/HooSaidThat.xcodeproj', import.meta.url));
 const help = `Usage: hoosaidthat-voiceover-ios doctor [--udid UUID]
        hoosaidthat-voiceover-ios run [--udid UUID] [--scenario FILE] [--results DIRECTORY]
-       hoosaidthat-voiceover-ios record [--udid UUID] [--scenario FILE] [--results DIRECTORY] [--audio-device NAME]
+       hoosaidthat-voiceover-ios record [--udid UUID] [--scenario FILE] [--results DIRECTORY] [--audio-device NAME] [--dedicated-mac-output]
 
 Requires Xcode 27+ and an available iPhone Simulator with iOS 27+.
 doctor lists eligible devices. Select one with --udid if several are available.
@@ -37,12 +37,14 @@ export function validateScenario(input) {
   check(Buffer.byteLength(JSON.stringify(input)) <= 32_768, 'Scenario exceeds 32 KiB.');
   input.steps.forEach((step, i) => {
     const msg = `Invalid scenario step ${i + 1}`;
-    check(onlyKeys(step, ['action', 'expect', 'until', 'maxMoves']) && ['current', 'forward', 'backward', 'in', 'out', 'activate'].includes(step.action), msg + ': unknown action or field.');
+    check(onlyKeys(step, ['action', 'expect', 'until', 'maxMoves', 'text']) && ['current', 'forward', 'backward', 'in', 'out', 'activate', 'type'].includes(step.action), msg + ': unknown action or field.');
+    if (step.action === 'type') check(typeof step.text === 'string' && step.text.length > 0 && step.text.length <= 2000, msg + ': type requires text (1..2000 characters).');
+    else check(!('text' in step), msg + ': only type accepts text.');
     for (const key of ['expect', 'until']) {
       if (key in step) check(typeof step[key] === 'string' && step[key].trim().length, msg + ': expected a nonempty substring.');
     }
     if ('until' in step) {
-      check(!('expect' in step) && !['current', 'activate'].includes(step.action) && Number.isInteger(step.maxMoves) && step.maxMoves >= 1 && step.maxMoves <= 50,
+      check(!('expect' in step) && !['current', 'activate', 'type'].includes(step.action) && Number.isInteger(step.maxMoves) && step.maxMoves >= 1 && step.maxMoves <= 50,
         msg + ': until requires a movement, maxMoves (1..50) and no expect.');
     } else check(!('maxMoves' in step), msg + ': maxMoves requires until.');
   });
@@ -93,20 +95,22 @@ async function inventory() {
   return { xcode: xcode.trim(), sdk: sdk.trim(), devices, runtimes };
 }
 
-async function smokeFixture() {
+async function smokeFixture(recording = false) {
   const id = randomUUID().slice(0, 8);
   const heading = 'Order summary ' + id;
   const button = 'Confirm order ' + id;
+  const receipt = 'Receipt ready ' + id;
   const path = '/' + id;
   const server = createServer((req, res) => {
     if (req.url !== path) { res.writeHead(404).end(); return; }
     console.log('Mobile Safari requested the smoke page.');
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
-    res.end(`<!doctype html><html lang="en"><meta name="viewport" content="width=device-width"><title>VoiceOver test</title><main><h1>${heading}</h1><button>${button}</button></main></html>`);
+    res.end(`<!doctype html><html lang="en"><meta name="viewport" content="width=device-width"><title>VoiceOver test</title><main><h1>${heading}</h1><button onclick="this.textContent='${receipt}'">${button}</button></main></html>`);
   });
   await new Promise((ok, fail) => { server.once('error', fail); server.listen(0, '127.0.0.1', ok); });
   return { server, scenario: { url: `http://127.0.0.1:${server.address().port}${path}`, readyText: button, steps: [
     { action: 'forward', until: button, maxMoves: 40 }, { action: 'backward', expect: heading }, { action: 'forward', expect: button },
+    ...(recording ? [{ action: 'activate', expect: receipt }] : []),
   ] } };
 }
 
@@ -124,7 +128,7 @@ async function extract(result, dir, device) {
   return JSON.parse(await readFile(join(path, file), 'utf8'));
 }
 
-async function runOnDevice(device, environment, input, parent, audioDevice) {
+async function runOnDevice(device, environment, input, parent, audioDevice, dedicatedMac) {
   check(device.state === 'Booted' || device.state === 'Shutdown', `Simulator is ${device.state}; wait until it is ready.`);
   await mkdir(parent, { recursive: true });
   const output = await mkdtemp(join(parent, 'run-'));
@@ -133,14 +137,14 @@ async function runOnDevice(device, environment, input, parent, audioDevice) {
   const derived = await mkdtemp(join(tmpdir(), 'hst-ios-build-'));
   let fixture, recording, bootedHere = false;
   try {
-    if (!input) fixture = await smokeFixture();
+    if (!input) fixture = await smokeFixture(!!audioDevice);
     const scenario = input ?? fixture.scenario;
     if (device.state === 'Shutdown') {
       await xcrun(['simctl', 'boot', device.udid]);
       bootedHere = true;
     }
     await xcrun(['simctl', 'bootstatus', device.udid], 5 * 60_000);
-    if (audioDevice) recording = await createRecording(output, device.udid, audioDevice);
+    if (audioDevice) recording = await createRecording(output, device.udid, audioDevice, dedicatedMac);
     const args = ['xcodebuild', 'test', '-project', project, '-scheme', 'HooSaidThat', '-destination', 'platform=iOS Simulator,id=' + device.udid,
       '-derivedDataPath', derived, '-resultBundlePath', result, '-parallel-testing-enabled', 'NO', '-test-timeouts-enabled', 'YES',
       '-default-test-execution-time-allowance', '480', '-maximum-test-execution-time-allowance', '480', '-only-testing:HooSaidThatUITests/VoiceOverTests/testScenario'];
@@ -187,14 +191,14 @@ async function runOnDevice(device, environment, input, parent, audioDevice) {
   }
 }
 
-async function run(device, environment, input, parent, audioDevice) {
+async function run(device, environment, input, parent, audioDevice, dedicatedMac = false) {
   const lock = join(tmpdir(), 'hoosaidthat-voiceover-' + device.udid + '.lock');
   try { await mkdir(lock, { mode: 0o700 }); }
   catch (err) {
     if (err.code === 'EEXIST') throw new Error('This simulator is in use. After an interrupted run, confirm no test is running before removing ' + lock);
     throw err;
   }
-  try { return await runOnDevice(device, environment, input, parent, audioDevice); }
+  try { return await runOnDevice(device, environment, input, parent, audioDevice, dedicatedMac); }
   finally { await rm(lock, { recursive: true, force: true }); }
 }
 
@@ -204,11 +208,11 @@ export async function runIPhoneVoiceOver(scenario, { udid, resultsDirectory } = 
   return run(selectDevice(env.devices, env.runtimes, udid), env, input, resolve(resultsDirectory ?? 'test-results/ios-voiceover'));
 }
 
-export async function recordIPhoneVoiceOver(scenario, { udid, resultsDirectory, audioDevice } = {}) {
+export async function recordIPhoneVoiceOver(scenario, { udid, resultsDirectory, audioDevice, dedicatedMacOutput = false } = {}) {
   const input = validateScenario(scenario);
   const env = await inventory();
   const device = selectDevice(env.devices, env.runtimes, udid);
-  return run(device, env, input, resolve(resultsDirectory ?? 'test-results/ios-voiceover'), await recordingTools(audioDevice));
+  return run(device, env, input, resolve(resultsDirectory ?? 'test-results/ios-voiceover'), await recordingTools(audioDevice, dedicatedMacOutput), dedicatedMacOutput);
 }
 
 async function main(args) {
@@ -216,10 +220,14 @@ async function main(args) {
   const [command, ...rest] = args;
   check(['doctor', 'run', 'record'].includes(command), help);
   const options = {};
-  for (let i = 0; i < rest.length; i += 2) {
+  for (let i = 0; i < rest.length;) {
+    if (command === 'record' && rest[i] === '--dedicated-mac-output') {
+      check(!options['--dedicated-mac-output'], help);
+      options['--dedicated-mac-output'] = true; i++; continue;
+    }
     const key = rest[i], value = rest[i + 1];
     check((command === 'record' ? ['--scenario', '--udid', '--results', '--audio-device'] : command === 'run' ? ['--scenario', '--udid', '--results'] : ['--udid']).includes(key) && value && !value.startsWith('--') && !(key in options), help);
-    options[key] = value;
+    options[key] = value; i += 2;
   }
   const input = options['--scenario'] ? validateScenario(JSON.parse(await readFile(options['--scenario'], 'utf8'))) : undefined;
   const env = await inventory();
@@ -231,8 +239,8 @@ async function main(args) {
   }
   const device = selectDevice(env.devices, env.runtimes, options['--udid']);
   if (command === 'doctor') { console.log(env.xcode + '\n' + JSON.stringify(device)); return; }
-  const audioDevice = command === 'record' ? await recordingTools(options['--audio-device']) : undefined;
-  await run(device, env, input, resolve(options['--results'] ?? 'test-results/ios-voiceover'), audioDevice);
+  const audioDevice = command === 'record' ? await recordingTools(options['--audio-device'], options['--dedicated-mac-output']) : undefined;
+  await run(device, env, input, resolve(options['--results'] ?? 'test-results/ios-voiceover'), audioDevice, options['--dedicated-mac-output']);
 }
 
 if (process.argv[1] && await realpath(process.argv[1]).catch(() => undefined) === fileURLToPath(import.meta.url)) {

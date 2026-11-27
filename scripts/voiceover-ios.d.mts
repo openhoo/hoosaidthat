@@ -1,8 +1,9 @@
 export type IPhoneVoiceOverMovement = 'forward' | 'backward' | 'in' | 'out';
-export type IPhoneVoiceOverAction = 'current' | 'activate' | IPhoneVoiceOverMovement;
+export type IPhoneVoiceOverAction = 'current' | 'activate' | 'type' | IPhoneVoiceOverMovement;
 
 export type IPhoneVoiceOverStep =
-  | { action: IPhoneVoiceOverAction; expect?: string; until?: never; maxMoves?: never }
+  | { action: Exclude<IPhoneVoiceOverAction, 'type'>; expect?: string; until?: never; maxMoves?: never; text?: never }
+  | { action: 'type'; text: string; expect?: string; until?: never; maxMoves?: never }
   | { action: IPhoneVoiceOverMovement; until: string; maxMoves: number; expect?: never };
 
 export type IPhoneVoiceOverScenario = ({ url: string; bundleId?: never } | { bundleId: string; url?: never }) & {
@@ -32,7 +33,7 @@ export interface IPhoneVoiceOverReport {
     url?: string;
     bundleId?: string;
     completed: true;
-    events: { step: number; action: IPhoneVoiceOverAction; utterance: string }[];
+    events: { step: number; action: IPhoneVoiceOverAction; utterance: string; secondsFromStart?: number }[];
   };
 }
 
@@ -44,7 +45,7 @@ export function runIPhoneVoiceOver(
 
 export interface IPhoneVoiceOverRecording {
   file: 'recording.mp4';
-  audioSource: 'simulator output via virtual loopback';
+  audioSource: 'simulator output via virtual loopback' | 'dedicated Mac output via virtual loopback (includes host audio)';
   audioDevice: string;
   durationSeconds: number;
   width: number;
@@ -55,5 +56,5 @@ export interface IPhoneVoiceOverRecording {
 /** Record actual device output during the scenario and reject silent or incomplete recordings. */
 export function recordIPhoneVoiceOver(
   scenario: IPhoneVoiceOverScenario,
-  options?: IPhoneVoiceOverOptions & { audioDevice?: string },
+  options?: IPhoneVoiceOverOptions & { audioDevice?: string; dedicatedMacOutput?: boolean },
 ): Promise<{ outputDirectory: string; report: IPhoneVoiceOverReport & { recording: IPhoneVoiceOverRecording } }>;
