@@ -1,7 +1,5 @@
 # Releasing
 
-For the partial 0.1.5 release, use [Recover the 0.1.5 npm publication](recover-npm-015.md).
-
 For a new release, run `.github/workflows/release.yml` from
 the exact `v<package-version>` tag. Supply the full lowercase 40-character SHA
 of an immutable HooVDA commit, the SHA-256 of the npm archive tested on
@@ -14,10 +12,14 @@ the same value is also an OCI tag.
 ## Publishing from GitHub Actions
 
 All release builds and registry uploads run in GitHub Actions. The workflow
-pins Node 24 and npm 11.20.0 and offers two npm modes for new releases:
+pins Node 24 and npm 11.20.0. Use `trusted` for this package. On November 27,
+2026, npm showed its saved GitHub Actions publisher for `openhoo/hoosaidthat`
+and `release.yml` as **Valid**, with both direct and staged publishing enabled.
+The [completed 0.1.5 recovery](recover-npm-015.md) records the first verified
+publication with this publisher.
 
 - `trusted` (default): `npm publish --access public --provenance` uses GitHub
-  OIDC. Configure the package's trusted publisher on npmjs.com with organization
+  OIDC. If the publisher needs to be restored, configure it on npmjs.com with organization
   `openhoo`, repository `hoosaidthat`, and workflow filename `release.yml`.
   Leave the environment unset, matching this workflow, and explicitly allow
   direct `npm publish`. The job has `id-token: write` and runs on a GitHub-hosted

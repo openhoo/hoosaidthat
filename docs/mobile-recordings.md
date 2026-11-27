@@ -6,6 +6,11 @@ scenario. Each invocation makes its own run directory. The MP4 contains device
 pixels and routed audio, including sounds your app makes. For automated scenarios,
 the separate transcript is what the screen reader reported as text.
 
+For a first manual recording, the [`hst-film` guide](https://github.com/openhoo/hoosaidthat/blob/examples/mobile-recordings/examples/recordings/mobile/TRY-RC2.md)
+shows how to open a website or install your own iPhone Simulator `.app` or Android `.apk`.
+You can [watch four examples with captions](https://github.com/openhoo/hoosaidthat/tree/examples/mobile-recordings/examples/recordings/mobile)
+to see the focus move and hear each reader announce it.
+
 ## Record your first feature
 
 Start your site, then save this example as `checkout.json`. Replace the URL
