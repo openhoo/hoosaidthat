@@ -219,8 +219,15 @@ final class VoiceOverTests: XCTestCase {
         state.initialVoiceOver = HSTVoiceOver.isEnabled()
         if state.initialVoiceOver == false { try HSTVoiceOver.setEnabled(true) }
         guard HSTVoiceOver.isEnabled() else { throw ScenarioError("VoiceOver did not become enabled.") }
-        try await waitForVoiceOver(in: target, firstAction: scenario.steps[0].action, startedHere: state.initialVoiceOver == false)
         let recording = ProcessInfo.processInfo.environment["HST_RECORDING_ENDPOINT"]
+        if recording != nil, let readyText = scenario.readyText {
+            // A physical touch selects an item while VoiceOver is on. It gives a cold
+            // service a real foreground focus before asking it for its current speech.
+            let elements = scenario.url == nil ? target.descendants(matching: .any) : target.webViews.descendants(matching: .any)
+            let anchor = elements.matching(NSPredicate(format: "label == %@", readyText)).firstMatch
+            if anchor.exists && anchor.isHittable { anchor.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap() }
+        }
+        try await waitForVoiceOver(in: target, firstAction: scenario.steps[0].action, startedHere: state.initialVoiceOver == false)
         if let recording { try await captureSignal("start", endpoint: recording) }
         let featureStart = ProcessInfo.processInfo.systemUptime
         for (index, step) in scenario.steps.enumerated() {
@@ -233,7 +240,15 @@ final class VoiceOverTests: XCTestCase {
                 } else if step.action == .type, let text = step.text {
                     target.typeText(text)
                 }
-                let utterance = try HSTVoiceOver.speech(for: (step.action == .activate || step.action == .type) ? "current" : step.action.rawValue)
+                var query = (step.action == .activate || step.action == .type) ? "current" : step.action.rawValue
+                if recording != nil && (step.action == .forward || step.action == .backward) {
+                    // In acoustic recordings send a VoiceOver one-finger flick, as
+                    // a user would, and observe the native service's resulting focus.
+                    if step.action == .forward { target.swipeRight() } else { target.swipeLeft() }
+                    query = "current"
+                    try await Task.sleep(nanoseconds: 300_000_000)
+                }
+                let utterance = try HSTVoiceOver.speech(for: query)
                 guard !utterance.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                     throw ScenarioError("Step \(index): VoiceOver returned no spoken text.")
                 }

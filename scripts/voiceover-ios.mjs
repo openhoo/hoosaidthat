@@ -108,7 +108,7 @@ async function smokeFixture(recording = false) {
     res.end(`<!doctype html><html lang="en"><meta name="viewport" content="width=device-width"><title>VoiceOver test</title><main><h1>${heading}</h1><button onclick="this.textContent='${receipt}'">${button}</button></main></html>`);
   });
   await new Promise((ok, fail) => { server.once('error', fail); server.listen(0, '127.0.0.1', ok); });
-  return { server, scenario: { url: `http://127.0.0.1:${server.address().port}${path}`, readyText: button, steps: [
+  return { server, scenario: { url: `http://127.0.0.1:${server.address().port}${path}`, readyText: recording ? heading : button, steps: [
     { action: 'forward', until: button, maxMoves: 40 }, { action: 'backward', expect: heading }, { action: 'forward', expect: button },
     ...(recording ? [{ action: 'activate', expect: receipt }] : []),
   ] } };

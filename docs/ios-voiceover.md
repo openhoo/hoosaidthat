@@ -83,6 +83,13 @@ can still be interrupted. Transcript events include the action's elapsed time
 from the start of the scenario. The report identifies the selected audio device,
 duration, frame size and measured peak volume.
 
+When `readyText` is visible and hittable, recording starts by touching its
+center once with VoiceOver on to establish focus before the movie. Set it to
+the element where the walkthrough should begin. Recording uses actual
+one-finger right/left flicks for forward/backward and queries native VoiceOver
+for the resulting utterance. The transcript-only `run` command uses Apple's
+service navigation methods.
+
 The movie contains the simulator's audio output, which can include VoiceOver,
 app sounds and other device sounds. The transcript records Apple's returned
 utterances separately. The runner rejects missing tracks and silence; it does
