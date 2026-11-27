@@ -81,6 +81,10 @@ jobs:
           xcrun simctl io "$HST_PHONE" enumerate
       - name: Wait until cold Safari can reach an inert fixture
         run: python3 .github/scripts/warm-iphone-safari.py "$HST_PHONE" test-results/ios-voiceover
+      # This Safari instance belongs to the CI fixture. Give XCTest a new
+      # process so its URL launch can attach accessibility to the web view.
+      - name: Close Safari after its readiness check
+        run: xcrun simctl terminate "$HST_PHONE" com.apple.mobilesafari
       - name: Record and check actual VoiceOver output in Mobile Safari
         working-directory: ${{ runner.temp }}/consumer
         run: node_modules/.bin/hoosaidthat-record ios --udid "$HST_PHONE" --audio-device "BlackHole 2ch" --results "$GITHUB_WORKSPACE/test-results/ios-voiceover"
