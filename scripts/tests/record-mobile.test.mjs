@@ -11,6 +11,8 @@ test('choose either a scenario or a custom Android workflow, preserving child fl
   assert.throws(() => parseRecording(['ios','--dedicated-mac-output']));
   assert.equal(parseRecording(['ios','--dedicated-mac-output','--audio-device','BlackHole 2ch']).options['--dedicated-mac-output'], true);
   assert.throws(() => parseRecording(['android','--udid','wrong']));
+  assert.throws(() => parseRecording(['android','--avd','demo','--reverse-port','8080','--scenario','web.json']));
+  assert.throws(() => parseRecording(['android','--avd','demo','--reverse-port','99999','--','npm','test']));
   assert.throws(() => parseRecording(['android','--avd','one','--avd','two']));
 });
 

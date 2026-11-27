@@ -21,6 +21,7 @@ const help = `Record a mobile feature with a real screen reader.
   --avd NAME          disposable copy of an existing Android Virtual Device with TalkBack
   --locale LOCALE     configured TalkBack locale: en-US or de-DE
   --tts-engine PACKAGE  installed Android speech engine (default: AVD preference)
+  --reverse-port PORT   expose a host loopback service to a custom Android command
   --talkback-apk FILE optional trusted local APK to install in that disposable emulator
 
 Requires a prepared simulator; see docs/mobile-recordings.md for prerequisites and examples.`;
@@ -30,7 +31,7 @@ export function parseRecording(args) {
   if (!own.length || own.includes('--help') || own.includes('-h')) return { help: true };
   const [platform, ...flags] = own;
   if (!['android','ios'].includes(platform)) throw Error(help);
-  const allowed = ['--results','--scenario', ...(platform === 'ios' ? ['--udid','--audio-device','--dedicated-mac-output'] : ['--avd','--locale','--talkback-apk','--tts-engine'])];
+  const allowed = ['--results','--scenario', ...(platform === 'ios' ? ['--udid','--audio-device','--dedicated-mac-output'] : ['--avd','--locale','--talkback-apk','--tts-engine','--reverse-port'])];
   const options = Object.create(null);
   for (let i = 0; i < flags.length;) {
     const key = flags[i++];
@@ -45,6 +46,8 @@ export function parseRecording(args) {
   if (options['--dedicated-mac-output'] && !options['--audio-device']) throw Error('Name the virtual --audio-device when recording dedicated Mac output.');
   const child = split < 0 ? [] : args.slice(split + 1);
   if (split >= 0 && (platform !== 'android' || !child.length || options['--scenario'])) throw Error('Use either --scenario or an Android -- command, and provide the command after --.');
+  if (options['--reverse-port'] && (!child.length || !/^\d{1,5}$/.test(options['--reverse-port']) ||
+      +options['--reverse-port'] < 1 || +options['--reverse-port'] > 65535)) throw Error('--reverse-port requires a port (1–65535) and an Android -- command.');
   if (platform === 'android' && !options['--avd']) throw Error('Select an Android emulator with --avd NAME.');
   return { platform, options, child };
 }

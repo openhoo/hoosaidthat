@@ -68,17 +68,16 @@ and starting an installed app by bundle ID.
 The JSON runner also supports `activate`, `nextButton`, `previousButton`,
 `nextHeading`, `previousHeading`, `nextLink` and `previousLink` on Android.
 For logins, typing, navigation between pages or existing regression tests,
-run the desired Playwright test as the child. For example:
+run the desired Playwright test as the child. For a site served by the host on port 8080:
 
 ```sh
-npx --no-install hoosaidthat-record android --avd HST_TalkBack_API35 -- \
+npx --no-install hoosaidthat-record android --avd HST_TalkBack_API35 --reverse-port 8080 -- \
   npx playwright test --config android.config.ts --grep "change a booking"
 ```
 
 Use one worker, `screenReader: 'talkback'`, `runtime: 'external'`, and the
 HooSaidThat test fixture. The child receives the device endpoints. Use a site
-the emulator can reach; for a custom command, the runner cannot infer your
-server port. The movie covers the child command, so select one test to get
+the emulator can reach. Omit `--reverse-port` for a remote site. The movie covers the child command, so select one test to get
 one feature per movie.
 
 ## What the files prove
