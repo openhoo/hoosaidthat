@@ -80,6 +80,29 @@ HooSaidThat test fixture. The child receives the device endpoints. Use a site
 the emulator can reach. Omit `--reverse-port` for a remote site. The movie covers the child command, so select one test to get
 one feature per movie.
 
+## Try an example that comes with the SDK
+
+From your npm project, serve the [sample booking page](examples/mobile/booking/index.html):
+
+```sh
+python3 -m http.server 8080 --bind 127.0.0.1 --directory node_modules/@openhoo/hoosaidthat/docs/examples/mobile/booking
+```
+
+In another terminal, record the packaged [booking scenario](examples/mobile/booking/booking.json):
+
+```sh
+npx --no-install hoosaidthat-record android --avd HST_TalkBack_API35 --scenario node_modules/@openhoo/hoosaidthat/docs/examples/mobile/booking/booking.json
+```
+
+For a **native Android app**, supply a child script or test driver. The recorder
+sets `ANDROID_SERIAL` to the emulator it owns. For example, this
+[Settings walkthrough](examples/mobile/android-settings.mjs) opens Display
+settings and goes back. TalkBack speaks as each native screen appears.
+
+```sh
+npx --no-install hoosaidthat-record android --avd HST_TalkBack_API35 -- node node_modules/@openhoo/hoosaidthat/docs/examples/mobile/android-settings.mjs
+```
+
 ## What the files prove
 
 The transcripts come directly from VoiceOver's XCTest service or TalkBack's

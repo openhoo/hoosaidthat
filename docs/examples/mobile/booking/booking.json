@@ -1,0 +1,23 @@
+{
+  "url": "http://127.0.0.1:8080/",
+  "readyText": "Book a visit",
+  "steps": [
+    {
+      "action": "forward",
+      "until": "Reserve Tuesday",
+      "maxMoves": 7
+    },
+    {
+      "action": "backward",
+      "expect": "Choose your appointment"
+    },
+    {
+      "action": "forward",
+      "expect": "Reserve Tuesday"
+    },
+    {
+      "action": "activate",
+      "expect": "Visit reserved"
+    }
+  ]
+}
