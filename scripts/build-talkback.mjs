@@ -29,7 +29,7 @@ async function main() {
   const tools = join(sdk, 'build-tools', '35.0.0');
   const android = join(sdk, 'platforms', 'android-35', 'android.jar');
   await stat(android);
-  const build = join(root, 'build');
+  const build = resolve(process.env.HST_TALKBACK_HELPERS ?? join(root, 'build'));
   await mkdir(build, { recursive: true });
   const key = join(build, 'test-only.p12');
   try { await stat(key); } catch (error) {

@@ -76,6 +76,8 @@ export function talkbackCommands() {
   const alt = 57, shift = 59, ctrl = 113;
   const commands = {
     nextFocusable: [[61]], previousFocusable: [[shift, 61]],
+    // TalkBack navigation follows reading order, including non-focusable text.
+    moveToNextObjectFlat: [[alt, 22]], moveToPreviousObjectFlat: [[alt, 21]],
     activate: [[alt, 66]], activateWithSpace: [[62]], escape: [[111]],
     returnToPage: 'focusWeb', readCurrent: 'readCurrent',
     documentStart: 'documentStart', documentEnd: 'documentEnd',
