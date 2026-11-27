@@ -17,7 +17,7 @@ test('manual mode requires one named simulator, isolated audio and a bounded opt
   for (const extra of [['--duration','0'],['--duration','3601'],['--duration','1.5'],['--scenario','s'],['--dedicated-mac-output'],['--manual'],['--','npm','test']]) {
     assert.throws(() => parseRecording([...flags,...extra]));
   }
-  for (const invalid of [['ios','--manual','--udid','a'],['ios','--manual','--audio-device','Virtual'],['ios','--duration','2'],['android','--avd','a','--manual']]) {
+  for (const invalid of [['ios','--manual','--udid','a'],['ios','--manual','--audio-device','Virtual'],['ios','--duration','2']]) {
     assert.throws(() => parseRecording(invalid));
   }
 });

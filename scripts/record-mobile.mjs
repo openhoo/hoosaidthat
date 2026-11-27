@@ -12,19 +12,21 @@ const help = `Record a mobile feature with a real screen reader.
 
   hoosaidthat-record ios --manual --udid UUID --audio-device NAME [--duration SECONDS]
   hoosaidthat-record ios [--scenario feature.json] --audio-device NAME [--udid UUID]
+  hoosaidthat-record android --manual --avd NAME [--app PACKAGE] [--duration SECONDS]
   hoosaidthat-record android --avd NAME [--scenario feature.json]
   hoosaidthat-record android --avd NAME -- npx playwright test checkout.spec.ts
 
   --results DIR       parent for a new run directory (default: test-results/mobile-recordings)
-  --manual            drive an already booted iPhone yourself; Enter or Ctrl-C saves the movie
-  --duration SECONDS  stop a manual recording after 1–3600 seconds (required without a terminal)
+  --manual            drive the iPhone in Device Hub or Android in a scrcpy control window
+  --app PACKAGE       open this installed app in the manual Android recording
+  --duration SECONDS  stop a manual recording after 1–3600 seconds (required for iOS without a terminal)
   --scenario FILE     feature to exercise; omit for the packaged smoke test
   --audio-device NAME isolated simulator audio loopback input (iOS)
   --dedicated-mac-output  include whole-host output via that named virtual device (dedicated Mac only)
   --avd NAME          disposable copy of an existing Android Virtual Device with TalkBack
   --locale LOCALE     configured TalkBack locale: en-US or de-DE
   --tts-engine PACKAGE  installed Android speech engine (default: AVD preference)
-  --reverse-port PORT   expose a host loopback service to a custom Android command
+  --reverse-port PORT   expose a host loopback service to the Android window or a custom command
   --talkback-apk FILE optional trusted local APK to install in that disposable emulator
 
 Requires a prepared simulator; see docs/mobile-recordings.md for prerequisites and examples.`;
@@ -34,11 +36,11 @@ export function parseRecording(args) {
   if (!own.length || own.includes('--help') || own.includes('-h')) return { help: true };
   const [platform, ...flags] = own;
   if (!['android','ios'].includes(platform)) throw Error(help);
-  const allowed = ['--results','--scenario', ...(platform === 'ios' ? ['--udid','--audio-device','--dedicated-mac-output','--manual','--duration'] : ['--avd','--locale','--talkback-apk','--tts-engine','--reverse-port'])];
+  const allowed = ['--results','--scenario','--manual','--duration', ...(platform === 'ios' ? ['--udid','--audio-device','--dedicated-mac-output'] : ['--avd','--app','--locale','--talkback-apk','--tts-engine','--reverse-port'])];
   const options = Object.create(null);
   for (let i = 0; i < flags.length;) {
     const key = flags[i++];
-    if (platform === 'ios' && ['--dedicated-mac-output','--manual'].includes(key) && !(key in options)) {
+    if (allowed.includes(key) && ['--dedicated-mac-output','--manual'].includes(key) && !(key in options)) {
       options[key] = true;
       continue;
     }
@@ -47,15 +49,18 @@ export function parseRecording(args) {
     options[key] = value;
   }
   if (options['--dedicated-mac-output'] && !options['--audio-device']) throw Error('Name the virtual --audio-device when recording dedicated Mac output.');
-  if (options['--manual'] && (!options['--udid'] || !options['--audio-device'] || options['--scenario'] || options['--dedicated-mac-output'])) {
+  if (platform === 'ios' && options['--manual'] && (!options['--udid'] || !options['--audio-device'] || options['--scenario'] || options['--dedicated-mac-output'])) {
     throw Error('--manual needs an explicit --udid and --audio-device, with a simulator-only audio route and no --scenario.');
   }
+  if (options['--manual'] && options['--scenario']) throw Error('Choose --manual or --scenario.');
+  if (options['--app'] && (!options['--manual'] || !/^[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)+$/.test(options['--app'])))
+    throw Error('--app requires Android --manual and an installed application ID such as com.android.settings.');
   if (options['--duration'] && (!options['--manual'] || !/^\d{1,4}$/.test(options['--duration']) || +options['--duration'] < 1 || +options['--duration'] > 3600))
-    throw Error('--duration requires iOS --manual and a whole number from 1 to 3600 seconds.');
+    throw Error('--duration requires --manual and a whole number from 1 to 3600 seconds.');
   const child = split < 0 ? [] : args.slice(split + 1);
-  if (split >= 0 && (platform !== 'android' || !child.length || options['--scenario'])) throw Error('Use either --scenario or an Android -- command, and provide the command after --.');
-  if (options['--reverse-port'] && (!child.length || !/^\d{1,5}$/.test(options['--reverse-port']) ||
-      +options['--reverse-port'] < 1 || +options['--reverse-port'] > 65535)) throw Error('--reverse-port requires a port (1–65535) and an Android -- command.');
+  if (split >= 0 && (platform !== 'android' || !child.length || options['--scenario'] || options['--manual'])) throw Error('Choose one of --manual, --scenario, or an Android -- command. Provide the command after --.');
+  if (options['--reverse-port'] && ((!child.length && !options['--manual']) || !/^\d{1,5}$/.test(options['--reverse-port']) ||
+      +options['--reverse-port'] < 1 || +options['--reverse-port'] > 65535)) throw Error('--reverse-port requires a port (1–65535) and either Android --manual or a custom command.');
   if (platform === 'android' && !options['--avd']) throw Error('Select an Android emulator with --avd NAME.');
   return { platform, options, child };
 }
@@ -100,9 +105,19 @@ export async function recordMobile(args) {
       env.HST_TALKBACK_HELPERS = join(privateDir, 'helpers');
       await invoke([local('./build-talkback.mjs')], env);
     }
-    const flags = Object.entries(options).filter(([k]) => !['--results','--scenario'].includes(k)).flat();
+    const flags = Object.entries(options).filter(([k]) => !['--results','--scenario','--manual','--app','--duration'].includes(k)).flat();
     let command = child;
-    if (feature) {
+    if (options['--manual']) {
+      // The bridge sets ANDROID_SERIAL to its own disposable emulator for this
+      // child. The recorder has the audio stream; the window only controls it.
+      const sdk = env.ANDROID_HOME || env.ANDROID_SDK_ROOT;
+      if (env.HST_ADB_BIN || sdk) env.ADB = env.HST_ADB_BIN || join(sdk, 'platform-tools', process.platform === 'win32' ? 'adb.exe' : 'adb');
+      command = [env.HST_SCRCPY_BIN || 'scrcpy', '--no-audio', '--no-clipboard-autosync',
+        '--window-title=HooSaidThat — Android (close to save recording)',
+        ...(options['--app'] ? ['--start-app=' + options['--app']] : []),
+        ...(options['--duration'] ? ['--time-limit=' + Number(options['--duration'])] : [])];
+      console.log('Drive the Android window when it opens. Let TalkBack finish speaking, then close the window to save.');
+    } else if (feature) {
       // Preserve the original origin, including localhost's secure-context behavior.
       const url = new URL(feature.url);
       if (['localhost','127.0.0.1','[::1]'].includes(url.hostname)) flags.push('--reverse-port', url.port || (url.protocol === 'https:' ? '443' : '80'));

@@ -25,8 +25,8 @@ test('checkout is announced', async ({ page, screenReader }) => {
 ```
 
 **Record a mobile feature:** use `hoosaidthat-record ios` for VoiceOver or
-`hoosaidthat-record android` for TalkBack. Both take a feature scenario and
-save a movie of the device with its output audio. See the
+`hoosaidthat-record android` for TalkBack. Add `--manual` to drive the device yourself, or
+pass a feature scenario. Both save the device screen and its output audio. See the
 [recording walkthrough](docs/mobile-recordings.md) for setup, a reusable
 checkout scenario, and running an existing Android Playwright test.
 

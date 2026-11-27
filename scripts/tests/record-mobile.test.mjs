@@ -16,6 +16,20 @@ test('choose either a scenario or a custom Android workflow, preserving child fl
   assert.throws(() => parseRecording(['android','--avd','one','--avd','two']));
 });
 
+test('manual Android can open an installed app or reach a loopback site and requires its own device', () => {
+  const flags = ['android','--manual','--avd','demo'];
+  const { options, child } = parseRecording([...flags,'--duration','25','--app','com.android.settings','--reverse-port','8080']);
+  assert.equal(options['--manual'], true);
+  assert.equal(options['--app'], 'com.android.settings');
+  assert.deepEqual(child, []);
+  assert.throws(() => parseRecording(['android','--manual']), /--avd/);
+  for (const extra of [['--manual'],['--duration','0'],['--duration','3601'],['--duration','2.9'],
+    ['--app','+com.android.settings'],['--app','org.demo;echo'],['--reverse-port','65536'],['--scenario','case.json'],['--','npm','test']]) {
+    assert.throws(() => parseRecording([...flags,...extra]));
+  }
+  for (const flag of ['--app','--duration']) assert.throws(() => parseRecording(['android','--avd','demo',flag,'1']));
+});
+
 const feature = steps => ({ url: 'https://example.test/orders', steps });
 const heard = (...texts) => ({ timedOut: false, speechEvents: texts.map(text => ({text})) });
 test('find a label within actual reader output then move backward in reading order', async () => {

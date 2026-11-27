@@ -88,6 +88,23 @@ Open `recording.mp4` to verify the words you expected to hear. The adjacent
 `report.json` identifies the simulator, route, VoiceOver state and media
 checks. Manual recording does not produce a transcript or require XCTest.
 
+## Record any Android feature by hand
+
+On a computer with a graphical desktop and scrcpy installed, open a window for
+the disposable emulator:
+
+```sh
+npx --no-install hoosaidthat-record android --manual --avd HST_TalkBack_API35 --results films
+```
+
+Use the window to navigate apps or websites with TalkBack. You can start directly in an
+installed app with `--app com.android.settings`. To open a site served by your
+computer, add `--reverse-port 8080` and visit `http://127.0.0.1:8080` in Chrome.
+Let TalkBack finish the last announcement, then **close the window** to save
+the MP4 and its TalkBack transcript. For a timed session, add `--duration 30`.
+Closing the window or reaching the time limit stops the disposable emulator.
+A session with no audible TalkBack request fails instead of saving a silent film.
+
 ## Record a longer Android flow
 
 The JSON runner also supports `activate`, `nextButton`, `previousButton`,
