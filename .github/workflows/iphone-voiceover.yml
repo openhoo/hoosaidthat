@@ -6,12 +6,15 @@ on:
     paths:
       - '.github/workflows/iphone-voiceover.yml'
       - '.github/scripts/verify-iphone-audio.py'
+      - '.github/scripts/warm-iphone-safari.py'
       - 'oracle/ios-voiceover/**'
       - 'scripts/voiceover-ios.mjs'
       - 'scripts/record-mobile.mjs'
       - 'package.json'
       - 'package-lock.json'
       - 'scripts/native/ios-recording.mjs'
+      - 'scripts/native/ios-loopback.c'
+      - 'scripts/native/ios-manual.mjs'
       - 'scripts/tests/ios-voiceover.test.mjs'
 
 permissions:
@@ -76,6 +79,8 @@ jobs:
           [[ -n "$device" && "$device" != *$'\n'* ]] || { echo 'Expected one BlackHole 2ch device.' >&2; exit 1; }
           xcrun devicectl device settings audio --device "$HST_PHONE" --output-device "$device" --volume 80 --timeout 90
           xcrun simctl io "$HST_PHONE" enumerate
+      - name: Wait until cold Safari can reach an inert fixture
+        run: python3 .github/scripts/warm-iphone-safari.py "$HST_PHONE" test-results/ios-voiceover
       - name: Record and check actual VoiceOver output in Mobile Safari
         working-directory: ${{ runner.temp }}/consumer
         run: node_modules/.bin/hoosaidthat-record ios --udid "$HST_PHONE" --audio-device "BlackHole 2ch" --results "$GITHUB_WORKSPACE/test-results/ios-voiceover"
