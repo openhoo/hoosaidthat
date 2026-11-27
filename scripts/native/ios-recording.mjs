@@ -101,8 +101,11 @@ export async function mediaDuration(file) {
 export async function encodeIPhoneMovie(screen, rawAudio, output, offset, duration) {
   // Simulator screen captures can stop on the last changed frame. Hold that
   // frame until the end of the real audio without generating any sound.
-  const filter = 'tpad=stop_mode=clone:stop=-1,trim=start=' + offset.toFixed(3) + ',setpts=PTS-STARTPTS,fps=24';
-  await exec('ffmpeg', ['-nostdin', '-v', 'error', '-i', screen, '-i', rawAudio, '-map', '0:v:0', '-map', '1:a:0',
+  // Apple can emit two frames with the same presentation time. Ignore decode
+  // timestamps: otherwise FFmpeg can shift later screen changes several seconds
+  // early. Expand sparse frames before cutting so the initial held image survives.
+  const filter = 'fps=24:start_time=0,tpad=stop_mode=clone:stop=-1,trim=start=' + offset.toFixed(3) + ',setpts=PTS-STARTPTS';
+  await exec('ffmpeg', ['-nostdin', '-v', 'error', '-fflags', '+igndts', '-i', screen, '-i', rawAudio, '-map', '0:v:0', '-map', '1:a:0',
     '-c:v', 'libx264', '-preset', 'veryfast', '-pix_fmt', 'yuv420p', '-vf', filter, '-c:a', 'aac', '-b:a', '128k',
     '-t', duration.toFixed(3), '-movflags', '+faststart', output], { timeout: Math.max(600_000, duration * 3000) });
   return inspectMovie(output);
