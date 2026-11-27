@@ -99,9 +99,9 @@ export async function createRecording(output, udid, audioDevice, dedicatedMac = 
   verifyAudioRoute(ports.stdout, audioDevice, JSON.parse(profile.stdout), dedicatedMac);
   const scratch = await mkdtemp(join(output, '.recording-'));
   const key = '/' + randomUUID();
-  const rawVideo = join(scratch, 'screen.mp4'), rawAudio = join(scratch, 'route.wav');
-  let video, audio, state = 'idle', videoAt, audioAt, fault, pending, stopPromise, closing;
-  const stop = (incomplete = false) => stopPromise ??= Promise.allSettled([video?.stop(incomplete), audio?.stop(incomplete)]).then(results => {
+  const rawAudio = join(scratch, 'route.wav');
+  let audio, state = 'idle', audioAt, fault, pending, stopPromise, closing;
+  const stop = (incomplete = false) => stopPromise ??= Promise.allSettled([audio?.stop(incomplete)]).then(results => {
     const failure = results.find(x => x.status === 'rejected');
     if (failure && !incomplete) throw failure.reason;
   });
@@ -113,9 +113,10 @@ export async function createRecording(output, udid, audioDevice, dedicatedMac = 
         state = 'starting';
         audio = launch('ffmpeg', ['-hide_banner', '-nostdin', '-f', 'avfoundation', '-i', ':' + audioDevice,
           '-vn', '-c:a', 'pcm_s16le', '-stats_period', '0.05', '-progress', 'pipe:2', rawAudio], /out_time_us=[1-9]\d*/);
-        video = launch('/usr/bin/xcrun', ['simctl', 'io', udid, 'recordVideo', '--codec=h264', rawVideo], /Recording started/i);
-        pending = Promise.all([video.start(), audio.start()]);
-        [videoAt, audioAt] = await pending;
+        pending = audio.start();
+        await pending;
+        // The clock used by xcresulttool attachment timestamps is Unix wall time.
+        audioAt = Date.now() / 1000;
         state = 'recording';
       } else if (op.endsWith('/stop') && state === 'recording') {
         state = 'stopping'; await stop(); state = 'captured';
@@ -128,24 +129,25 @@ export async function createRecording(output, udid, audioDevice, dedicatedMac = 
   } catch (error) { await rm(scratch, { recursive: true, force: true }); throw error; }
   return {
     endpoint: 'http://127.0.0.1:' + server.address().port + key,
-    async finalize() {
+    async finalize(screen) {
       if (fault) throw fault;
       if (state !== 'captured') throw new Error('XCTest did not complete the requested feature recording.');
+      if (!screen || !Number.isFinite(screen.timestamp)) throw new Error('XCTest did not attach a screen movie for the selected simulator.');
       const file = join(scratch, 'recording.mp4');
-      // Drop the lead-in of whichever capture started first. Re-encode the screen to allow a frame-accurate cut.
-      const common = Math.max(videoAt, audioAt);
-      const seconds = n => (n / 1000).toFixed(3);
-      const { stdout } = await exec('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', rawAudio], {timeout: 20_000});
-      const duration = Number(stdout.trim()) - (common - audioAt) / 1000;
-      if (!Number.isFinite(duration) || duration < 0.5) throw new Error('Too little simulator audio was captured.');
-      // simctl captures changed frames only; trim AFTER padding so a static final screen still covers the audio.
-      const filter = 'tpad=stop_mode=clone:stop=-1,trim=start=' + seconds(common - videoAt) + ',setpts=PTS-STARTPTS,fps=24';
-      await exec('ffmpeg', ['-nostdin', '-v', 'error', '-i', rawVideo, '-ss', seconds(common - audioAt), '-i', rawAudio,
+      const { stdout: rawDuration } = await exec('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', rawAudio], {timeout: 20_000});
+      const duration = Number(rawDuration.trim());
+      const { stdout: screenDuration } = await exec('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', screen.file], {timeout: 20_000});
+      const offset = audioAt - screen.timestamp;
+      // Screen recording can end on the last changed frame; preserve that frame through trailing speech.
+      if (!Number.isFinite(duration) || duration < 0.5 || !(offset >= -0.5 && offset < Number(screenDuration.trim())))
+        throw new Error('The XCTest screen attachment does not overlap the recorded feature audio.');
+      const filter = 'tpad=stop_mode=clone:stop=-1,trim=start=' + Math.max(0, offset).toFixed(3) + ',setpts=PTS-STARTPTS,fps=24';
+      await exec('ffmpeg', ['-nostdin', '-v', 'error', '-i', screen.file, '-i', rawAudio,
         '-map', '0:v:0', '-map', '1:a:0', '-c:v', 'libx264', '-preset', 'veryfast', '-vf', filter,
         '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '128k', '-t', duration.toFixed(3), '-movflags', '+faststart', file], {timeout: 10 * 60_000});
       const media = await inspectMovie(file);
       await rename(file, join(output, 'recording.mp4'));
-      return { file: 'recording.mp4', audioSource: dedicatedMac ? 'dedicated Mac output via virtual loopback (includes host audio)' : 'simulator output via virtual loopback', audioDevice, ...media };
+      return { file: 'recording.mp4', videoSource: 'XCTest device screen recording', screenOffsetSeconds: Math.max(0, offset), audioSource: dedicatedMac ? 'dedicated Mac output via virtual loopback (includes host audio)' : 'simulator output via virtual loopback', audioDevice, ...media };
     },
     close() {
       return closing ??= (async () => {
