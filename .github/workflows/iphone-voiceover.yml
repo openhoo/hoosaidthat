@@ -7,6 +7,9 @@ on:
       - '.github/workflows/iphone-voiceover.yml'
       - 'oracle/ios-voiceover/**'
       - 'scripts/voiceover-ios.mjs'
+      - 'scripts/record-mobile.mjs'
+      - 'package.json'
+      - 'package-lock.json'
       - 'scripts/native/ios-recording.mjs'
       - 'scripts/tests/ios-voiceover.test.mjs'
 
@@ -22,9 +25,25 @@ jobs:
       DEVELOPER_DIR: /Applications/Xcode_27.1.app/Contents/Developer
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24
+      - name: Install the packed recorder in a clean project
+        run: |
+          set -eu
+          umask 022
+          npm install --global --ignore-scripts npm@11.20.0
+          npm ci
+          npm run build
+          mkdir -p "$RUNNER_TEMP/sdk" "$RUNNER_TEMP/consumer" test-results/ios-voiceover
+          npm pack --pack-destination "$RUNNER_TEMP/sdk"
+          (cd "$RUNNER_TEMP/sdk" && shasum -a 256 ./*.tgz) > test-results/ios-voiceover/SHA256SUMS
+          git rev-parse HEAD > test-results/ios-voiceover/SOURCE
+          cd "$RUNNER_TEMP/consumer"
+          npm install --ignore-scripts "$RUNNER_TEMP/sdk/"*.tgz @playwright/test@1.62.1
       - name: Select the iPhone 18 Pro on this disposable runner
         run: |
-          node scripts/voiceover-ios.mjs doctor
+          "$RUNNER_TEMP/consumer/node_modules/.bin/hoosaidthat-voiceover-ios" doctor
           phone=$(xcrun simctl list -j | jq -er --arg runtimeVersion "$HST_IOS_VERSION" '
             . as $list | [.runtimes[] | select(.isAvailable and .platform == "iOS" and .version == $runtimeVersion)
             | .identifier as $runtime | $list.devices[$runtime][]?
@@ -37,7 +56,7 @@ jobs:
           brew install switchaudio-osx
           brew install --cask blackhole-2ch
           sudo killall coreaudiod || true
-          for attempt in {1..20}; do
+          for _ in {1..20}; do
             system_profiler SPAudioDataType -json | jq -e 'any(.SPAudioDataType[]._items[]; ._name == "BlackHole 2ch")' && break
             sleep 1
           done
@@ -49,7 +68,8 @@ jobs:
           xcrun simctl bootstatus "$HST_PHONE"
           open -a "$DEVELOPER_DIR/../Applications/DeviceHub.app" "devices://device/open?id=$HST_PHONE"
       - name: Record and check actual VoiceOver output in Mobile Safari
-        run: node scripts/voiceover-ios.mjs record --udid "$HST_PHONE" --audio-device "BlackHole 2ch" --dedicated-mac-output
+        working-directory: ${{ runner.temp }}/consumer
+        run: node_modules/.bin/hoosaidthat-record ios --udid "$HST_PHONE" --audio-device "BlackHole 2ch" --dedicated-mac-output --results "$GITHUB_WORKSPACE/test-results/ios-voiceover"
       - name: Preserve XCTest results and transcript
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
