@@ -110,6 +110,7 @@
     "scripts/record-mobile.mjs",
     "scripts/mobile-scenario.mjs",
     "scripts/native/ios-recording.mjs",
+    "scripts/native/ios-loopback.c",
     "scripts/native/ios-manual.mjs"
   ],
   "scripts": {

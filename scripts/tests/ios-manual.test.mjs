@@ -72,8 +72,9 @@ test('manual mux holds the last screen frame through speech and rejects silence'
       gen(['-f','lavfi','-i','sine=frequency=400:duration=1.5',sound]),
       gen(['-f','lavfi','-i','anullsrc=channel_layout=mono:duration=1',silent]),
     ]);
-    const media = await muxManualMovie(screen,sound,join(dir,'movie.mp4'),0.35);
+    const media = await muxManualMovie(screen,sound,join(dir,'movie.mp4'),0.35,1.5);
+    await assert.rejects(muxManualMovie(screen,sound,join(dir,'truncated.mp4'),0,39), /Incomplete simulator audio/);
     assert.equal(media.width,64); assert.ok(media.durationSeconds > 1.4); assert.ok(media.peakDb > -55);
-    await assert.rejects(muxManualMovie(screen,silent,join(dir,'silent.mp4'),0), /No usable simulator audio/);
+    await assert.rejects(muxManualMovie(screen,silent,join(dir,'silent.mp4'),0,1), /No usable simulator audio/);
   } finally { await rm(dir,{recursive:true,force:true}); }
 });

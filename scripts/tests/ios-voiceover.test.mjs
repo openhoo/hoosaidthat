@@ -31,7 +31,7 @@ test('the npm package ships the iPhone runner and every source needed by the XCT
   const [manifest] = JSON.parse(packed.stdout);
   const paths = new Set(manifest.files.map(item => item.path));
   for (const file of [
-    'scripts/record-mobile.mjs', 'scripts/native/ios-manual.mjs', 'scripts/native/ios-recording.mjs',
+    'scripts/record-mobile.mjs', 'scripts/native/ios-manual.mjs', 'scripts/native/ios-recording.mjs', 'scripts/native/ios-loopback.c',
     'scripts/voiceover-ios.mjs', 'scripts/voiceover-ios.d.mts', 'oracle/ios-voiceover/UITestHost.swift', 'oracle/ios-voiceover/VoiceOverTests.swift',
     'oracle/ios-voiceover/HSTVoiceOver.h', 'oracle/ios-voiceover/HSTVoiceOver.m',
     'oracle/ios-voiceover/HooSaidThat.xcodeproj/project.pbxproj',

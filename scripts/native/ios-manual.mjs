@@ -5,7 +5,7 @@ import { mkdir, mkdtemp, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { inventory, selectDevice, withIPhoneLock } from '../voiceover-ios.mjs';
-import { encodeIPhoneMovie, launchCapture, mediaDuration, recordingTools, simulatorPorts, verifyAudioRoute } from './ios-recording.mjs';
+import { encodeIPhoneMovie, launchCapture, mediaDuration, prepareLoopback, recordingTools, simulatorPorts, verifyAudioRoute, verifyCaptureInterval } from './ios-recording.mjs';
 
 const exec = promisify(execFile);
 const xcrun = '/usr/bin/xcrun';
@@ -48,20 +48,24 @@ export async function withVoiceOver(udid, use, state = voiceOver) {
 async function checkAudioRoute(udid, audioDevice) {
   const [name, ports] = await Promise.all([recordingTools(audioDevice), simulatorPorts(udid)]);
   // In isolated mode verifyAudioRoute requires an explicit match to the guest route.
-  verifyAudioRoute(ports.stdout, name, {}, false);
+  return verifyAudioRoute(ports.stdout, name, {}, false);
 }
 
-export async function muxManualMovie(screen, rawAudio, output, offsetSeconds) {
+export async function muxManualMovie(screen, rawAudio, output, offsetSeconds, captureWallSeconds) {
   const duration = await mediaDuration(rawAudio);
   if (!(duration >= 0.5) || !Number.isFinite(duration) || !Number.isFinite(offsetSeconds) || offsetSeconds < 0)
     throw Error('The recording was too short or has invalid capture timing.');
-  return encodeIPhoneMovie(screen, rawAudio, output, offsetSeconds, duration);
+  verifyCaptureInterval(duration, captureWallSeconds);
+  const movie = await encodeIPhoneMovie(screen, rawAudio, output, offsetSeconds, duration);
+  verifyCaptureInterval(movie.durationSeconds, captureWallSeconds);
+  return { ...movie, rawAudioSeconds: duration, captureWallSeconds };
 }
 
 // SIGINT also goes to a terminal's foreground process group. Keep the two
 // recorders in separate groups so we can stop and flush them exactly once.
-async function capture({ udid, audioDevice, scratch, onReady, stop }) {
+async function capture({ udid, uid, scratch, onReady, stop }) {
   const screen = join(scratch, 'screen.mp4'), rawAudio = join(scratch, 'audio.wav');
+  const openLoopback = await prepareLoopback(scratch);
   const video = launchCapture(xcrun, ['simctl', 'io', udid, 'recordVideo', '--display=internal', '--codec=h264', screen], /Recording started/, { detached: true });
   let audio, closing;
   const close = incomplete => closing ??= Promise.allSettled([video.stop(incomplete), audio?.stop(incomplete)]).then(results => {
@@ -71,13 +75,13 @@ async function capture({ udid, audioDevice, scratch, onReady, stop }) {
   const unexpected = (process, label) => process.closed.then(result => { throw result.error ?? Error(label + ' recorder exited before the recording was stopped.'); });
   try {
     const videoAt = await video.start();
-    audio = launchCapture('ffmpeg', ['-nostdin', '-hide_banner', '-f', 'avfoundation', '-i', ':' + audioDevice,
-      '-vn', '-c:a', 'pcm_s16le', '-stats_period', '0.05', '-progress', 'pipe:2', rawAudio], /out_time_us=[1-9]\d*/, { detached: true });
+    audio = openLoopback(uid, rawAudio, { detached: true });
     const audioAt = await Promise.race([audio.start(), unexpected(video, 'Screen')]);
     onReady();
     const reason = await Promise.race([stop, unexpected(video, 'Screen'), unexpected(audio, 'Audio')]);
+    const captureWallSeconds = (performance.now() - audioAt) / 1000;
     await close(false);
-    return { screen, rawAudio, reason, offsetSeconds: (audioAt - videoAt) / 1000 };
+    return { screen, rawAudio, reason, captureWallSeconds, offsetSeconds: (audioAt - videoAt) / 1000 };
   } finally { await close(true).catch(() => {}); }
 }
 
@@ -113,7 +117,7 @@ export async function recordManualIPhone({ udid, audioDevice, parent, seconds })
     if (device.state !== 'Booted') throw Error('Open this iPhone in Device Hub and launch the feature you want to record before running --manual.');
     return await withIPhoneLock(device, async () => {
       checkCanceled();
-      await checkAudioRoute(device.udid, audioDevice);
+      const uid = await checkAudioRoute(device.udid, audioDevice);
       checkCanceled();
       await mkdir(parent, { recursive: true, mode: 0o700 });
       const output = await mkdtemp(join(parent, 'ios-manual-'));
@@ -124,7 +128,7 @@ export async function recordManualIPhone({ udid, audioDevice, parent, seconds })
         const result = await withVoiceOver(device.udid, async initial => {
           previousVoiceOver = initial;
           checkCanceled();
-          const captured = await capture({ udid: device.udid, audioDevice, scratch, stop: control.stop,
+          const captured = await capture({ udid: device.udid, uid, scratch, stop: control.stop,
             onReady: () => {
               checkCanceled(); control.ready();
               console.log('Recording now. Drive the selected iPhone in Device Hub. Press Enter or Ctrl-C to save' + (seconds ? ', or wait ' + seconds + ' seconds.' : '.'));
@@ -133,7 +137,7 @@ export async function recordManualIPhone({ udid, audioDevice, parent, seconds })
           return captured;
         });
         const file = join(scratch, 'recording.mp4');
-        const media = await muxManualMovie(result.screen, result.rawAudio, file, result.offsetSeconds);
+        const media = await muxManualMovie(result.screen, result.rawAudio, file, result.offsetSeconds, result.captureWallSeconds);
         const report = { mode: 'manual', screenReader: 'VoiceOver', device, xcode: environment.xcode, sdk: environment.sdk, stoppedBy: result.reason,
           voiceOver: { enabledBefore: previousVoiceOver, enabledAtStart: true, enabledAtEnd: true, restored: true },
           recording: { file: 'recording.mp4', videoSource: 'simctl selected simulator display', audioSource: 'simulator output via virtual loopback',

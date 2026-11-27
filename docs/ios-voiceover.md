@@ -208,3 +208,9 @@ command also captures the simulator screen and routed audio. Neither command
 captures braille, rotor gestures, or a stream of unsolicited live-region text. It runs independently of the desktop
 Chrome/Playwright fixture; `screenReader: 'voiceover'` still selects the Mac
 adapter. A simulator result does not qualify a physical iPhone.
+
+The recorder opens the selected loopback by device ID and reads its PCM samples
+through CoreAudio. Both scripted and manual recordings compare the received
+audio duration with elapsed capture time. If the loopback drops a substantial
+part of a feature, the command fails instead of saving a shortened movie.
+The report includes both durations: `rawAudioSeconds` and `captureWallSeconds`.

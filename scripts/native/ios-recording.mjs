@@ -3,6 +3,7 @@ import { mkdtemp, rename, rm } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { createServer } from 'node:http';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
 const exec = promisify(execFile);
@@ -28,9 +29,9 @@ export function verifyAudioRoute(ports, device, profile, dedicatedMac) {
   const escape = text => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const uid = new RegExp('^\\s*([^\\s:]+): ' + escape(device) + ' \\(\\d+ In / \\d+ Out\\)', 'm').exec(ports)?.[1];
   const route = /Guest Audio Output -> ([^\n]+)/.exec(ports)?.[1]?.trim();
-  if (uid && route === 'Host Audio Device #' + uid) return;
+  if (uid && route === 'Host Audio Device #' + uid) return uid;
   if (dedicatedMac && uid && route === 'Default Host Audio Device' && (profile.SPAudioDataType ?? []).some(group =>
-    (group._items ?? []).some(d => d._name === device && d.coreaudio_default_audio_output_device === 'spaudio_yes'))) return;
+    (group._items ?? []).some(d => d._name === device && d.coreaudio_default_audio_output_device === 'spaudio_yes'))) return uid;
   throw new Error('The selected simulator is not routed to ' + device + '. In Device Hub select Device → Sound → Sound Output and choose that loopback. Simulator reports: ' + (route || 'unknown output') + '.');
 }
 
@@ -76,6 +77,28 @@ export function launchCapture(command, args, readyPattern, { detached = false } 
       if (!allowIncomplete && (!wasRunning || result.error || result.signal === 'SIGKILL' || ![0, 255, null].includes(result.status))) throw result.error ?? exited();
     },
   };
+}
+
+// Compile for the user's host architecture with the same Xcode used by the
+// simulator. The executable stays in the private per-recording scratch folder.
+export async function prepareLoopback(scratch) {
+  const helper = join(scratch, 'capture-loopback');
+  const source = fileURLToPath(new URL('./ios-loopback.c', import.meta.url));
+  await exec('/usr/bin/xcrun', ['--sdk', 'macosx', 'clang', '-std=c11', '-O2', source,
+    '-framework', 'AudioToolbox', '-framework', 'CoreAudio', '-framework', 'CoreFoundation', '-o', helper], { timeout: 90_000 });
+  return (uid, wav, options) => launchCapture(helper, [uid, wav], /HST loopback received PCM/, options);
+}
+
+export function verifyCaptureInterval(rawAudioSeconds, captureWallSeconds) {
+  // The first/last hardware buffers straddle our process notifications. Allow
+  // that startup/stop jitter plus a small amount of device clock drift.
+  const tolerance = Math.min(2.5, 0.65 + 0.001 * captureWallSeconds);
+  if (!(captureWallSeconds >= 0.5) || !Number.isFinite(captureWallSeconds) ||
+      !(rawAudioSeconds >= 0.5) || !Number.isFinite(rawAudioSeconds) ||
+      Math.abs(rawAudioSeconds - captureWallSeconds) > tolerance) {
+    throw Error('Incomplete simulator audio: received ' + Number(rawAudioSeconds).toFixed(3) +
+      ' s of PCM during ' + Number(captureWallSeconds).toFixed(3) + ' s of recording. Check the simulator sound route and host load.');
+  }
 }
 
 export async function inspectMovie(file) {
@@ -132,12 +155,15 @@ export async function createRecording(output, udid, audioDevice, dedicatedMac = 
     simulatorPorts(udid),
     audioProfile(),
   ]);
-  verifyAudioRoute(ports.stdout, audioDevice, JSON.parse(profile.stdout), dedicatedMac);
+  const uid = verifyAudioRoute(ports.stdout, audioDevice, JSON.parse(profile.stdout), dedicatedMac);
   const scratch = await mkdtemp(join(output, '.recording-'));
   const key = '/' + randomUUID();
   const rawAudio = join(scratch, 'route.wav');
+  let openLoopback;
+  try { openLoopback = await prepareLoopback(scratch); }
+  catch (error) { await rm(scratch, { recursive: true, force: true }); throw error; }
   let finalized = false;
-  let audio, state = 'idle', audioAt, fault, pending, stopPromise, closing;
+  let audio, state = 'idle', audioAt, audioClock, captureWallSeconds, fault, pending, stopPromise, closing;
   const stop = (incomplete = false) => stopPromise ??= Promise.allSettled([audio?.stop(incomplete)]).then(results => {
     const failure = results.find(x => x.status === 'rejected');
     if (failure && !incomplete) throw failure.reason;
@@ -148,14 +174,14 @@ export async function createRecording(output, udid, audioDevice, dedicatedMac = 
     try {
       if (op.endsWith('/start') && state === 'idle') {
         state = 'starting';
-        audio = launchCapture('ffmpeg', ['-hide_banner', '-nostdin', '-f', 'avfoundation', '-i', ':' + audioDevice,
-          '-vn', '-c:a', 'pcm_s16le', '-stats_period', '0.05', '-progress', 'pipe:2', rawAudio], /out_time_us=[1-9]\d*/);
+        audio = openLoopback(uid, rawAudio);
         pending = audio.start();
-        await pending;
+        audioClock = await pending;
         // The clock used by xcresulttool attachment timestamps is Unix wall time.
         audioAt = Date.now() / 1000;
         state = 'recording';
       } else if (op.endsWith('/stop') && state === 'recording') {
+        captureWallSeconds = (performance.now() - audioClock) / 1000;
         state = 'stopping'; await stop(); state = 'captured';
       } else { response.writeHead(409).end(); return; }
       response.writeHead(200).end();
@@ -172,13 +198,15 @@ export async function createRecording(output, udid, audioDevice, dedicatedMac = 
       if (!screen || !Number.isFinite(screen.timestamp)) throw new Error('XCTest did not attach a screen movie for the selected simulator.');
       const file = join(scratch, 'recording.mp4');
       const [duration, screenDuration] = await Promise.all([mediaDuration(rawAudio), mediaDuration(screen.file)]);
+      verifyCaptureInterval(duration, captureWallSeconds);
       const offset = audioAt - screen.timestamp;
       if (!Number.isFinite(duration) || duration < 0.5 || !(offset >= -0.5 && offset < screenDuration))
         throw new Error('The XCTest screen attachment does not overlap the recorded feature audio.');
       const media = await encodeIPhoneMovie(screen.file, rawAudio, file, Math.max(0, offset), duration);
+      verifyCaptureInterval(media.durationSeconds, captureWallSeconds);
       await rename(file, join(output, 'recording.mp4'));
       finalized = true;
-      return { file: 'recording.mp4', videoSource: 'XCTest device screen recording', screenOffsetSeconds: Math.max(0, offset), audioSource: dedicatedMac ? 'dedicated Mac output via virtual loopback (includes host audio)' : 'simulator output via virtual loopback', audioDevice, ...media };
+      return { file: 'recording.mp4', videoSource: 'XCTest device screen recording', screenOffsetSeconds: Math.max(0, offset), audioSource: dedicatedMac ? 'dedicated Mac output via virtual loopback (includes host audio)' : 'simulator output via virtual loopback', audioDevice, captureWallSeconds, rawAudioSeconds: duration, sourceVideoSeconds: screenDuration, ...media };
     },
     close() {
       return closing ??= (async () => {
