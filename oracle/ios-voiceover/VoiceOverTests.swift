@@ -2,9 +2,10 @@ import XCTest
 import UIKit
 
 private struct Scenario: Decodable {
-    enum Action: String, Decodable { case current, forward, backward, `in`, out, activate }
+    enum Action: String, Decodable { case current, forward, backward, `in`, out, activate, type }
     struct Step: Decodable {
         let action: Action
+        let text: String?
         let expect: String?
         let until: String?
         let maxMoves: Int?
@@ -19,6 +20,7 @@ private struct Event: Encodable {
     let step: Int
     let action: String
     let utterance: String
+    let secondsFromStart: Double?
 }
 
 private struct Transcript: Encodable {
@@ -174,8 +176,13 @@ final class VoiceOverTests: XCTestCase {
             throw ScenarioError("readyText must contain a nonempty label.")
         }
         for (index, step) in scenario.steps.enumerated() {
+            if step.action == .type {
+                guard let text = step.text, !text.isEmpty, text.utf16.count <= 2000 else {
+                    throw ScenarioError("Step \(index): type requires 1–2000 characters.")
+                }
+            } else if step.text != nil { throw ScenarioError("Step \(index): only type accepts text.") }
             if let until = step.until {
-                guard step.action != .current, step.action != .activate, step.expect == nil, !until.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                guard step.action != .current, step.action != .activate, step.action != .type, step.expect == nil, !until.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                       let maxMoves = step.maxMoves, (1...50).contains(maxMoves) else {
                     throw ScenarioError("Step \(index): until requires a movement, no expect, and maxMoves between 1 and 50.")
                 }
@@ -215,19 +222,23 @@ final class VoiceOverTests: XCTestCase {
         try await waitForVoiceOver(in: target, firstAction: scenario.steps[0].action, startedHere: state.initialVoiceOver == false)
         let recording = ProcessInfo.processInfo.environment["HST_RECORDING_ENDPOINT"]
         if let recording { try await captureSignal("start", endpoint: recording) }
+        let featureStart = ProcessInfo.processInfo.systemUptime
         for (index, step) in scenario.steps.enumerated() {
             for move in 1...(step.maxMoves ?? 1) {
                 guard target.state == .runningForeground else { throw ScenarioError("Step \(index): The target app lost focus.") }
+                let actionTime = recording == nil ? nil : ProcessInfo.processInfo.systemUptime - featureStart
                 if step.action == .activate {
                     // VoiceOver activates its focused element on a one-finger double-tap.
                     target.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).doubleTap()
+                } else if step.action == .type, let text = step.text {
+                    target.typeText(text)
                 }
-                let utterance = try HSTVoiceOver.speech(for: step.action == .activate ? "current" : step.action.rawValue)
+                let utterance = try HSTVoiceOver.speech(for: (step.action == .activate || step.action == .type) ? "current" : step.action.rawValue)
                 guard !utterance.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                     throw ScenarioError("Step \(index): VoiceOver returned no spoken text.")
                 }
                 // Record every actual move, including repeats and failed assertions.
-                state.transcript.events.append(Event(step: index, action: step.action.rawValue, utterance: utterance))
+                state.transcript.events.append(Event(step: index, action: step.action.rawValue, utterance: utterance, secondsFromStart: actionTime))
                 if recording != nil {
                     // Give audible output time to finish before the next focus change interrupts it.
                     let seconds = min(12.0, max(1.4, Double(utterance.count) / 11.0 + 0.6))

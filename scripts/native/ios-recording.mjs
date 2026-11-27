@@ -7,7 +7,7 @@ import { promisify } from 'node:util';
 
 const exec = promisify(execFile);
 
-export function selectLoopback(profile, requested) {
+export function selectLoopback(profile, requested, dedicatedMac = false) {
   const devices = (profile.SPAudioDataType ?? []).flatMap(group => group._items ?? [])
     .filter(d => d.coreaudio_device_transport === 'coreaudio_device_type_virtual' && d.coreaudio_device_input > 0 && d.coreaudio_device_output > 0);
   const eligible = devices.filter(d => requested === undefined || d._name === requested);
@@ -15,18 +15,19 @@ export function selectLoopback(profile, requested) {
     throw new Error('Select a dedicated virtual loopback with --audio-device NAME and route Device Hub → Device → Sound → Sound Output to it. Available virtual input/output devices: ' + (devices.map(d => d._name).join(', ') || 'none'));
   }
   const device = eligible[0];
-  if (device.coreaudio_default_audio_output_device === 'spaudio_yes' || device.coreaudio_default_audio_system_device === 'spaudio_yes') {
+  if (!dedicatedMac && (device.coreaudio_default_audio_output_device === 'spaudio_yes' || device.coreaudio_default_audio_system_device === 'spaudio_yes')) {
     throw new Error('The selected loopback is the default Mac output. Keep Mac audio on a different output and route only the simulator to the loopback in Device Hub.');
   }
   return device._name;
 }
 
-export async function recordingTools(requested) {
+export async function recordingTools(requested, dedicatedMac = false) {
   const [profile] = await Promise.all([
     exec('/usr/sbin/system_profiler', ['SPAudioDataType', '-json'], { timeout: 20_000 }),
     ...['ffmpeg', 'ffprobe'].map(tool => exec(tool, ['-version'], { timeout: 10_000 }).catch(() => { throw new Error('iPhone recording requires ffmpeg and ffprobe on PATH.'); })),
   ]);
-  return selectLoopback(JSON.parse(profile.stdout), requested);
+  if (dedicatedMac && !requested) throw new Error('Recording a dedicated Mac output requires an explicit --audio-device NAME.');
+  return selectLoopback(JSON.parse(profile.stdout), requested, dedicatedMac);
 }
 
 function launch(command, args, readyPattern) {
@@ -80,7 +81,7 @@ export async function inspectMovie(file) {
 
 // The XCTest calls this private loopback endpoint immediately before and after scenario steps.
 // No build, startup probe, unrelated desktop pixels, or physical microphone enter the movie.
-export async function createRecording(output, udid, audioDevice) {
+export async function createRecording(output, udid, audioDevice, dedicatedMac = false) {
   const scratch = await mkdtemp(join(output, '.recording-'));
   const key = '/' + randomUUID();
   const rawVideo = join(scratch, 'screen.mp4'), rawAudio = join(scratch, 'route.wav');
@@ -124,7 +125,7 @@ export async function createRecording(output, udid, audioDevice) {
         '-preset', 'veryfast', '-vf', 'fps=24,tpad=stop_mode=clone:stop=-1', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '128k', '-shortest', '-movflags', '+faststart', file], {timeout: 10 * 60_000});
       const media = await inspectMovie(file);
       await rename(file, join(output, 'recording.mp4'));
-      return { file: 'recording.mp4', audioSource: 'simulator output via virtual loopback', audioDevice, ...media };
+      return { file: 'recording.mp4', audioSource: dedicatedMac ? 'dedicated Mac output via virtual loopback (includes host audio)' : 'simulator output via virtual loopback', audioDevice, ...media };
     },
     async close() {
       server.close(); server.closeAllConnections();

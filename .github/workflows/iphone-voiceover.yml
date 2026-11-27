@@ -34,33 +34,22 @@ jobs:
       - name: Install an isolated simulator audio loopback on the disposable Mac
         run: |
           command -v ffmpeg || brew install ffmpeg
+          brew install switchaudio-osx
           brew install --cask blackhole-2ch
           sudo killall coreaudiod || true
           for attempt in {1..20}; do
             system_profiler SPAudioDataType -json | jq -e 'any(.SPAudioDataType[]._items[]; ._name == "BlackHole 2ch")' && break
             sleep 1
           done
+          SwitchAudioSource -t output -s "BlackHole 2ch"
+          SwitchAudioSource -t output -c
       - name: Present the test iPhone in Device Hub
         run: |
           xcrun simctl boot "$HST_PHONE"
           xcrun simctl bootstatus "$HST_PHONE"
           open -a "$DEVELOPER_DIR/../Applications/DeviceHub.app" "devices://device/open?id=$HST_PHONE"
-      - name: Route only Device Hub sound to BlackHole
-        run: |
-          osascript <<'APPLESCRIPT'
-          tell application "System Events"
-            tell process "Device Hub"
-              set frontmost to true
-              repeat 40 times
-                if exists menu bar item "Device" of menu bar 1 then exit repeat
-                delay 1
-              end repeat
-              click menu item "BlackHole 2ch" of menu 1 of menu item "Sound Output" of menu 1 of menu item "Sound" of menu 1 of menu bar item "Device" of menu bar 1
-            end tell
-          end tell
-          APPLESCRIPT
       - name: Record and check actual VoiceOver output in Mobile Safari
-        run: node scripts/voiceover-ios.mjs record --udid "$HST_PHONE" --audio-device "BlackHole 2ch"
+        run: node scripts/voiceover-ios.mjs record --udid "$HST_PHONE" --audio-device "BlackHole 2ch" --dedicated-mac-output
       - name: Preserve XCTest results and transcript
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
