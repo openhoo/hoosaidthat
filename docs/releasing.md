@@ -186,6 +186,30 @@ After a first release, set each GHCR package visibility deliberately and verify
 the npm tarball, OCI digest, SBOM, provenance, and fresh-pull smoke before
 announcing it.
 
+### If npm accepts a trusted publish but the version is not visible yet
+
+npm can accept a package before anonymous clients can read it. The workflow submits
+the package once, then reads its public version metadata for up to 60 minutes. It
+backs off to one request per minute while the version or its provenance is missing
+or the registry is temporarily unavailable. Any conflicting package identity,
+checksum or attestation fails verification immediately. The upload step preserves
+the sanitized acceptance receipt even when verification fails.
+
+If the job times out after acceptance, download its `release-qualification-evidence`
+artifact and keep the original `npm-publication-receipt.json`. In a checkout of the
+release source, rerun **only the anonymous verification** on a copy of that receipt:
+
+```sh
+cp npm-publication-receipt.json npm-publication-readback.json
+node scripts/verify-public-npm.mjs npm-publication-readback.json
+```
+
+Success records `registryVerified: true` with the expected provenance URL. Keep the
+verified copy with the original. If the public metadata conflicts with the receipt,
+or a submitted version remains absent, have a package maintainer check the original
+publish on npm. Do not rerun the release workflow or resubmit the archive on the
+strength of a 404. This procedure applies to the ordinary trusted release.
+
 ## Timing the qualification without publishing
 
 Each hosted runner uses one screen reader at a time. Across runners, the four

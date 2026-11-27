@@ -59,6 +59,41 @@ Use `start --avd NAME` to serve a session until Ctrl+C, or append
 checks native navigation and async live-region speech. Set `HST_TALKBACK_RESULTS`
 to an absolute directory to retain the test attachments on the host.
 
+## Record a feature with audible TalkBack
+
+On macOS, Linux or WSL, install scrcpy (with `--require-audio`) and FFmpeg.
+The Google Play API 35 image can use its stock Google voice. To use another
+installed offline voice, prepare its language data first and pass
+`--tts-engine its.package.name`. Set `HST_SCRCPY_BIN` or `HST_FFMPEG_BIN` if
+the programs are outside PATH.
+
+Run a custom Playwright suite using the normal HooSaidThat fixtures:
+
+```bash
+hoosaidthat-talkback-android run --avd HST_TalkBack_API35 \
+  --token-file ~/.hst/talkback-token --recording artifacts/checkout.mp4 \
+  -- npx playwright test --config mobile.config.ts
+```
+
+The command records the selected emulator's full display and Android output
+mix while the child runs. TalkBack supplies the words, language, pitch and
+rate. The test helper asks the installed Android voice to synthesize them and
+returns its actual PCM for playback on TalkBack's stream. There is no external
+narration or microphone input. The helper currently supports 16-bit PCM voices
+for English (US) and German (Germany); it does not reproduce engine-specific
+span prosody. A different voice, this relay and the emulator can affect timing.
+
+Alongside the MP4, `artifacts/checkout.mp4.talkback.jsonl` contains TalkBack's
+own synthesis requests, tagged with the Android uptime and host observation
+time. Requests can be interrupted; the movie is the evidence of what played.
+The exporter requires H.264 video, a non-silent guest audio track, and nonzero
+device-voice PCM for a TalkBack request from this run. It refuses to overwrite
+either output. A failing test may still produce evidence and keeps its failing
+exit status. Only the read-only `--avd` path can select a recording voice.
+For a web app served on the host, `--reverse-port PORT` routes that loopback
+port through adb for this run. The child receives `ANDROID_SERIAL` so any
+additional adb commands target the same emulator.
+
 ## Attach to a prepared device with `--serial`
 
 Requirements:
@@ -217,10 +252,9 @@ role, and resulting live update in separate synthesis requests. For observations
 of slower application updates, set `quietMs` in the fixture options.
 
 These are actual **synthesis requests**, not proof of audible playback or
-utterance completion. The test engine returns short silent PCM and does not
+utterance completion. Outside movie mode, the test engine returns short silent PCM and does not
 preserve natural voice timing. Interruptions and continuous-reading behavior
-can differ from a normal voice. Neither a WAV/audio track nor a braille display
-is claimed. Text/JSON transcripts, runtime identity, screenshots and annotated
+can differ from a normal voice. These text artifacts do not include a WAV or a braille display. Text/JSON transcripts, runtime identity, screenshots and annotated
 HTML reports use the existing evidence path.
 
 ## Verification

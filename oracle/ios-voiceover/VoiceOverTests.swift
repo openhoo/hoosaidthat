@@ -2,15 +2,18 @@ import XCTest
 import UIKit
 
 private struct Scenario: Decodable {
-    enum Action: String, Decodable { case current, forward, backward, `in`, out }
+    enum Action: String, Decodable { case current, forward, backward, `in`, out, activate, type }
     struct Step: Decodable {
         let action: Action
+        let text: String?
         let expect: String?
         let until: String?
         let maxMoves: Int?
     }
-    let url: String
+    let url: String?
+    let bundleId: String?
     let readyText: String?
+    let initialFocusText: String?
     let steps: [Step]
 }
 
@@ -18,11 +21,13 @@ private struct Event: Encodable {
     let step: Int
     let action: String
     let utterance: String
+    let secondsFromStart: Double?
 }
 
 private struct Transcript: Encodable {
     let version = 1
-    var url = ""
+    var url: String?
+    var bundleId: String?
     var events: [Event] = []
     var completed = false
 }
@@ -36,18 +41,18 @@ private struct ScenarioError: LocalizedError {
 private final class RunState {
     var transcript = Transcript()
     var initialVoiceOver: Bool?
-    var startedSafari = false
+    var startedTarget = false
 }
 
 final class VoiceOverTests: XCTestCase {
     @MainActor
-    private func visibleOverlays(in safari: XCUIApplication) -> String {
+    private func visibleOverlays(in target: XCUIApplication) -> String {
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
-        return "Safari alert: \(safari.alerts.firstMatch.exists); Safari sheet: \(safari.sheets.firstMatch.exists); system alert: \(springboard.alerts.firstMatch.exists)"
+        return "App alert: \(target.alerts.firstMatch.exists); App sheet: \(target.sheets.firstMatch.exists); system alert: \(springboard.alerts.firstMatch.exists)"
     }
 
     @MainActor
-    private func waitForVoiceOver(in safari: XCUIApplication, firstAction: Scenario.Action, startedHere: Bool) async throws {
+    private func waitForVoiceOver(in target: XCUIApplication, firstAction: Scenario.Action, startedHere: Bool) async throws {
         // isEnabled is a preference. On a fresh simulator the actual VoiceOver
         // process can take over a minute to initialize after the preference flips.
         let started = ProcessInfo.processInfo.systemUptime
@@ -63,8 +68,8 @@ final class VoiceOverTests: XCTestCase {
         var lastError: NSError?
         var lastResult = "no usable response"
         repeat {
-            guard safari.state == .runningForeground else {
-                throw ScenarioError("Mobile Safari lost focus during VoiceOver startup. " + visibleOverlays(in: safari))
+            guard target.state == .runningForeground else {
+                throw ScenarioError("The target app lost focus during VoiceOver startup. " + visibleOverlays(in: target))
             }
             attempts += 1
             // Only poll the current focus. Replaying a movement could skip an element.
@@ -118,13 +123,61 @@ final class VoiceOverTests: XCTestCase {
             try await Task.sleep(nanoseconds: UInt64(min(remaining, 1) * 1_000_000_000))
         } while ProcessInfo.processInfo.systemUptime < deadline
         let reason = lastError.map { "\($0.domain) code \($0.code): \($0.localizedDescription)" } ?? "none"
-        throw ScenarioError("VoiceOver did not provide spoken focus within 180s (\(attempts) probes; last result: \(lastResult); last native error: \(reason)). " + visibleOverlays(in: safari))
+        throw ScenarioError("VoiceOver did not provide spoken focus within 180s (\(attempts) probes; last result: \(lastResult); last native error: \(reason)). " + visibleOverlays(in: target))
+    }
+
+    private func captureSignal(_ phase: String, endpoint: String) async throws {
+        guard let url = URL(string: endpoint + "/" + phase), url.scheme == "http", url.host == "127.0.0.1" else {
+            throw ScenarioError("Invalid recording endpoint.")
+        }
+        var request = URLRequest(url: url, timeoutInterval: 30)
+        request.httpMethod = "POST"
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard (response as? HTTPURLResponse)?.statusCode == 200 else {
+            throw ScenarioError("Recorder failed to " + phase + ": " + String(decoding: data.prefix(1000), as: UTF8.self))
+        }
+    }
+
+    @MainActor
+    private func activateFocusedItem(in target: XCUIApplication, isWeb: Bool) throws {
+        // On iOS Simulator a synthesized double-tap in blank page content need not
+        // activate VoiceOver's cursor. Place it on the unique, visibly hittable
+        // item VoiceOver just identified; never guess when labels are ambiguous.
+        let spoken = try HSTVoiceOver.speech(for: "current")
+        let words = spoken.split(whereSeparator: { $0.isWhitespace })
+        guard !words.isEmpty else { throw ScenarioError("VoiceOver has no current item to activate.") }
+        let prefixes = (1...words.count).map { words.prefix($0).joined(separator: " ") }
+        let elements = isWeb ? target.webViews.descendants(matching: .any) : target.descendants(matching: .any)
+        let matches = elements.matching(NSPredicate(format: "label IN %@", prefixes)).allElementsBoundByIndex
+            .filter { $0.isHittable }
+        guard let length = matches.map({ $0.label.count }).max() else {
+            throw ScenarioError("The current VoiceOver utterance did not identify a visible item to activate.")
+        }
+        var longest = matches.filter { $0.label.count == length }
+        // Safari exposes a label, wrapper, and real control under the same name.
+        // Use the role VoiceOver actually spoke to distinguish them. Without a
+        // known role (including other reader languages), keep the ambiguity error.
+        if longest.count > 1, let label = longest.first?.label {
+            let suffix = String(spoken.dropFirst(label.count)).trimmingCharacters(in: .whitespaces).lowercased()
+            let roles: [(String, [XCUIElement.ElementType])] = [
+                ("secure text field", [.secureTextField]), ("text field", [.textField, .secureTextField, .textView]),
+                ("text view", [.textView]), ("button", [.button]), ("link", [.link]), ("switch", [.switch])
+            ]
+            if let types = roles.first(where: { suffix == $0.0 || suffix.hasPrefix($0.0 + " ") })?.1 {
+                longest = longest.filter { types.contains($0.elementType) }
+            }
+        }
+        guard longest.count == 1 else { throw ScenarioError("Several visible items match the current VoiceOver utterance; activation is ambiguous.") }
+        longest[0].coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).doubleTap()
     }
 
     @MainActor
     func testScenario() async throws {
         let state = RunState()
-        let safari = XCUIApplication(bundleIdentifier: "com.apple.mobilesafari")
+        guard let input = ProcessInfo.processInfo.environment["HST_IOS_SCENARIO_JSON"],
+              input.utf8.count <= 32_768 else { throw ScenarioError("Missing or oversized scenario.") }
+        let scenario = try JSONDecoder().decode(Scenario.self, from: Data(input.utf8))
+        let target = XCUIApplication(bundleIdentifier: scenario.bundleId ?? "com.apple.mobilesafari")
         // XCTest may halt the body if launching Safari or a UI query fails.
         // Teardown keeps the partial transcript and restores the original VoiceOver setting.
         addTeardownBlock { @MainActor in
@@ -139,7 +192,7 @@ final class VoiceOverTests: XCTestCase {
                     state.transcript.completed = false
                 }
             }
-            if state.startedSafari && safari.state != .notRunning { safari.terminate() }
+            if state.startedTarget && target.state != .notRunning { target.terminate() }
             if (self.testRun?.failureCount ?? 0) != 0 { state.transcript.completed = false }
             let attachment = XCTAttachment(data: try JSONEncoder().encode(state.transcript),
                                            uniformTypeIdentifier: "public.json")
@@ -148,22 +201,22 @@ final class VoiceOverTests: XCTestCase {
             self.add(attachment)
         }
 
-        guard let input = ProcessInfo.processInfo.environment["HST_IOS_SCENARIO_JSON"] else {
-            throw ScenarioError("HST_IOS_SCENARIO_JSON is missing from the UI test process.")
-        }
-        guard input.utf8.count <= 32_768 else { throw ScenarioError("Scenario exceeds 32 KiB.") }
-        let scenario = try JSONDecoder().decode(Scenario.self, from: Data(input.utf8))
         state.transcript.url = scenario.url
-        guard let url = URL(string: scenario.url), ["http", "https"].contains(url.scheme?.lowercased()),
-              url.host?.isEmpty == false, url.user == nil, url.password == nil, (1...100).contains(scenario.steps.count) else {
-            throw ScenarioError("Supply an HTTP(S) URL without credentials and between 1 and 100 steps.")
+        state.transcript.bundleId = scenario.bundleId
+        guard (scenario.url == nil) != (scenario.bundleId == nil), (1...100).contains(scenario.steps.count) else {
+            throw ScenarioError("Supply exactly one target and between 1 and 100 steps.")
         }
         if scenario.readyText?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == true {
             throw ScenarioError("readyText must contain a nonempty label.")
         }
         for (index, step) in scenario.steps.enumerated() {
+            if step.action == .type {
+                guard let text = step.text, !text.isEmpty, text.utf16.count <= 2000 else {
+                    throw ScenarioError("Step \(index): type requires 1–2000 characters.")
+                }
+            } else if step.text != nil { throw ScenarioError("Step \(index): only type accepts text.") }
             if let until = step.until {
-                guard step.action != .current, step.expect == nil, !until.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                guard step.action != .current, step.action != .activate, step.action != .type, step.expect == nil, !until.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                       let maxMoves = step.maxMoves, (1...50).contains(maxMoves) else {
                     throw ScenarioError("Step \(index): until requires a movement, no expect, and maxMoves between 1 and 50.")
                 }
@@ -179,41 +232,80 @@ final class VoiceOverTests: XCTestCase {
         guard HSTVoiceOver.isSupported() else {
             throw ScenarioError("Native iPhone VoiceOver requires Xcode 27 and an iOS 27 or newer simulator.")
         }
-        state.startedSafari = safari.state == .notRunning
-        if state.startedSafari {
-            // Let Safari finish its first launch before submitting the test URL.
-            safari.launch()
-            guard safari.wait(for: .runningForeground, timeout: 60) else {
-                throw ScenarioError("Mobile Safari did not finish launching.")
+        state.startedTarget = target.state == .notRunning
+        if state.startedTarget { target.launch() } else { target.activate() }
+        guard target.wait(for: .runningForeground, timeout: 60) else { throw ScenarioError("The target app did not launch.") }
+        if let address = scenario.url {
+            guard let url = URL(string: address), ["http", "https"].contains(url.scheme?.lowercased()),
+                  url.host?.isEmpty == false, url.user == nil, url.password == nil else { throw ScenarioError("Invalid web target.") }
+            target.open(url)
+            guard target.wait(for: .runningForeground, timeout: 15), target.webViews.firstMatch.waitForExistence(timeout: 20) else {
+                throw ScenarioError("Safari did not display the requested web view. " + visibleOverlays(in: target))
             }
         }
-        safari.open(url)
-        let webView = safari.webViews.firstMatch
-        guard safari.wait(for: .runningForeground, timeout: 15), webView.waitForExistence(timeout: 20) else {
-            throw ScenarioError("Mobile Safari did not display a web view for the requested URL. " + visibleOverlays(in: safari))
-        }
-        // A label confirms this page rendered. Only VoiceOver's own utterances
-        // are valid speech evidence and can be included in the transcript.
         if let readyText = scenario.readyText {
-            let content = safari.webViews.descendants(matching: .any).matching(NSPredicate(format: "label == %@", readyText))
-            guard content.firstMatch.waitForExistence(timeout: 180) else {
-                throw ScenarioError("The requested readyText label did not appear in Safari's web view. " + visibleOverlays(in: safari))
+            let elements = scenario.url == nil ? target.descendants(matching: .any) : target.webViews.descendants(matching: .any)
+            guard elements.matching(NSPredicate(format: "label == %@", readyText)).firstMatch.waitForExistence(timeout: 180) else {
+                throw ScenarioError("The readyText label did not appear in the target. " + visibleOverlays(in: target))
             }
         }
-        print("HooSaidThat: Safari page ready; starting VoiceOver focus probe.")
+        print("HooSaidThat: target ready; starting VoiceOver focus probe.")
         state.initialVoiceOver = HSTVoiceOver.isEnabled()
         if state.initialVoiceOver == false { try HSTVoiceOver.setEnabled(true) }
         guard HSTVoiceOver.isEnabled() else { throw ScenarioError("VoiceOver did not become enabled.") }
-        try await waitForVoiceOver(in: safari, firstAction: scenario.steps[0].action, startedHere: state.initialVoiceOver == false)
+        let recording = ProcessInfo.processInfo.environment["HST_RECORDING_ENDPOINT"]
+        if recording != nil, let initialFocusText = scenario.initialFocusText {
+            // A physical touch selects an item while VoiceOver is on. It gives a cold
+            // service a real foreground focus before asking it for its current speech.
+            let elements = scenario.url == nil ? target.descendants(matching: .any) : target.webViews.descendants(matching: .any)
+            let anchor = elements.matching(NSPredicate(format: "label == %@", initialFocusText)).firstMatch
+            guard anchor.waitForExistence(timeout: 15) && anchor.isHittable else {
+                throw ScenarioError("The requested initialFocusText is absent or not hittable.")
+            }
+            anchor.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        }
+        try await waitForVoiceOver(in: target, firstAction: scenario.steps[0].action, startedHere: state.initialVoiceOver == false)
+        if let recording {
+            try await captureSignal("start", endpoint: recording)
+            print("HooSaidThat: recorder ready; starting scenario steps.")
+            // XCTest also runs teardown when a gesture/assertion throws. Stop the
+            // microphone-free capture there so diagnostics contain no unrelated tail.
+            addTeardownBlock {
+                try? await self.captureSignal("stop", endpoint: recording)
+            }
+        }
+        let featureStart = ProcessInfo.processInfo.systemUptime
         for (index, step) in scenario.steps.enumerated() {
             for move in 1...(step.maxMoves ?? 1) {
-                guard safari.state == .runningForeground else { throw ScenarioError("Step \(index): Mobile Safari lost focus.") }
-                let utterance = try HSTVoiceOver.speech(for: step.action.rawValue)
+                guard target.state == .runningForeground else { throw ScenarioError("Step \(index): The target app lost focus.") }
+                let actionTime = recording == nil ? nil : ProcessInfo.processInfo.systemUptime - featureStart
+                if step.action == .activate {
+                    try activateFocusedItem(in: target, isWeb: scenario.url != nil)
+                } else if step.action == .type, let text = step.text {
+                    target.typeText(text)
+                }
+                var query = (step.action == .activate || step.action == .type) ? "current" : step.action.rawValue
+                if recording != nil && (step.action == .forward || step.action == .backward) {
+                    // In acoustic recordings send a VoiceOver one-finger flick, as
+                    // a user would, and observe the native service's resulting focus.
+                    let direction = step.action == .forward ? 1.0 : -1.0
+                    let from = target.coordinate(withNormalizedOffset: CGVector(dx: 0.5 - 0.16 * direction, dy: 0.5))
+                    let to = target.coordinate(withNormalizedOffset: CGVector(dx: 0.5 + 0.16 * direction, dy: 0.5))
+                    from.press(forDuration: 0.01, thenDragTo: to, withVelocity: .fast, thenHoldForDuration: 0)
+                    query = "current"
+                    try await Task.sleep(nanoseconds: 300_000_000)
+                }
+                let utterance = try HSTVoiceOver.speech(for: query)
                 guard !utterance.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                     throw ScenarioError("Step \(index): VoiceOver returned no spoken text.")
                 }
                 // Record every actual move, including repeats and failed assertions.
-                state.transcript.events.append(Event(step: index, action: step.action.rawValue, utterance: utterance))
+                state.transcript.events.append(Event(step: index, action: step.action.rawValue, utterance: utterance, secondsFromStart: actionTime))
+                if recording != nil {
+                    // Give audible output time to finish before the next focus change interrupts it.
+                    let seconds = min(12.0, max(1.4, Double(utterance.count) / 11.0 + 0.6))
+                    try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+                }
                 if let expect = step.expect, utterance.range(of: expect, options: .literal) == nil {
                     throw ScenarioError("Step \(index): VoiceOver speech did not contain the expected text.")
                 }
@@ -224,6 +316,7 @@ final class VoiceOverTests: XCTestCase {
                 break
             }
         }
+        if let recording { try await captureSignal("stop", endpoint: recording) }
         state.transcript.completed = true
     }
 }

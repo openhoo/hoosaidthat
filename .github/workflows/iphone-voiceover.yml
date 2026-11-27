@@ -5,8 +5,16 @@ on:
   pull_request:
     paths:
       - '.github/workflows/iphone-voiceover.yml'
+      - '.github/scripts/verify-iphone-audio.py'
+      - '.github/scripts/warm-iphone-safari.py'
       - 'oracle/ios-voiceover/**'
       - 'scripts/voiceover-ios.mjs'
+      - 'scripts/record-mobile.mjs'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'scripts/native/ios-recording.mjs'
+      - 'scripts/native/ios-loopback.c'
+      - 'scripts/native/ios-manual.mjs'
       - 'scripts/tests/ios-voiceover.test.mjs'
 
 permissions:
@@ -15,29 +23,74 @@ permissions:
 jobs:
   safari:
     runs-on: xcode-27
-    timeout-minutes: 30
+    timeout-minutes: 45
     env:
       HST_IOS_VERSION: '27.0'
-      DEVELOPER_DIR: /Applications/Xcode_27.1.app/Contents/Developer
+      HST_IOS_KEEP_FAILED_AUDIO: '1' # Only this disposable runner and its quiet synthetic fixture.
+      DEVELOPER_DIR: /Applications/Xcode_27.2.app/Contents/Developer
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24
+      - name: Install the packed recorder in a clean project
+        run: |
+          set -eu
+          umask 022
+          npm install --global --ignore-scripts npm@11.20.0
+          npm ci
+          npm run build
+          mkdir -p "$RUNNER_TEMP/sdk" "$RUNNER_TEMP/consumer" test-results
+          mkdir test-results/ios-voiceover # Only accept recordings from this job.
+          npm pack --pack-destination "$RUNNER_TEMP/sdk"
+          (cd "$RUNNER_TEMP/sdk" && shasum -a 256 ./*.tgz) > test-results/ios-voiceover/SHA256SUMS
+          git rev-parse HEAD > test-results/ios-voiceover/SOURCE
+          cd "$RUNNER_TEMP/consumer"
+          npm install --ignore-scripts "$RUNNER_TEMP/sdk/"*.tgz @playwright/test@1.62.1
       - name: Select the iPhone 18 Pro on this disposable runner
         run: |
-          node scripts/voiceover-ios.mjs doctor
+          "$RUNNER_TEMP/consumer/node_modules/.bin/hoosaidthat-voiceover-ios" doctor
           phone=$(xcrun simctl list -j | jq -er --arg runtimeVersion "$HST_IOS_VERSION" '
             . as $list | [.runtimes[] | select(.isAvailable and .platform == "iOS" and .version == $runtimeVersion)
             | .identifier as $runtime | $list.devices[$runtime][]?
             | select(.isAvailable and .deviceTypeIdentifier == "com.apple.CoreSimulator.SimDeviceType.iPhone-18-Pro")][0].udid')
           echo "Testing iPhone 18 Pro on iOS $HST_IOS_VERSION ($phone)"
           echo "HST_PHONE=$phone" >> "$GITHUB_ENV"
+      - name: Install an isolated simulator audio loopback on the disposable Mac
+        run: |
+          command -v ffmpeg || brew install ffmpeg
+          brew install --cask blackhole-2ch
+          sudo killall coreaudiod || true
       - name: Present the test iPhone in Device Hub
         run: |
           xcrun simctl boot "$HST_PHONE"
           xcrun simctl bootstatus "$HST_PHONE"
           open -a "$DEVELOPER_DIR/../Applications/DeviceHub.app" "devices://device/open?id=$HST_PHONE"
-      - name: Check actual VoiceOver speech in Mobile Safari
-        run: node scripts/voiceover-ios.mjs run --udid "$HST_PHONE"
-      - name: Preserve XCTest results and transcript
+      - name: Route only the test iPhone to BlackHole
+        run: |
+          set -eu
+          # CoreAudio can take a moment to register the new virtual device.
+          for _ in {1..12}; do
+            ports=$(xcrun simctl io "$HST_PHONE" enumerate)
+            device=$(awk -F ': ' '$2 ~ /^BlackHole 2ch \([0-9]+ In \/ [0-9]+ Out\)/ { sub(/^[[:space:]]+/, "", $1); print $1 }' <<< "$ports")
+            [[ -n "$device" ]] && break
+            sleep 2
+          done
+          [[ -n "$device" && "$device" != *$'\n'* ]] || { echo 'Expected one BlackHole 2ch device.' >&2; exit 1; }
+          xcrun devicectl device settings audio --device "$HST_PHONE" --output-device "$device" --volume 80 --timeout 90
+          xcrun simctl io "$HST_PHONE" enumerate
+      - name: Wait until cold Safari can reach an inert fixture
+        run: python3 .github/scripts/warm-iphone-safari.py "$HST_PHONE" test-results/ios-voiceover
+      # This Safari instance belongs to the CI fixture. Give XCTest a new
+      # process so its URL launch can attach accessibility to the web view.
+      - name: Close Safari after its readiness check
+        run: xcrun simctl terminate "$HST_PHONE" com.apple.mobilesafari
+      - name: Record and check actual VoiceOver output in Mobile Safari
+        working-directory: ${{ runner.temp }}/consumer
+        run: node_modules/.bin/hoosaidthat-record ios --udid "$HST_PHONE" --audio-device "BlackHole 2ch" --results "$GITHUB_WORKSPACE/test-results/ios-voiceover"
+      - name: Hear the order and confirmation in the finished movie
+        run: python3 .github/scripts/verify-iphone-audio.py test-results/ios-voiceover
+      - name: Preserve XCTest results, MP4 and acoustic verification
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:

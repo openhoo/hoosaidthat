@@ -11,6 +11,7 @@ import { pathToFileURL, fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { createAdb, androidProbe, TalkBackCaptureError, TalkBackDriver } from './native/talkback.mjs';
 import { startTalkBackEmulator, validAvdName } from './native/android-emulator.mjs';
+import { startTalkBackMovie } from './native/talkback-movie.mjs';
 import { prepareTalkBackEmulator } from './native/prepare-talkback-emulator.mjs';
 import { startAndroidDevtools } from './native/android-devtools.mjs';
 import { startNativeServer } from './native/server.mjs';
@@ -26,7 +27,7 @@ export function parseTalkBackArguments(args) {
   if (!['doctor', 'start', 'run'].includes(command)) throw new Error('use doctor, start, or run; see --help');
   const options = { command, child: split < 0 ? [] : args.slice(split + 1) };
   const flags = split < 0 ? args.slice(1) : args.slice(1, split);
-  const allowed = new Set(['serial', 'avd', 'talkback-apk', 'token-file', 'control-port', 'cdp-port', 'locale']);
+  const allowed = new Set(['serial', 'avd', 'talkback-apk', 'token-file', 'control-port', 'cdp-port', 'locale', 'recording', 'tts-engine', 'reverse-port']);
   for (let index = 0; index < flags.length; index += 2) {
     const name = flags[index]?.slice(2), value = flags[index + 1];
     if (!flags[index]?.startsWith('--') || !allowed.has(name) || typeof value !== 'string' || !value || value.startsWith('--') || name in options) {
@@ -39,6 +40,9 @@ export function parseTalkBackArguments(args) {
   if (options.avd && !validAvdName(options.avd)) throw new Error('invalid --avd name');
   if (options.avd && command === 'doctor') throw new Error('doctor inspects an existing device; use --serial SERIAL');
   if (options['talkback-apk'] && !options.avd) throw new Error('--talkback-apk is only supported with --avd');
+  if (options.recording && (command !== 'run' || !options.avd || !/\.mp4$/i.test(options.recording))) throw new Error('--recording requires run --avd NAME and an MP4 output path');
+  if (options['tts-engine'] && (!options.recording || !/^[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)+$/.test(options['tts-engine']))) throw new Error('--tts-engine requires a recording and an installed Android TTS package name');
+  if (options['reverse-port'] && (command !== 'run' || !options.avd || !/^\d{1,5}$/.test(options['reverse-port']) || +options['reverse-port'] < 1 || +options['reverse-port'] > 65535)) throw new Error('--reverse-port requires run --avd NAME and a valid TCP port');
   if (command !== 'doctor' && !options['token-file']) throw new Error('--token-file is required');
   if (command !== 'run' && options.child.length) throw new Error('only run accepts a child command');
   for (const [name, fallback] of [['control-port', '3005'], ['cdp-port', '9227']]) {
@@ -103,8 +107,11 @@ async function main() {
 Connect a dedicated Android 14+ device or emulator running real TalkBack and
 Chrome. With --serial install both helper APKs and select the capture TTS engine first.
 With --avd build the helper APKs first; a disposable headless emulator is started from that AVD.
-The helper captures text synthesis requests and produces silent PCM.
+The helper captures TalkBack's text. Movie mode plays it through an installed Android voice.
 
+  --reverse-port PORT       expose the host's loopback TCP port inside the disposable AVD
+  --recording FILE.mp4      run --avd only: record the screen, guest sound and TalkBack transcript
+  --tts-engine PACKAGE      installed Android voice for the movie (default: the AVD's preferred voice)
   --serial SERIAL           connect to a prepared device; leave its settings unchanged
   --avd NAME                start/run with a read-only copy of an existing Android virtual device
   --talkback-apk PATH       trusted TalkBack APK to install only in the disposable emulator
@@ -186,7 +193,7 @@ async function runOnDevice(options, adb, signal) {
   const api = Number((await adb('shell', 'getprop', 'ro.build.version.sdk')).toString().trim());
   if (!Number.isInteger(api) || api < 34) throw new Error('TalkBack adapter requires Android 14 (API 34) or later');
   if (options.avd) {
-    await prepareTalkBackEmulator((...args) => { signal.throwIfAborted(); return adb(...args); }, options);
+    options.voiceEngine = await prepareTalkBackEmulator((...args) => { signal.throwIfAborted(); return adb(...args); }, options);
   }
   signal.throwIfAborted();
   const state = await androidProbe(adb);
@@ -202,8 +209,13 @@ async function runOnDevice(options, adb, signal) {
     if (error.code === 'EEXIST') throw new Error(`Android device lease is held; stop its bridge first. After a crash, remove ${lease}`);
     throw error;
   }
-  let forwardPort, devtools, driver, bridge, browser, bootstrap;
+  let reversePort, forwardPort, devtools, driver, bridge, browser, bootstrap;
   try {
+    if (options['reverse-port']) {
+      const port = 'tcp:' + Number(options['reverse-port']);
+      await adb('reverse', '--no-rebind', port, port);
+      reversePort = port;
+    }
     const forwarded = (await adb('forward', '--no-rebind', 'tcp:0', 'localabstract:chrome_devtools_remote')).toString().trim();
     if (!/^\d+$/.test(forwarded) || +forwarded < 1 || +forwarded > 65535) throw new Error('adb did not allocate a Chrome debugging forward');
     forwardPort = forwarded;
@@ -231,10 +243,19 @@ async function runOnDevice(options, adb, signal) {
     } else {
       const command = options.child.length ? options.child : [process.execPath, createRequire(import.meta.url).resolve('@playwright/test/cli'),
         'test', '--config', fileURLToPath(new URL('../oracle/android-talkback/playwright.config.mjs', import.meta.url))];
-      process.exitCode = await runTalkBackConsumer(command, { signal, env: { ...process.env,
+      const movie = options.recording ? await startTalkBackMovie({ output: options.recording, serial: options.serial,
+        adb, driver, engine: options.voiceEngine, version: state.version, signal }) : undefined;
+      try {
+        process.exitCode = await runTalkBackConsumer(command, { signal, env: { ...process.env, ANDROID_SERIAL: options.serial,
         SCREEN_READER: 'talkback', SCREEN_READER_LOCALE: options.locale,
         HOOSAIDTHAT_TALKBACK_CONTROL_ENDPOINT: bridge.endpoint, HOOSAIDTHAT_TALKBACK_CDP_ENDPOINT: devtools.endpoint,
         HOOSAIDTHAT_TALKBACK_CONTROL_TOKEN: token } });
+        await movie?.finish();
+      } catch (error) {
+        if (signal.aborted && signal.reason?.signal) {
+          process.exitCode = signal.reason.signal === 'SIGINT' ? 130 : 143;
+        } else throw error;
+      } finally { await movie?.close(); }
     }
   } finally {
     try {
@@ -244,6 +265,7 @@ async function runOnDevice(options, adb, signal) {
       await bootstrap?.close().catch(() => {});
       await browser?.close().catch(() => {});
       await devtools?.close();
+      if (reversePort) await adb('reverse', '--remove', reversePort).catch(() => {});
       if (forwardPort) await adb('forward', '--remove', `tcp:${forwardPort}`).catch(() => {});
       await rm(lease, { recursive: true, force: true });
     }

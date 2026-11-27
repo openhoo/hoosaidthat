@@ -1,6 +1,6 @@
 {
   "name": "@openhoo/hoosaidthat",
-  "version": "0.1.5",
+  "version": "0.1.6-rc.2",
   "description": "Real screen-reader testing fixtures, assertions, and visual evidence for Playwright.",
   "type": "module",
   "license": "MIT",
@@ -53,7 +53,8 @@
     "hoosaidthat-voiceover-macos": "./scripts/voiceover-macos.mjs",
     "hoosaidthat-hoovda-doctor": "./scripts/hoovda-doctor.mjs",
     "hoosaidthat-voiceover-ios": "./scripts/voiceover-ios.mjs",
-    "hoosaidthat-windows-reader": "./scripts/windows-reader-docker.mjs"
+    "hoosaidthat-windows-reader": "./scripts/windows-reader-docker.mjs",
+    "hoosaidthat-record": "./scripts/record-mobile.mjs"
   },
   "types": "./dist/index.d.ts",
   "files": [
@@ -79,6 +80,7 @@
     "scripts/native/server.mjs",
     "scripts/native/token.mjs",
     "scripts/native/talkback.mjs",
+    "scripts/native/talkback-movie.mjs",
     "scripts/native/android-devtools.mjs",
     "scripts/native/android-emulator.mjs",
     "scripts/native/prepare-talkback-emulator.mjs",
@@ -104,7 +106,12 @@
     "scripts/windows-reader-docker.mjs",
     "oracle/windows-jaws",
     "!oracle/windows-jaws/tests/**",
-    "scripts/native/focus-windows.ps1"
+    "scripts/native/focus-windows.ps1",
+    "scripts/record-mobile.mjs",
+    "scripts/mobile-scenario.mjs",
+    "scripts/native/ios-recording.mjs",
+    "scripts/native/ios-loopback.c",
+    "scripts/native/ios-manual.mjs"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json && tsc -p tsconfig.parity.json && node scripts/build-parity.mjs",

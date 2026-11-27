@@ -31,6 +31,7 @@ test('the npm package ships the iPhone runner and every source needed by the XCT
   const [manifest] = JSON.parse(packed.stdout);
   const paths = new Set(manifest.files.map(item => item.path));
   for (const file of [
+    'scripts/record-mobile.mjs', 'scripts/native/ios-manual.mjs', 'scripts/native/ios-recording.mjs', 'scripts/native/ios-loopback.c',
     'scripts/voiceover-ios.mjs', 'scripts/voiceover-ios.d.mts', 'oracle/ios-voiceover/UITestHost.swift', 'oracle/ios-voiceover/VoiceOverTests.swift',
     'oracle/ios-voiceover/HSTVoiceOver.h', 'oracle/ios-voiceover/HSTVoiceOver.m',
     'oracle/ios-voiceover/HooSaidThat.xcodeproj/project.pbxproj',
@@ -155,4 +156,65 @@ test('the transcript binds actual spoken text and every navigation attempt to th
     mutate(invalid);
     assert.throws(() => validateTranscript(scenario, invalid), mutate.toString());
   }
+});
+
+test('native target and activation are tied to their own transcript; activation never repeats', () => {
+  const scenario = validateScenario({ bundleId: 'com.example.shop', steps: [{ action: 'activate', expect: 'Receipt' }] });
+  const transcript = { version: 1, completed: true, bundleId: scenario.bundleId, events: [{ step: 0, action: 'activate', utterance: 'Receipt, heading' }] };
+  validateTranscript(scenario, transcript);
+  assert.throws(() => validateTranscript(scenario, { ...transcript, bundleId: 'com.example.other' }));
+  assert.throws(() => validateScenario({ ...scenario, url }));
+  assert.throws(() => validateScenario({ ...scenario, bundleId: '' }));
+  assert.doesNotThrow(() => validateScenario({ ...scenario, steps: [{ action: 'type', text: 'Sample' }] }));
+  for (const step of [{ action: 'type' }, { action: 'type', text: '' }, { action: 'forward', text: 'Sample' }, { action: 'type', text: 'S', until: 'x', maxMoves: 2 }]) {
+    assert.throws(() => validateScenario({ ...scenario, steps: [step] }));
+  }
+  assert.throws(() => validateScenario({ ...scenario, steps: [{ action: 'activate', until: 'Receipt', maxMoves: 2 }] }));
+});
+
+test('recording accepts an isolated loopback, never a microphone or the host default output', async () => {
+  const { selectLoopback } = await import('../native/ios-recording.mjs');
+  const loop = { _name: 'BlackHole 2ch', coreaudio_device_transport: 'coreaudio_device_type_virtual', coreaudio_device_input: 2, coreaudio_device_output: 2 };
+  const mic = { ...loop, _name: 'Microphone', coreaudio_device_transport: 'coreaudio_device_type_builtin' };
+  const profile = devices => ({ SPAudioDataType: [{ _items: devices }] });
+  assert.equal(selectLoopback(profile([mic, loop])), loop._name);
+  assert.throws(() => selectLoopback(profile([mic]), mic._name));
+  for (const name of ['default', '0', '6 virtual inputs']) assert.throws(() => selectLoopback(profile([{ ...loop, _name: name }])));
+  assert.throws(() => selectLoopback(profile([loop, { ...mic, _name: loop._name + ' microphone' }]), loop._name));
+  assert.throws(() => selectLoopback(profile([{ ...loop, coreaudio_default_audio_output_device: 'spaudio_yes' }]), loop._name));
+  assert.throws(() => selectLoopback(profile([loop, { ...loop, _name: 'Other' }])));
+});
+
+test('media verification refuses a mute AAC track, a video without audio, and accepts audible synchronized tracks', async t => {
+  if (spawnSync('ffmpeg', ['-version'], { stdio: 'ignore' }).status !== 0 || spawnSync('ffprobe', ['-version'], { stdio: 'ignore' }).status !== 0) {
+    t.skip('FFmpeg not installed'); return;
+  }
+  const { mkdtemp, rm } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { inspectMovie } = await import('../native/ios-recording.mjs');
+  const dir = await mkdtemp(join(tmpdir(), 'hst-ios-media-'));
+  try {
+    for (const [name, source] of [['tone', 'sine=frequency=700'], ['silent', 'anullsrc'], ['no-audio', null]]) {
+      const file = join(dir, name + '.mp4');
+      const args = ['-nostdin', '-loglevel', 'error', '-f', 'lavfi', '-i', 'color=size=64x64:rate=24'];
+      if (source) args.push('-f', 'lavfi', '-i', source, '-c:a', 'aac');
+      const result = spawnSync('ffmpeg', [...args, '-c:v', 'libx264', '-t', '1', file], { encoding: 'utf8' });
+      assert.equal(result.status, 0, result.stderr);
+      if (name === 'tone') assert.equal((await inspectMovie(file)).width, 64);
+      else await assert.rejects(inspectMovie(file), name === 'silent' ? /No usable simulator audio/ : /screen track/);
+    }
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test('the simulator output route must match the loopback, including the dedicated-host opt-in', async () => {
+  const { verifyAudioRoute } = await import('../native/ios-recording.mjs');
+  const device = 'BlackHole [2ch]';
+  const profile = { SPAudioDataType: [{ _items: [{ _name: device, coreaudio_default_audio_output_device: 'spaudio_yes' }] }] };
+  const ports = route => 'Guest Audio Output -> ' + route + '\n    BlackHole_UID: ' + device + ' (2 In / 2 Out)\n';
+  verifyAudioRoute(ports('Host Audio Device #BlackHole_UID'), device, profile, false);
+  verifyAudioRoute(ports('Default Host Audio Device'), device, profile, true);
+  assert.throws(() => verifyAudioRoute(ports('Default Host Audio Device'), device, profile, false));
+  assert.throws(() => verifyAudioRoute(ports('Default Host Audio Device'), device, {}, true));
+  assert.throws(() => verifyAudioRoute(ports('Host Audio Device #Other'), device, profile, true));
 });

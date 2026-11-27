@@ -7,7 +7,7 @@
          </BuildActionEntry>
       </BuildActionEntries>
    </BuildAction>
-   <TestAction buildConfiguration="Debug" shouldUseLaunchSchemeArgsEnv="NO">
+   <TestAction systemAttachmentLifetime="keepAlways" preferredScreenCaptureFormat="screenRecording" buildConfiguration="Debug" shouldUseLaunchSchemeArgsEnv="NO">
       <Testables>
          <TestableReference skipped="NO" parallelizable="NO">
             <BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="A00000000000000000000005" BuildableName="HooSaidThatUITests.xctest" BlueprintName="HooSaidThatUITests" ReferencedContainer="container:HooSaidThat.xcodeproj"/>

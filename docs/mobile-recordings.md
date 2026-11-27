@@ -1,0 +1,156 @@
+# Record a feature with VoiceOver or TalkBack
+
+Use `hoosaidthat-record` from a project that has this SDK and its supported
+Playwright peer installed. Both platforms can follow the same web navigation
+scenario. Each invocation makes its own run directory. The MP4 contains device
+pixels and routed audio, including sounds your app makes. For automated scenarios,
+the separate transcript is what the screen reader reported as text.
+
+## Record your first feature
+
+Start your site, then save this example as `checkout.json`. Replace the URL
+and labels with ones from your page. A local development server can stay bound
+to loopback when it runs on the same computer as the emulator.
+
+```json
+{
+  "url": "http://127.0.0.1:8080/checkout",
+  "readyText": "Confirm order",
+  "steps": [
+    { "action": "forward", "until": "Order summary", "maxMoves": 30 },
+    { "action": "forward", "expect": "Confirm order" },
+    { "action": "backward", "expect": "Order summary" }
+  ]
+}
+```
+
+```sh
+npx --no-install hoosaidthat-record ios --scenario checkout.json --audio-device "BlackHole 2ch" --results films
+npx --no-install hoosaidthat-record android --scenario checkout.json --avd HST_TalkBack_API35 --results films
+```
+
+Open `recording.mp4` in the run directory printed by the command. Omit
+`--scenario` to try the packaged smoke test. Each requested recording requires
+a working audio source; the transcript is never read out afterward to make
+the soundtrack.
+
+- **iPhone:** use macOS with Xcode 27+, a dedicated iPhone simulator with iOS
+  27+, FFmpeg/ffprobe, and a virtual audio loopback. Route the simulator's
+  sound output to the named loopback in Device Hub. Keep the Mac's default
+  audio output separate so other apps aren't mixed into the movie. To select
+  among iPhones, run `npx --no-install hoosaidthat-voiceover-ios doctor` and
+  pass `--udid UUID`. A dedicated Mac can opt into recording its entire
+  output via the named loopback with `--dedicated-mac-output`. See
+  [iPhone setup and scenarios](ios-voiceover.md).
+- **Android:** create the [TalkBack AVD](../oracle/android-talkback/README.md)
+  with Chrome, TalkBack, an installed speech engine, and hardware keyboard
+  support. Install scrcpy and FFmpeg and put them on PATH alongside the
+  Android SDK and JDK tools. The recorder builds the two helpers if needed.
+  Use `--tts-engine PACKAGE` to select another installed voice engine or
+  `--locale de-DE` for an AVD already configured for German. A loopback web
+  scenario forwards only its explicit URL port into the disposable emulator.
+
+For both readers, `forward` and `backward` move in reading order; `current`
+reads the selection. Match a literal substring with `expect`, or repeat a
+movement with `until` and a limit of 1–50 moves. Reader output and element
+order can differ across platforms. If they do, use a separate scenario rather
+than weakening the expected text. `readyText` is a page readiness check; it
+cannot satisfy a speech expectation.
+
+For a state change, navigate to a button with an expectation, use
+`{ "action": "activate" }`, then check the result. Android sends the TalkBack
+activation shortcut. On iOS this is an XCTest double tap followed by a
+VoiceOver observation. The [iPhone guide](ios-voiceover.md) also covers typing
+and starting an installed app by bundle ID.
+
+## Record any iPhone feature by hand
+
+Open your iPhone simulator in **Device Hub**, launch the app or site, and leave
+it on the screen where the movie should start. Choose **Device > Sound >
+Sound Output** and select a dedicated virtual loopback, such as BlackHole 2ch.
+Keep your Mac’s output and system alert sounds on another device. Use
+`xcrun simctl list devices booted` to find the simulator’s UUID, then run:
+
+```sh
+npx --no-install hoosaidthat-record ios --manual --udid "$UDID" --audio-device "BlackHole 2ch" --results films
+```
+
+Wait for **Recording now**, then drive the iPhone in Device Hub. You can
+navigate a native app, switch apps, type, or explore a web feature with
+VoiceOver gestures. Press **Enter** in the terminal or **Ctrl-C** to save.
+For a timed recording, add `--duration 30` (1–3600 seconds); this is required
+without an interactive terminal. The duration starts when both recorders
+are ready. Let the final announcement finish before stopping.
+
+The command checks the selected simulator’s audio route and enables VoiceOver
+through Device Hub if needed. It restores VoiceOver to its original state.
+Open `recording.mp4` to verify the words you expected to hear. The adjacent
+`report.json` identifies the simulator, route, VoiceOver state and media
+checks. Manual recording does not produce a transcript or require XCTest.
+
+## Record any Android feature by hand
+
+On a computer with a graphical desktop and scrcpy installed, open a window for
+the disposable emulator:
+
+```sh
+npx --no-install hoosaidthat-record android --manual --avd HST_TalkBack_API35 --results films
+```
+
+Use the window to navigate apps or websites with TalkBack. You can start directly in an
+installed app with `--app com.android.settings`. To open a site served by your
+computer, add `--reverse-port 8080` and visit `http://127.0.0.1:8080` in Chrome.
+Let TalkBack finish the last announcement, then **close the window** to save
+the MP4 and its TalkBack transcript. For a timed session, add `--duration 30`.
+Closing the window or reaching the time limit stops the disposable emulator.
+A session with no audible TalkBack request fails instead of saving a silent film.
+
+## Record a longer Android flow
+
+The JSON runner also supports `activate`, `nextButton`, `previousButton`,
+`nextHeading`, `previousHeading`, `nextLink` and `previousLink` on Android.
+For logins, typing, navigation between pages or existing regression tests,
+run the desired Playwright test as the child. For a site served by the host on port 8080:
+
+```sh
+npx --no-install hoosaidthat-record android --avd HST_TalkBack_API35 --reverse-port 8080 -- \
+  npx playwright test --config android.config.ts --grep "change a booking"
+```
+
+Use one worker, `screenReader: 'talkback'`, `runtime: 'external'`, and the
+HooSaidThat test fixture. The child receives the device endpoints. Use a site
+the emulator can reach. Omit `--reverse-port` for a remote site. The movie covers the child command, so select one test to get
+one feature per movie.
+
+## Try an example that comes with the SDK
+
+From your npm project, serve the [sample booking page](examples/mobile/booking/index.html):
+
+```sh
+python3 -m http.server 8080 --bind 127.0.0.1 --directory node_modules/@openhoo/hoosaidthat/docs/examples/mobile/booking
+```
+
+In another terminal, record the packaged [booking scenario](examples/mobile/booking/booking.json):
+
+```sh
+npx --no-install hoosaidthat-record android --avd HST_TalkBack_API35 --scenario node_modules/@openhoo/hoosaidthat/docs/examples/mobile/booking/booking.json
+```
+
+For a **native Android app**, supply a child script or test driver. The recorder
+sets `ANDROID_SERIAL` to the emulator it owns. For example, this
+[Settings walkthrough](examples/mobile/android-settings.mjs) opens Display
+settings and goes back. TalkBack speaks as each native screen appears.
+
+```sh
+npx --no-install hoosaidthat-record android --avd HST_TalkBack_API35 -- node node_modules/@openhoo/hoosaidthat/docs/examples/mobile/android-settings.mjs
+```
+
+## What the files prove
+
+The transcripts come directly from VoiceOver's XCTest service or TalkBack's
+TTS requests. The soundtrack comes from the simulator output on iOS and the
+guest on Android. Neither track isolates the reader from your app's other
+sounds. Use a quiet test page or app when the voice alone matters. Inspect
+the actual movie before sharing it: screens, speech, and transcripts can all
+contain the data used by the test. A simulator recording establishes behavior
+for that device configuration; test a physical phone separately if required.

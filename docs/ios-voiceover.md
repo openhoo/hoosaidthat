@@ -1,4 +1,4 @@
-# Test a website with VoiceOver on an iPhone simulator
+# Test and record features with VoiceOver on an iPhone simulator
 
 Use a dedicated iPhone simulator with iOS 27 or later and Xcode 27 or later.
 In Xcode Settings → Components, install an iOS Simulator runtime; create a
@@ -59,6 +59,81 @@ An `expect` is a case-sensitive literal substring of one utterance. On a
 movement, `until` repeats that movement until the substring appears. Supply
 `maxMoves` (1–50); exhausting the limit fails. Without an expectation, the
 step still requires nonempty speech. A scenario accepts 1–100 steps.
+
+## Record a feature with real simulator sound
+
+Install FFmpeg (including `ffprobe`) on the Mac and a virtual loopback audio
+device such as BlackHole 2ch. Open the iPhone in Device Hub and select that
+device under **Device → Sound → Sound Output**. Keep the Mac’s own sound output
+on its speakers or headphones. Reserve the loopback for this simulator and stop
+other apps playing to it. Complete Safari’s first-run prompts on this simulator.
+
+Keep the simulator booted and visible in Device Hub, then run:
+
+```sh
+npx --no-install hoosaidthat-voiceover-ios record --udid <UDID> \
+  --scenario checkout.json --audio-device "BlackHole 2ch" --results ./recordings
+```
+
+The run directory contains **recording.mp4** (H.264 video, AAC audio),
+**transcript.json** and **report.json**. The recording starts after the target
+is ready and VoiceOver has initialized. It ends after the last step. Recording
+paces navigation to let speech finish; long descriptions or slow speech settings
+can still be interrupted. Transcript events include the action's elapsed time
+from the start of the scenario. The report identifies the selected audio device,
+duration, frame size and measured peak volume.
+
+Optionally specify `initialFocusText` to touch the center of that exact label
+once with VoiceOver on before the movie starts. Choose a noninteractive heading
+as the starting point. Without this option no initial touch is sent. The
+`readyText` check never touches the element. Recording uses actual
+one-finger right/left flicks for forward/backward and queries native VoiceOver
+for the resulting utterance. The transcript-only `run` command uses Apple's
+service navigation methods.
+
+The movie contains the simulator's audio output, which can include VoiceOver,
+app sounds and other device sounds. The transcript records Apple's returned
+utterances separately. The runner rejects missing tracks and silence; it does
+not transcribe the audio to prove each word is audible. Use a quiet feature
+with a distinctive phrase to confirm routing when setting up a new Mac.
+With the default settings, the physical microphone and default Mac output cannot be selected. If just one
+eligible loopback is installed, you can omit `--audio-device`. On a disposable
+Mac used only for this run, you may instead select the loopback as the Mac's
+default output, leave Device Hub on System, and add `--dedicated-mac-output`
+with an explicit `--audio-device`. That mode records **all sounds routed to
+that Mac output**; the report labels it accordingly. Microphones remain
+ineligible. Before recording, the runner checks that the simulator's output is
+actually routed to that device. Ctrl-C requests XCTest teardown and stops both
+recorders. An unresponsive XCTest process may be unable to restore VoiceOver;
+check that setting on a pre-booted simulator after a forced interruption.
+
+For an installed native app, use its bundle ID instead of a URL:
+
+```json
+{
+  "bundleId": "com.example.shop",
+  "readyText": "Cart",
+  "steps": [
+    { "action": "forward", "until": "Checkout", "maxMoves": 20 },
+    { "action": "activate" },
+    { "action": "forward", "until": "Shipping address", "maxMoves": 10 }
+  ]
+}
+```
+
+`activate` double-taps the visible item whose accessibility label matches the
+start of VoiceOver's current utterance. If a control and its label share a
+name, the runner also checks the spoken role (for example, “Text field” in
+English). It stops before tapping if the target is still ambiguous. VoiceOver may still report the previous
+utterance immediately after activation. Assert a distinctive result on the
+next navigation step when the screen moves focus or changes its labels. The
+runner stops if the scenario leaves the target app. It does not install apps.
+After activating a text field, `{ "action": "type", "text": "Sample" }` types
+through XCTest and reads current focus. Use sample data: typed text is included
+in the scenario report and may be spoken or visible in the recording.
+
+The programmatic equivalent is `recordIPhoneVoiceOver(scenario, { udid,
+audioDevice, resultsDirectory })` from `@openhoo/hoosaidthat/ios`.
 
 ## Use a Playwright test
 
@@ -128,8 +203,14 @@ on the simulated iPhone. It restores the simulator's prior VoiceOver setting
 during teardown. The CLI shuts down a simulator that it booted. Safari history,
 tabs and site data can remain on that simulator. Host VoiceOver is not required.
 
-This runner tests web navigation and the service's returned speech text.
-It does not access the acoustic output, braille, rotor gestures, or a stream
-of unsolicited live-region announcements. It runs independently of the desktop
+The `run` command checks the service's returned speech text. The `record`
+command also captures the simulator screen and routed audio. Neither command
+captures braille, rotor gestures, or a stream of unsolicited live-region text. It runs independently of the desktop
 Chrome/Playwright fixture; `screenReader: 'voiceover'` still selects the Mac
 adapter. A simulator result does not qualify a physical iPhone.
+
+The recorder opens the selected loopback by device ID and reads its PCM samples
+through CoreAudio. Both scripted and manual recordings compare the received
+audio duration with elapsed capture time. If the loopback drops a substantial
+part of a feature, the command fails instead of saving a shortened movie.
+The report includes both durations: `rawAudioSeconds` and `captureWallSeconds`.
