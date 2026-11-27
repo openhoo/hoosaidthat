@@ -1,8 +1,10 @@
 # Feature recordings with VoiceOver and TalkBack
 
+**[Try the RC.2 recorder](TRY-RC2.md)** to record your own app or website by hand. The four examples below include real simulator audio, English captions, and notes on the builds used to make them.
+
 ## Confirm a checkout in iPhone Safari
 
-[Play or download the 46-second iPhone checkout MP4](https://raw.githubusercontent.com/openhoo/hoosaidthat/examples/mobile-recordings/examples/recordings/mobile/ios-voiceover-checkout.mp4) · [English captions](ios-voiceover-checkout.en.vtt).
+[Play or download the 46-second iPhone checkout MP4](https://raw.githubusercontent.com/openhoo/hoosaidthat/857056f64847a96ed6002add0e15eacccef9c78f/examples/recordings/mobile/ios-voiceover-checkout.mp4) · [English captions](https://raw.githubusercontent.com/openhoo/hoosaidthat/857056f64847a96ed6002add0e15eacccef9c78f/examples/recordings/mobile/ios-voiceover-checkout.en.vtt).
 
 VoiceOver reads the **Confirm order** button, moves back to **Order summary**, then forward to the button. A double tap activates the button. On the next forward movement you hear **Receipt ready** and see the focus outline around the new label. The letters and digits in the labels identify this synthetic run.
 
@@ -16,7 +18,7 @@ This is the unedited MP4 written by the installed [candidate archive](https://gi
 
 ## Book a visit in a browser
 
-[Download or play the 31-second MP4](https://raw.githubusercontent.com/openhoo/hoosaidthat/examples/mobile-recordings/examples/recordings/mobile/android-talkback-booking.mp4). [English captions](android-talkback-booking.en.vtt) are available separately. The green rectangle is TalkBack’s current focus. At 0:25 the button has been activated and TalkBack says “Visit reserved.” The video includes audio from the Android 15 emulator.
+[Download or play the 31-second MP4](https://raw.githubusercontent.com/openhoo/hoosaidthat/857056f64847a96ed6002add0e15eacccef9c78f/examples/recordings/mobile/android-talkback-booking.mp4). [English captions](https://raw.githubusercontent.com/openhoo/hoosaidthat/857056f64847a96ed6002add0e15eacccef9c78f/examples/recordings/mobile/android-talkback-booking.en.vtt) are available separately. The green rectangle is TalkBack’s current focus. At 0:25 the button has been activated and TalkBack says “Visit reserved.” The video includes audio from the Android 15 emulator.
 
 | Time | TalkBack output |
 | --- | --- |
@@ -27,11 +29,11 @@ This is the unedited MP4 written by the installed [candidate archive](https://gi
 | 0:20 | Reserve Tuesday. Button. Press Alt + Enter to activate. |
 | 0:25 | Visit reserved. |
 
-The [sample page](../../../docs/examples/mobile/booking/index.html) and [scenario](../../../docs/examples/mobile/booking/booking.json) ship with the recorder. Follow the [recording guide](../../../docs/mobile-recordings.md) to record your own feature. This movie was recorded from a clean installation of the [CI package](https://github.com/openhoo/hoosaidthat/actions/runs/45968512363), archive SHA-256 `395bac471f6f51783ba6e95da14f05d5f9731f7fd316dcf87f93ab8d05b90e06`. The key phrases were checked against both the TalkBack transcript and speech recognition on the MP4. The page and booking are synthetic.
+The [sample page](https://github.com/openhoo/hoosaidthat/blob/2d99883002316be08700f6763303c72539929ac6/docs/examples/mobile/booking/index.html) and [scenario](https://github.com/openhoo/hoosaidthat/blob/2d99883002316be08700f6763303c72539929ac6/docs/examples/mobile/booking/booking.json) ship with the recorder. Follow the [recording guide](https://github.com/openhoo/hoosaidthat/blob/2d99883002316be08700f6763303c72539929ac6/docs/mobile-recordings.md) to record your own feature. This movie was recorded from a clean installation of the [CI package](https://github.com/openhoo/hoosaidthat/actions/runs/45968512363), archive SHA-256 `395bac471f6f51783ba6e95da14f05d5f9731f7fd316dcf87f93ab8d05b90e06`. The key phrases were checked against both the TalkBack transcript and speech recognition on the MP4. The page and booking are synthetic.
 
 ## Visit Display settings in a native app
 
-[Download or play the 13-second MP4](https://raw.githubusercontent.com/openhoo/hoosaidthat/examples/mobile-recordings/examples/recordings/mobile/android-talkback-settings.mp4) · [English captions](android-talkback-settings.en.vtt).
+[Download or play the 13-second MP4](https://raw.githubusercontent.com/openhoo/hoosaidthat/857056f64847a96ed6002add0e15eacccef9c78f/examples/recordings/mobile/android-talkback-settings.mp4) · [English captions](https://raw.githubusercontent.com/openhoo/hoosaidthat/857056f64847a96ed6002add0e15eacccef9c78f/examples/recordings/mobile/android-talkback-settings.en.vtt).
 
 A driver opens Android Settings, opens **Display & touch**, and returns to Settings. The green TalkBack outline moves from the profile button to the back button. The recording includes the emulator’s volume announcement.
 
@@ -44,11 +46,11 @@ A driver opens Android Settings, opens **Display & touch**, and returns to Setti
 | 0:11 | Navigate up. Button. |
 | 0:12 | Settings. |
 
-See the [native driver example](../../../docs/examples/mobile/android-settings.mjs). This movie came from an installed development archive built at `6e2d679` on Android 15 with TalkBack 15.0. The words “Settings,” “Display and touch,” and “Navigate up” appear in both speech recognition on the saved audio and TalkBack’s own transcript.
+See the [native driver example](https://github.com/openhoo/hoosaidthat/blob/2d99883002316be08700f6763303c72539929ac6/docs/examples/mobile/android-settings.mjs). This movie came from an installed development archive built at `6e2d679` on Android 15 with TalkBack 15.0. The words “Settings,” “Display and touch,” and “Navigate up” appear in both speech recognition on the saved audio and TalkBack’s own transcript.
 
 ## Browse a museum booking on iPhone
 
-[Download or play the 35-second iPhone MP4](https://raw.githubusercontent.com/openhoo/hoosaidthat/examples/mobile-recordings/examples/recordings/mobile/ios-voiceover-museum.mp4) · [English captions](ios-voiceover-museum.en.vtt) · [Sample UIKit app and runnable scenario](ios-museum/README.md).
+[Download or play the 35-second iPhone MP4](https://raw.githubusercontent.com/openhoo/hoosaidthat/857056f64847a96ed6002add0e15eacccef9c78f/examples/recordings/mobile/ios-voiceover-museum.mp4) · [English captions](https://raw.githubusercontent.com/openhoo/hoosaidthat/857056f64847a96ed6002add0e15eacccef9c78f/examples/recordings/mobile/ios-voiceover-museum.en.vtt) · [Sample UIKit app and runnable scenario](https://github.com/openhoo/hoosaidthat/blob/857056f64847a96ed6002add0e15eacccef9c78f/examples/recordings/mobile/ios-museum/README.md).
 
 VoiceOver moves forward to the appointment description and the button, then back to the heading. Listen for the following words and watch the black focus outline move with them:
 
