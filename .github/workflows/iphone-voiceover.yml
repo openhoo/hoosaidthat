@@ -23,7 +23,7 @@ jobs:
     env:
       HST_IOS_VERSION: '27.0'
       HST_IOS_KEEP_FAILED_AUDIO: '1' # Only this disposable runner and its quiet synthetic fixture.
-      DEVELOPER_DIR: /Applications/Xcode_27.1.app/Contents/Developer
+      DEVELOPER_DIR: /Applications/Xcode_27.2.app/Contents/Developer
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
@@ -54,23 +54,29 @@ jobs:
       - name: Install an isolated simulator audio loopback on the disposable Mac
         run: |
           command -v ffmpeg || brew install ffmpeg
-          brew install switchaudio-osx
           brew install --cask blackhole-2ch
           sudo killall coreaudiod || true
-          for _ in {1..20}; do
-            system_profiler SPAudioDataType -json | jq -e 'any(.SPAudioDataType[]._items[]; ._name == "BlackHole 2ch")' && break
-            sleep 1
-          done
-          SwitchAudioSource -t output -s "BlackHole 2ch"
-          SwitchAudioSource -t output -c
       - name: Present the test iPhone in Device Hub
         run: |
           xcrun simctl boot "$HST_PHONE"
           xcrun simctl bootstatus "$HST_PHONE"
           open -a "$DEVELOPER_DIR/../Applications/DeviceHub.app" "devices://device/open?id=$HST_PHONE"
+      - name: Route only the test iPhone to BlackHole
+        run: |
+          set -eu
+          # CoreAudio can take a moment to register the new virtual device.
+          for _ in {1..12}; do
+            ports=$(xcrun simctl io "$HST_PHONE" enumerate)
+            device=$(awk -F ': ' '$2 ~ /^BlackHole 2ch \([0-9]+ In \/ [0-9]+ Out\)/ { sub(/^[[:space:]]+/, "", $1); print $1 }' <<< "$ports")
+            [[ -n "$device" ]] && break
+            sleep 2
+          done
+          [[ -n "$device" && "$device" != *$'\n'* ]] || { echo 'Expected one BlackHole 2ch device.' >&2; exit 1; }
+          xcrun devicectl device settings audio --device "$HST_PHONE" --output-device "$device" --volume 80 --timeout 90
+          xcrun simctl io "$HST_PHONE" enumerate
       - name: Record and check actual VoiceOver output in Mobile Safari
         working-directory: ${{ runner.temp }}/consumer
-        run: node_modules/.bin/hoosaidthat-record ios --udid "$HST_PHONE" --audio-device "BlackHole 2ch" --dedicated-mac-output --results "$GITHUB_WORKSPACE/test-results/ios-voiceover"
+        run: node_modules/.bin/hoosaidthat-record ios --udid "$HST_PHONE" --audio-device "BlackHole 2ch" --results "$GITHUB_WORKSPACE/test-results/ios-voiceover"
       - name: Preserve XCTest results and transcript
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
