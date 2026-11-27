@@ -85,3 +85,5 @@ npx --no-install hoosaidthat-record android --avd "$AVD" --results films -- sh -
 The recorder supplies `ANDROID_SERIAL` for its disposable emulator. The commands install and open your build there. Drive the feature in the window, let TalkBack finish, then close the window to save. HooSaidThat records device audio separately, so the control window uses `--no-audio`.
 
 On either platform, open `recording.mp4` in the run directory printed by the command under `films/`. To replay a feature automatically, see the [scenario guide](https://github.com/openhoo/hoosaidthat/blob/2d99883002316be08700f6763303c72539929ac6/docs/mobile-recordings.md) and [booking example](https://github.com/openhoo/hoosaidthat/blob/2d99883002316be08700f6763303c72539929ac6/docs/examples/mobile/booking/booking.json).
+
+In a scripted iPhone Safari run, if XCTest reports that Safari has not loaded accessibility before the first feature action, close only Safari on the selected simulator and run the script again. Manual recording does not use XCTest.
