@@ -48,6 +48,15 @@ Check and install either tarball with the commands above.
 
 **iPhone with VoiceOver.** Follow the [iPhone setup](https://github.com/openhoo/hoosaidthat/blob/2d99883002316be08700f6763303c72539929ac6/docs/ios-voiceover.md) on a Mac with Xcode 27+, a booted iPhone simulator running iOS 27+, FFmpeg and an audio loopback. In Device Hub, select the loopback under **Device → Sound → Sound Output** and leave the Mac’s own output on its usual device. Open your app or website. Set `UDID` to the iPhone identifier from `xcrun simctl list devices booted`. Use your loopback’s actual name in the command.
 
+To record your own iOS build, use a `.app` built for the iOS Simulator. Install and open it on the same booted iPhone **before** starting the recorder:
+
+```sh
+xcrun simctl install "$UDID" /path/to/MyApp.app
+xcrun simctl launch "$UDID" com.example.MyApp
+```
+
+Use your app’s bundle ID, or open the installed app from the home screen. Then start recording:
+
 ```sh
 npx --no-install hoosaidthat-record ios --manual --udid "$UDID" --audio-device "BlackHole 2ch" --results films
 ```
@@ -61,5 +70,18 @@ npx --no-install hoosaidthat-record android --manual --avd "$AVD" --app com.andr
 ```
 
 Navigate in the scrcpy window. Let TalkBack finish speaking, then **close the window** to save. You can also add `--duration 30` for a timed recording. Omit `--app com.android.settings` to choose the app yourself.
+
+**Record your own Android APK.** Set `APK` to your signed debug or release APK and `APP_ID` to the Android application ID. From the project where you installed the recorder, run:
+
+```sh
+export APK="/absolute/path/to/app-debug.apk"
+export APP_ID="com.example.myapp"
+npx --no-install hoosaidthat-record android --avd "$AVD" --results films -- sh -ec '
+  adb -s "$ANDROID_SERIAL" install -r "$APK"
+  exec scrcpy --serial "$ANDROID_SERIAL" --no-audio --no-clipboard-autosync --start-app="$APP_ID"
+'
+```
+
+The recorder supplies `ANDROID_SERIAL` for its disposable emulator. The commands install and open your build there. Drive the feature in the window, let TalkBack finish, then close the window to save. HooSaidThat records device audio separately, so the control window uses `--no-audio`.
 
 On either platform, open `recording.mp4` in the run directory printed by the command under `films/`. To replay a feature automatically, see the [scenario guide](https://github.com/openhoo/hoosaidthat/blob/2d99883002316be08700f6763303c72539929ac6/docs/mobile-recordings.md) and [booking example](https://github.com/openhoo/hoosaidthat/blob/2d99883002316be08700f6763303c72539929ac6/docs/examples/mobile/booking/booking.json).
