@@ -19,6 +19,7 @@ jobs:
     timeout-minutes: 45
     env:
       HST_IOS_VERSION: '27.0'
+      HST_IOS_KEEP_FAILED_AUDIO: '1' # Only this disposable runner and its quiet synthetic fixture.
       DEVELOPER_DIR: /Applications/Xcode_27.1.app/Contents/Developer
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5

@@ -112,6 +112,7 @@ export async function createRecording(output, udid, audioDevice, dedicatedMac = 
   const scratch = await mkdtemp(join(output, '.recording-'));
   const key = '/' + randomUUID();
   const rawAudio = join(scratch, 'route.wav');
+  let finalized = false;
   let audio, state = 'idle', audioAt, fault, pending, stopPromise, closing;
   const stop = (incomplete = false) => stopPromise ??= Promise.allSettled([audio?.stop(incomplete)]).then(results => {
     const failure = results.find(x => x.status === 'rejected');
@@ -159,12 +160,17 @@ export async function createRecording(output, udid, audioDevice, dedicatedMac = 
         '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '128k', '-t', duration.toFixed(3), '-movflags', '+faststart', file], {timeout: 10 * 60_000});
       const media = await inspectMovie(file);
       await rename(file, join(output, 'recording.mp4'));
+      finalized = true;
       return { file: 'recording.mp4', videoSource: 'XCTest device screen recording', screenOffsetSeconds: Math.max(0, offset), audioSource: dedicatedMac ? 'dedicated Mac output via virtual loopback (includes host audio)' : 'simulator output via virtual loopback', audioDevice, ...media };
     },
     close() {
       return closing ??= (async () => {
         server.close(); server.closeAllConnections();
         await stop(true).catch(() => {}); await pending?.catch(() => {});
+        if (!finalized && process.env.CI === 'true' && process.env.HST_IOS_KEEP_FAILED_AUDIO === '1') {
+          try { await rename(rawAudio, join(output, 'failed-scenario-audio.wav')); }
+          catch (error) { if (error.code !== 'ENOENT') console.error('Could not retain failed scenario audio: ' + error.message); }
+        }
         await rm(scratch, { recursive: true, force: true });
       })();
     },

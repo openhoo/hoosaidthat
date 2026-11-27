@@ -228,7 +228,15 @@ final class VoiceOverTests: XCTestCase {
             if anchor.exists && anchor.isHittable { anchor.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap() }
         }
         try await waitForVoiceOver(in: target, firstAction: scenario.steps[0].action, startedHere: state.initialVoiceOver == false)
-        if let recording { try await captureSignal("start", endpoint: recording) }
+        if let recording {
+            try await captureSignal("start", endpoint: recording)
+            print("HooSaidThat: recorder ready; starting scenario steps.")
+            // XCTest also runs teardown when a gesture/assertion throws. Stop the
+            // microphone-free capture there so diagnostics contain no unrelated tail.
+            addTeardownBlock {
+                try? await self.captureSignal("stop", endpoint: recording)
+            }
+        }
         let featureStart = ProcessInfo.processInfo.systemUptime
         for (index, step) in scenario.steps.enumerated() {
             for move in 1...(step.maxMoves ?? 1) {
