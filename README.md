@@ -29,6 +29,8 @@ test('checkout is announced', async ({ page, screenReader }) => {
 pass a feature scenario. Both save the device screen and its output audio. See the
 [recording walkthrough](docs/mobile-recordings.md) for setup, a reusable
 checkout scenario, and running an existing Android Playwright test.
+Watch [four example recordings with captions](https://github.com/openhoo/hoosaidthat/tree/examples/mobile-recordings/examples/recordings/mobile),
+or [record your own app or website with `hst-film`](https://github.com/openhoo/hoosaidthat/blob/examples/mobile-recordings/examples/recordings/mobile/TRY-RC2.md).
 
 Experimental Android TalkBack support connects a dedicated device or emulator
 through adb and captures its text-to-speech requests. See the

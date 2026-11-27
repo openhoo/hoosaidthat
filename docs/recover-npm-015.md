@@ -1,6 +1,13 @@
-# Recover the 0.1.5 npm publication
+# 0.1.5 npm recovery (completed)
 
-Use this procedure only for `@openhoo/hoosaidthat@0.1.5`. The [original run](https://github.com/openhoo/hoosaidthat/actions/runs/45816609095/attempts/1)
+The [recovery run](https://github.com/openhoo/hoosaidthat/actions/runs/45967453150/attempts/1)
+submitted 0.1.5 on November 27, 2026. The registry still returned 404 when
+the run checked. A later anonymous download matched the original archive byte for byte. npm's
+[version metadata](https://registry.npmjs.org/@openhoo%2fhoosaidthat/0.1.5)
+and [signed provenance](https://registry.npmjs.org/-/npm/v1/attestations/@openhoo%2fhoosaidthat@0.1.5)
+are public. The procedure below is a historical record; do not dispatch it again.
+
+The [original run](https://github.com/openhoo/hoosaidthat/actions/runs/45816609095/attempts/1)
 built the archive, passed all 14 hosted qualification lanes and promoted all three
 image indexes. The npm command then returned `ENEEDAUTH`. Rerunning the original
 release would encounter occupied image tags.
