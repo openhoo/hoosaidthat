@@ -47,6 +47,8 @@ export function runIPhoneVoiceOver(
 
 export interface IPhoneVoiceOverRecording {
   file: 'recording.mp4';
+  videoSource: 'XCTest device screen recording';
+  screenOffsetSeconds: number;
   audioSource: 'simulator output via virtual loopback' | 'dedicated Mac output via virtual loopback (includes host audio)';
   audioDevice: string;
   durationSeconds: number;

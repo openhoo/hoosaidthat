@@ -119,13 +119,18 @@ async function extract(result, dir, device) {
   await mkdir(path, { recursive: true });
   await xcrun(['xcresulttool', 'export', 'attachments', '--test-id', 'VoiceOverTests/testScenario()', '--path', result, '--output-path', path], 180_000);
   const manifest = JSON.parse(await readFile(join(path, 'manifest.json'), 'utf8'));
-  const matches = manifest.filter(m => /(?:^|\/)VoiceOverTests\/testScenario(?:\(\))?$/.test(m.testIdentifier))
+  const scoped = manifest.filter(m => /(?:^|\/)VoiceOverTests\/testScenario(?:\(\))?$/.test(m.testIdentifier))
     .flatMap(m => m.attachments).filter(a => a.deviceId.toLowerCase() === device.udid.toLowerCase()
-      && /^hoosaidthat-voiceover-transcript(?:[_.-]|$)/.test(a.suggestedHumanReadableName));
+       );
+  const matches = scoped.filter(a => /^hoosaidthat-voiceover-transcript(?:[_.-]|$)/.test(a.suggestedHumanReadableName));
   check(matches.length === 1, 'Expected one VoiceOver test attachment for the selected iPhone; see the .xcresult bundle.');
   const file = matches[0].exportedFileName;
   check(basename(file) === file, 'Invalid attachment filename.');
-  return JSON.parse(await readFile(join(path, file), 'utf8'));
+  const movies = scoped.filter(a => /^Screen Recording .+\.mp4$/i.test(a.suggestedHumanReadableName));
+  const movie = movies.length === 1 && movies[0];
+  const screen = movie && typeof movie.exportedFileName === 'string' && basename(movie.exportedFileName) === movie.exportedFileName ?
+    { file: join(path, movie.exportedFileName), timestamp: movie.timestamp } : undefined;
+  return { transcript: JSON.parse(await readFile(join(path, file), 'utf8')), screen };
 }
 
 async function runOnDevice(device, environment, input, parent, audioDevice, dedicatedMac, signal) {
@@ -177,9 +182,9 @@ async function runOnDevice(device, environment, input, parent, audioDevice, dedi
       clearTimeout(cancelTimer);
     }
     signal?.throwIfAborted();
-    let transcript;
+    let transcript, screen;
     try {
-      transcript = await extract(result, output, device);
+      ({ transcript, screen } = await extract(result, output, device));
       await writeFile(join(output, 'transcript.json'), JSON.stringify(transcript, null, 2) + '\n');
     } catch (err) {
       if (!failure) throw err;
@@ -197,7 +202,7 @@ async function runOnDevice(device, environment, input, parent, audioDevice, dedi
     const report = {
       screenReader: 'VoiceOver', ...(scenario.url ? { browser: 'Mobile Safari' } : { bundleId: scenario.bundleId }), captureBoundary: 'XCUIVoiceOverService.Output.utterance',
       xcode: environment.xcode, sdk: environment.sdk, device, scenario, transcript,
-      ...(recording ? { recording: await recording.finalize() } : {}),
+      ...(recording ? { recording: await recording.finalize(screen) } : {}),
     };
     await writeFile(join(output, 'report.json'), JSON.stringify(report, null, 2) + '\n');
     console.log(`iPhone VoiceOver passed: ${transcript.events.length} native observations (${device.name}, iOS ${device.runtime}).`);
