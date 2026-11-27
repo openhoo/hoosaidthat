@@ -1,12 +1,11 @@
 export type IPhoneVoiceOverMovement = 'forward' | 'backward' | 'in' | 'out';
-export type IPhoneVoiceOverAction = 'current' | IPhoneVoiceOverMovement;
+export type IPhoneVoiceOverAction = 'current' | 'activate' | IPhoneVoiceOverMovement;
 
 export type IPhoneVoiceOverStep =
   | { action: IPhoneVoiceOverAction; expect?: string; until?: never; maxMoves?: never }
   | { action: IPhoneVoiceOverMovement; until: string; maxMoves: number; expect?: never };
 
-export interface IPhoneVoiceOverScenario {
-  url: string;
+export type IPhoneVoiceOverScenario = ({ url: string; bundleId?: never } | { bundleId: string; url?: never }) & {
   /** Wait for this exact accessibility label on the page before enabling VoiceOver. */
   readyText?: string;
   steps: readonly IPhoneVoiceOverStep[];
@@ -21,7 +20,8 @@ export interface IPhoneVoiceOverOptions {
 
 export interface IPhoneVoiceOverReport {
   screenReader: 'VoiceOver';
-  browser: 'Mobile Safari';
+  browser?: 'Mobile Safari';
+  bundleId?: string;
   captureBoundary: string;
   xcode: string;
   sdk: string;
@@ -29,7 +29,8 @@ export interface IPhoneVoiceOverReport {
   scenario: IPhoneVoiceOverScenario;
   transcript: {
     version: 1;
-    url: string;
+    url?: string;
+    bundleId?: string;
     completed: true;
     events: { step: number; action: IPhoneVoiceOverAction; utterance: string }[];
   };
@@ -40,3 +41,19 @@ export function runIPhoneVoiceOver(
   scenario: IPhoneVoiceOverScenario,
   options?: IPhoneVoiceOverOptions,
 ): Promise<{ outputDirectory: string; report: IPhoneVoiceOverReport }>;
+
+export interface IPhoneVoiceOverRecording {
+  file: 'recording.mp4';
+  audioSource: 'simulator output via virtual loopback';
+  audioDevice: string;
+  durationSeconds: number;
+  width: number;
+  height: number;
+  peakDb: number;
+}
+
+/** Record actual device output during the scenario and reject silent or incomplete recordings. */
+export function recordIPhoneVoiceOver(
+  scenario: IPhoneVoiceOverScenario,
+  options?: IPhoneVoiceOverOptions & { audioDevice?: string },
+): Promise<{ outputDirectory: string; report: IPhoneVoiceOverReport & { recording: IPhoneVoiceOverRecording } }>;
