@@ -1,0 +1,11 @@
+{
+  "bundleId": "ai.openhoo.hoosaidthat.MuseumBookingControl",
+  "readyText": "Reserve Tuesday",
+  "initialFocusText": "Book a museum visit",
+  "steps": [
+    {"action":"forward","expect":"Choose your appointment"},
+    {"action":"forward","expect":"Reserve Tuesday"},
+    {"action":"backward","expect":"Choose your appointment"},
+    {"action":"backward","expect":"Book a museum visit"}
+  ]
+}
