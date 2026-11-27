@@ -33,7 +33,7 @@ export function verifyAudioRoute(ports, device, profile, dedicatedMac) {
 
 export async function recordingTools(requested, dedicatedMac = false) {
   const [profile] = await Promise.all([
-    exec('/usr/sbin/system_profiler', ['SPAudioDataType', '-json'], { timeout: 20_000 }),
+    audioProfile(),
     ...['ffmpeg', 'ffprobe'].map(tool => exec(tool, ['-version'], { timeout: 10_000 }).catch(() => { throw new Error('iPhone recording requires ffmpeg and ffprobe on PATH.'); })),
   ]);
   if (dedicatedMac && !requested) throw new Error('Recording a dedicated Mac output requires an explicit --audio-device NAME.');
@@ -89,24 +89,25 @@ export async function inspectMovie(file) {
   return { durationSeconds: Number(video.duration), width: video.width, height: video.height, peakDb };
 }
 
-// The XCTest calls this private loopback endpoint immediately before and after scenario steps.
-// No build, startup probe, unrelated desktop pixels, or physical microphone enter the movie.
-async function simulatorPorts(udid) {
-  // A busy, freshly booted hosted Mac can take over 20s just to start simctl.
-  // Route inventory is a read-only operation and can safely be tried again.
+// Both CoreAudio discovery calls can take more than 20s on a freshly booted Mac.
+// They only inspect routes; a timeout can safely be retried once.
+async function inspectRoute(description, command, args) {
   for (let attempt = 0; ; attempt++) {
-    try { return await exec('/usr/bin/xcrun', ['simctl', 'io', udid, 'enumerate'], { timeout: 90_000 }); }
+    try { return await exec(command, args, { timeout: 90_000 }); }
     catch (error) {
       if (attempt === 0 && error.killed) continue;
-      throw new Error('Could not inspect the simulator audio route: ' + (error.stderr?.trim() || error.message));
+      throw new Error('Could not inspect ' + description + ': ' + (error.killed ? 'timed out twice after 90 seconds.' : error.stderr?.trim() || error.message));
     }
   }
 }
 
+const audioProfile = () => inspectRoute('Mac audio devices', '/usr/sbin/system_profiler', ['SPAudioDataType', '-json']);
+
+// The XCTest calls this private loopback endpoint immediately before and after scenario steps.
 export async function createRecording(output, udid, audioDevice, dedicatedMac = false) {
   const [ports, profile] = await Promise.all([
-    simulatorPorts(udid),
-    exec('/usr/sbin/system_profiler', ['SPAudioDataType', '-json'], { timeout: 20_000 }),
+    inspectRoute('the simulator audio route', '/usr/bin/xcrun', ['simctl', 'io', udid, 'enumerate']),
+    audioProfile(),
   ]);
   verifyAudioRoute(ports.stdout, audioDevice, JSON.parse(profile.stdout), dedicatedMac);
   const scratch = await mkdtemp(join(output, '.recording-'));
