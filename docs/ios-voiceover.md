@@ -122,8 +122,9 @@ For an installed native app, use its bundle ID instead of a URL:
 ```
 
 `activate` double-taps the visible item whose accessibility label matches the
-start of VoiceOver's current utterance. If two items have the same matching
-label, it stops before tapping. VoiceOver may still report the previous
+start of VoiceOver's current utterance. If a control and its label share a
+name, the runner also checks the spoken role (for example, “Text field” in
+English). It stops before tapping if the target is still ambiguous. VoiceOver may still report the previous
 utterance immediately after activation. Assert a distinctive result on the
 next navigation step when the screen moves focus or changes its labels. The
 runner stops if the scenario leaves the target app. It does not install apps.
