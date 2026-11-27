@@ -156,3 +156,24 @@ test('the transcript binds actual spoken text and every navigation attempt to th
     assert.throws(() => validateTranscript(scenario, invalid), mutate.toString());
   }
 });
+
+test('native target and activation are tied to their own transcript; activation never repeats', () => {
+  const scenario = validateScenario({ bundleId: 'com.example.shop', steps: [{ action: 'activate', expect: 'Receipt' }] });
+  const transcript = { version: 1, completed: true, bundleId: scenario.bundleId, events: [{ step: 0, action: 'activate', utterance: 'Receipt, heading' }] };
+  validateTranscript(scenario, transcript);
+  assert.throws(() => validateTranscript(scenario, { ...transcript, bundleId: 'com.example.other' }));
+  assert.throws(() => validateScenario({ ...scenario, url }));
+  assert.throws(() => validateScenario({ ...scenario, bundleId: '' }));
+  assert.throws(() => validateScenario({ ...scenario, steps: [{ action: 'activate', until: 'Receipt', maxMoves: 2 }] }));
+});
+
+test('recording accepts an isolated loopback, never a microphone or the host default output', async () => {
+  const { selectLoopback } = await import('../native/ios-recording.mjs');
+  const loop = { _name: 'BlackHole 2ch', coreaudio_device_transport: 'coreaudio_device_type_virtual', coreaudio_device_input: 2, coreaudio_device_output: 2 };
+  const mic = { ...loop, _name: 'Microphone', coreaudio_device_transport: 'coreaudio_device_type_builtin' };
+  const profile = devices => ({ SPAudioDataType: [{ _items: devices }] });
+  assert.equal(selectLoopback(profile([mic, loop])), loop._name);
+  assert.throws(() => selectLoopback(profile([mic]), mic._name));
+  assert.throws(() => selectLoopback(profile([{ ...loop, coreaudio_default_audio_output_device: 'spaudio_yes' }]), loop._name));
+  assert.throws(() => selectLoopback(profile([loop, { ...loop, _name: 'Other' }])));
+});
