@@ -153,7 +153,20 @@ final class VoiceOverTests: XCTestCase {
         guard let length = matches.map({ $0.label.count }).max() else {
             throw ScenarioError("The current VoiceOver utterance did not identify a visible item to activate.")
         }
-        let longest = matches.filter { $0.label.count == length }
+        var longest = matches.filter { $0.label.count == length }
+        // Safari exposes a label, wrapper, and real control under the same name.
+        // Use the role VoiceOver actually spoke to distinguish them. Without a
+        // known role (including other reader languages), keep the ambiguity error.
+        if longest.count > 1, let label = longest.first?.label {
+            let suffix = String(spoken.dropFirst(label.count)).trimmingCharacters(in: .whitespaces).lowercased()
+            let roles: [(String, [XCUIElement.ElementType])] = [
+                ("secure text field", [.secureTextField]), ("text field", [.textField, .secureTextField, .textView]),
+                ("text view", [.textView]), ("button", [.button]), ("link", [.link]), ("switch", [.switch])
+            ]
+            if let types = roles.first(where: { suffix == $0.0 || suffix.hasPrefix($0.0 + " ") })?.1 {
+                longest = longest.filter { types.contains($0.elementType) }
+            }
+        }
         guard longest.count == 1 else { throw ScenarioError("Several visible items match the current VoiceOver utterance; activation is ambiguous.") }
         longest[0].coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).doubleTap()
     }
