@@ -39,7 +39,9 @@ the soundtrack.
   sound output to the named loopback in Device Hub. Keep the Mac's default
   audio output separate so other apps aren't mixed into the movie. To select
   among iPhones, run `npx --no-install hoosaidthat-voiceover-ios doctor` and
-  pass `--udid UUID`. See [iPhone setup and scenarios](ios-voiceover.md).
+  pass `--udid UUID`. A dedicated Mac can opt into recording its entire
+  output via the named loopback with `--dedicated-mac-output`. See
+  [iPhone setup and scenarios](ios-voiceover.md).
 - **Android:** create the [TalkBack AVD](../oracle/android-talkback/README.md)
   with Chrome, TalkBack, an installed speech engine, and hardware keyboard
   support. Install scrcpy and FFmpeg and put them on PATH alongside the
@@ -54,6 +56,12 @@ movement with `until` and a limit of 1–50 moves. Reader output and element
 order can differ across platforms. If they do, use a separate scenario rather
 than weakening the expected text. `readyText` is a page readiness check; it
 cannot satisfy a speech expectation.
+
+For a state change, navigate to a button with an expectation, use
+`{ "action": "activate" }`, then check the result. Android sends the TalkBack
+activation shortcut. On iOS this is an XCTest double tap followed by a
+VoiceOver observation. The [iPhone guide](ios-voiceover.md) also covers typing
+and starting an installed app by bundle ID.
 
 ## Record a longer Android flow
 

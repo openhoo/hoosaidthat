@@ -8,6 +8,8 @@ test('choose either a scenario or a custom Android workflow, preserving child fl
   assert.deepEqual(parseRecording(args).child, args.slice(4));
   assert.throws(() => parseRecording(['android','--avd','demo','--scenario','a.json','--','npm','test']));
   assert.throws(() => parseRecording(['ios','--','npm','test']));
+  assert.throws(() => parseRecording(['ios','--dedicated-mac-output']));
+  assert.equal(parseRecording(['ios','--dedicated-mac-output','--audio-device','BlackHole 2ch']).options['--dedicated-mac-output'], true);
   assert.throws(() => parseRecording(['android','--udid','wrong']));
   assert.throws(() => parseRecording(['android','--avd','one','--avd','two']));
 });

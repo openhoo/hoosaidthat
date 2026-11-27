@@ -17,6 +17,7 @@ const help = `Record a mobile feature with a real screen reader.
   --results DIR       parent for a new run directory (default: test-results/mobile-recordings)
   --scenario FILE     feature to exercise; omit for the packaged smoke test
   --audio-device NAME isolated simulator audio loopback input (iOS)
+  --dedicated-mac-output  include whole-host output via that named virtual device (dedicated Mac only)
   --avd NAME          disposable copy of an existing Android Virtual Device with TalkBack
   --locale LOCALE     configured TalkBack locale: en-US or de-DE
   --tts-engine PACKAGE  installed Android speech engine (default: AVD preference)
@@ -29,13 +30,19 @@ export function parseRecording(args) {
   if (!own.length || own.includes('--help') || own.includes('-h')) return { help: true };
   const [platform, ...flags] = own;
   if (!['android','ios'].includes(platform)) throw Error(help);
-  const allowed = ['--results','--scenario', ...(platform === 'ios' ? ['--udid','--audio-device'] : ['--avd','--locale','--talkback-apk','--tts-engine'])];
+  const allowed = ['--results','--scenario', ...(platform === 'ios' ? ['--udid','--audio-device','--dedicated-mac-output'] : ['--avd','--locale','--talkback-apk','--tts-engine'])];
   const options = Object.create(null);
-  for (let i = 0; i < flags.length; i += 2) {
-    const key = flags[i], value = flags[i+1];
+  for (let i = 0; i < flags.length;) {
+    const key = flags[i++];
+    if (platform === 'ios' && key === '--dedicated-mac-output' && !(key in options)) {
+      options[key] = true;
+      continue;
+    }
+    const value = flags[i++];
     if (!allowed.includes(key) || key in options || !value?.trim() || value.startsWith('--')) throw Error('Invalid or duplicate ' + key + '. See --help.');
     options[key] = value;
   }
+  if (options['--dedicated-mac-output'] && !options['--audio-device']) throw Error('Name the virtual --audio-device when recording dedicated Mac output.');
   const child = split < 0 ? [] : args.slice(split + 1);
   if (split >= 0 && (platform !== 'android' || !child.length || options['--scenario'])) throw Error('Use either --scenario or an Android -- command, and provide the command after --.');
   if (platform === 'android' && !options['--avd']) throw Error('Select an Android emulator with --avd NAME.');
@@ -59,7 +66,7 @@ export async function recordMobile(args) {
   const parent = resolve(options['--results'] ?? 'test-results/mobile-recordings');
   const scenario = options['--scenario'] && resolve(options['--scenario']);
   if (platform === 'ios') {
-    const flags = Object.entries(options).filter(([k]) => k !== '--results').flat();
+    const flags = Object.entries(options).filter(([k]) => k !== '--results').flatMap(([k,v]) => v === true ? [k] : [k,v]);
     return invoke([local('./voiceover-ios.mjs'), 'record', '--results', parent, ...flags], process.env);
   }
   const feature = scenario && androidScenario(JSON.parse(await readFile(scenario, 'utf8')));
