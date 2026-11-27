@@ -13,6 +13,8 @@ export type IPhoneVoiceOverScenario = ({ url: string; bundleId?: never } | { bun
 }
 
 export interface IPhoneVoiceOverOptions {
+  /** Stop the recording and request native XCTest teardown. */
+  signal?: AbortSignal;
   /** Select a simulator explicitly when more than one eligible iPhone is available. */
   udid?: string;
   /** Parent directory for the unique run directory and its native XCTest artifacts. */
