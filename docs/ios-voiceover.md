@@ -121,9 +121,11 @@ For an installed native app, use its bundle ID instead of a URL:
 }
 ```
 
-`activate` sends an XCTest one-finger double tap to the foreground screen while
-VoiceOver is enabled, then reads the service's current utterance. Assert a
-distinctive result on this or a subsequent step to verify the transition. The
+`activate` double-taps the visible item whose accessibility label matches the
+start of VoiceOver's current utterance. If two items have the same matching
+label, it stops before tapping. VoiceOver may still report the previous
+utterance immediately after activation. Assert a distinctive result on the
+next navigation step when the screen moves focus or changes its labels. The
 runner stops if the scenario leaves the target app. It does not install apps.
 After activating a text field, `{ "action": "type", "text": "Sample" }` types
 through XCTest and reads current focus. Use sample data: typed text is included

@@ -111,7 +111,7 @@ async function smokeFixture(recording = false) {
   await new Promise((ok, fail) => { server.once('error', fail); server.listen(0, '127.0.0.1', ok); });
   return { server, scenario: { url: `http://127.0.0.1:${server.address().port}${path}`, readyText: button, ...(recording ? { initialFocusText: heading } : {}), steps: [
     { action: 'forward', until: button, maxMoves: 40 }, { action: 'backward', expect: heading }, { action: 'forward', expect: button },
-    ...(recording ? [{ action: 'activate', expect: receipt }] : []),
+    ...(recording ? [{ action: 'activate' }, { action: 'forward', until: receipt, maxMoves: 6 }] : []),
   ] } };
 }
 
